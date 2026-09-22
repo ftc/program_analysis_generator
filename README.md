@@ -14,211 +14,280 @@ The key insight that should make this possible is that the soundness of the abst
 Each abstract domain must implement a "contains" method that checks an observed state for containment in an abstraction.
 Abstract domains are tested by running sample programs and observing the pre and post states of commands then testing the transfer function against the soundness condition.
 
-## Worked example: a separation-logic heap domain
+## Worked example: IMP and the interval domain
 
-What is under test here is an *implementation* — a Scala transfer function for
-one command in one domain. It is specified by a backward triple and a soundness
-condition on that triple, and nothing else.
+An analysis here is assembled from two layers.
 
-References are to Shawn Meier's dissertation, Chapter 5 §5.2, *Abstracting the
-Relevant Heap for Goal-Directed Reasoning*, which gives the concrete semantics
-and the abstract domain used below. The soundness condition comes from
-Chapter 4, Lemma 1.
+- A **fixed-point layer**: domain-independent judgments that build an invariant
+  map backwards from an error condition and check that it is inductive. Written
+  once, by hand, and proved once.
+- A **transfer layer**: one function per command per abstract domain. Generated,
+  and accepted only once it passes its soundness condition against observed
+  executions.
 
-### Concrete states (Ch. 5, Fig. 5.2) and what the debugger reports
+The interface between the layers is three conditions on the domain, all of them
+stated in terms of a single concretization test. This example works through
+both layers for IMP and the interval domain.
+
+References are to Shawn Meier's dissertation: Chapter 5 §5.1 for the program
+representation, Chapter 4, Lemma 1 for the transfer soundness condition, and
+Chapter 4, Fig. 4.2 for the fixed-point judgments.
+
+### Programs (Ch. 5 §5.1, Fig. 5.1)
+
+A program `p` is a set of transitions over an unstructured control-flow graph.
+Each transition `ℓ —c→ ℓ'` carries a source location, a command, and a target
+location; execution starts at `ℓ_init`.
 
 ```
-commands         c ::= x = y.f | x.f = y | x = null | assume x = y | assume x != y
-values           v ::= null | a                 (a an address)
-memory locations l ::= x ↦ v | a.f ↦ v
-memories         μ ::= ∅ | l | μ ⊎ μ'           (⊎ requires dom(μ) ∩ dom(μ') = ∅)
+programs     p ::= ∅ | p, (ℓ —c→ ℓ')
+commands     c ::= x := a | assume b
+expressions  a ::= n | x | a + a | a * a
+conditions   b ::= a < a | a = a | ¬b
+```
+
+Structured control flow compiles into this shape: `if` and `while` become
+branching transitions guarded by `assume`. An assertion compiles to the
+reachability of an error location `ℓ_err`.
+
+```scala
+enum Expr:
+  case Lit(n: BigInt)
+  case Var(x: String)
+  case Add(l: Expr, r: Expr)
+  case Mul(l: Expr, r: Expr)
+
+enum Cond:
+  case Lt(l: Expr, r: Expr)
+  case Eq(l: Expr, r: Expr)
+  case Not(b: Cond)
+
+enum Command:
+  case Assign(x: String, a: Expr)
+  case Assume(b: Cond)
+```
+
+### Concrete states and what the debugger reports
+
+A concrete state `σ` maps variables to integers, so a snapshot is just the
+frame's locals — `StackFrame.getValues` under JDI.
+
+```scala
+type Store = Map[String, BigInt]     // σ
+```
+
+The concrete semantics `σ --c--> σ'` is the expected one: `x := a` rebinds `x`
+to the value of `a` in `σ` and leaves every other variable alone; `assume b`
+steps only when `b` holds in `σ`, leaving `σ` unchanged.
+
+### The interval domain
+
+```
+intervals        ι ::= [l, u]        l ∈ ℤ ∪ {-∞}, u ∈ ℤ ∪ {+∞}, l ≤ u
+abstract states  σ̂ ::= ⊥ | (x ↦ ι, ...)
 ```
 
 ```scala
-type Addr = Long                                  // ObjectReference.uniqueID
+enum Bound:
+  case NegInf, PosInf
+  case Fin(n: BigInt)
 
-enum Value:
-  case Null
-  case Ref(a: Addr)
+/** [lo, hi] with lo ≤ hi. */
+final case class Interval(lo: Bound, hi: Bound):
+  def holds(n: BigInt): Boolean = lo <= Bound.Fin(n) && Bound.Fin(n) <= hi
 
-enum CKey:                                        // the domain of μ
-  case Local(x: String)                           // StackFrame.getValues
-  case Field(a: Addr, f: String)                  // ObjectReference.getValues
-
-final case class Memory(cells: Map[CKey, Value])
+enum AbsState:
+  case Bottom
+  case Env(at: Map[String, Interval])   // a variable absent from `at` is [-∞, +∞]
 ```
 
-Keying by `CKey` makes `⊎`'s disjointness a property of the representation
-rather than a condition to check.
+A variable absent from the map is unconstrained, so `Env(Map.empty)` is `⊤` and
+needs no separate constructor.
 
-### The abstract domain (Ch. 5, Fig. 5.3)
+### `contains` — the concretization test
 
-```
-abstract memories        μ̂ ::= irrelevant | μ̂ * μ̂' | l̂
-abstract memory location l̂ ::= x ↦ v̂ | v̂.f ↦ v̂'
-pure constraints         π ::= v̂ ≠ v̂' | π ∧ π'
-valuations               ν ::= ∅ | ν[v̂ ↦ v]
-```
+`σ ⊨ σ̂` holds when `σ̂` is not `⊥` and every variable's value lies in its
+interval. Small enough to state in full:
+
+(Shawn's note: there may be something we can do later where the contains can be considered consistent with sufficient testing as well, but this is a reasonable assumption for now)
 
 ```scala
-enum SymValue:
-  case Null
-  case Sym(id: Int)
-
-enum AKey:
-  case Local(x: String)
-  case Field(base: SymValue, f: String)
-
-/** μ̂ ∧ π. Any key absent from `cells` is covered by `irrelevant`. */
-final case class AbsMemory(cells: Map[AKey, SymValue], pure: Set[(SymValue, SymValue)]):
-  def rel: Set[AKey] = cells.keySet                // rel(irrelevant) = ∅
-
-type Valuation = Map[SymValue.Sym, Value]
+/** σ ⊨ σ̂ */
+def contains(sigma: Store, sigmaHat: AbsState): Boolean = sigmaHat match
+  case AbsState.Bottom  => false
+  case AbsState.Env(at) => at.forall((x, i) => i.holds(sigma(x)))
 ```
 
-`irrelevant` needs no constructor: it is whatever the map does not mention.
-Keying by `AKey` also makes separating conjunction structural — a key cannot
-appear twice in a `Map`, so the unsatisfiable `x ↦ â * x ↦ â'` is not
-representable.
-
-### `contains` — the concretization test (Ch. 5, Fig. 5.3)
-
-```
-(μ,    ν) ⊨ irrelevant ∧ π                 iff  ν ⊨ π
-(μ⊎μ', ν) ⊨ (μ̂ * μ̂') ∧ π                   iff  (μ, ν) ⊨ μ̂ ∧ π and (μ', ν) ⊨ μ̂' ∧ π
-(x ↦ v, ν[v̂↦v]) ⊨ (x ↦ v̂) ∧ π              iff  ν[v̂↦v] ⊨ π
-(a.f ↦ v, ν[v̂↦a][v̂'↦v]) ⊨ (v̂.f ↦ v̂') ∧ π  iff  ν[v̂↦a][v̂'↦v] ⊨ π
-```
-
-```scala
-/** Some(ν) if the observed memory is in the concretization, None otherwise. */
-def contains(mu: Memory, muHat: AbsMemory): Option[Valuation]
-```
-
-Search for a `ν` that sends each `AKey` in `muHat.cells` to a `CKey` present in
-`mu.cells` with a matching value, then check `muHat.pure` under it. The induced
-map on keys must be **injective**: `v̂.f` and `v̂'.f` are separate cells, so a `ν`
-with `ν(v̂) = ν(v̂')` does not witness containment. Dropping that check would let
-unsound field-write transfers pass.
-
-`contains` is the trusted kernel — the one component a human reads, since every
-other component is tested against it. It has no fixed point and no aliasing
-case split; it is a matcher.
+This is the trusted kernel. It is the one component a human reads, because
+every other component is checked against it, and it is short enough that
+reading it is cheap: no fixed point, no case analysis, no search.
 
 ### The triple and its soundness condition
 
 A backward triple `⊢ {P'} c {P}` reads right-to-left: *if an execution of `c`
 reaches a post-state satisfying `P`, then the pre-state of that execution
-satisfies `P'`.*
+satisfies `P'`.* A transfer function computes `P'` from `c` and `P`:
 
-The transfer function computes `P'` from `c` and `P`. It returns a set of
-disjuncts, because materialization has to guess aliasing and the
-over-approximate direction keeps every guess. Its soundness condition:
-
-```
-  μ' --c--> μ   and   (μ, ν) ⊨ μ̂ ∧ π
-  ⟹  ∃ d ∈ transfer(c, μ̂ ∧ π). ∃ν'. (μ', ν') ⊨ d
+```scala
+def transfer(c: Command, post: AbsState): AbsState
 ```
 
-This is Ch. 4, Lemma 1 (*hoare triple soundness*, p. 89), restricted to the
-heap component of the program state and to a transfer function returning
-disjuncts. Lemma 1 as stated there also carries a specification parameter for
-framework behavior, which this domain does not use:
+Its soundness condition is that no concrete step escapes the computed
+pre-condition:
+
+```
+  σ' --c--> σ   and   σ ⊨ post   ⟹   σ' ⊨ transfer(c, post)
+```
+
+This is Ch. 4, Lemma 1 (*hoare triple soundness*, p. 89), with the state
+specialized to a variable store. Lemma 1 as stated there also carries a
+specification parameter for framework behavior, which this domain does not use:
 
 > If `⊢ {P'} c {P}` and `σ' --c--> σ` such that `σ ⊨ P`, then `σ' ⊨ P'`.
 
-Ch. 5 §5.2 states the dual under-approximate condition over this same heap
-domain, where the implication instead runs forward from pre-state to post.
-
-That condition is the complete specification of the transfer function.
-Entailment between abstract memories and includes-initial (both Ch. 5 §5.2) are
-separate components with their own conditions, tested the same way.
-
-### Judgments are not transfer functions
-
-The dissertation specifies these transfers with inference rules. This project
-does not, and the reason is worth stating.
-
-A judgment `⊢ {P'} c {P}` is a relation: for a fixed `c` and `P`, many `P'`
-stand in it. A transfer function is a function — it must return one. The rules
-therefore underdetermine the implementation in at least four ways:
-
-- **Mode.** A judgment has no inputs or outputs. `transfer(c, post)` commits to
-  reading the post-condition and producing a pre-condition.
-- **Search.** Existential premises become enumeration. A materialization rule
-  says *there exists* a suitably materialized state; the implementation must
-  case split on aliasing to find it and keep every case.
-- **Totality.** A judgment may be partial — no rule applies, no derivation
-  exists. A transfer function must return something for every input; its
-  fallback is real code that appears in no rule.
-- **Representation.** Rules work modulo commutativity of `*`, α-renaming of
-  symbolic variables, and semantic entailment. Data structures, normal forms,
-  and freshness are unconstrained by them.
-
-Since the implementation is tested against the soundness condition rather than
-against derivability, carrying the rules would add a second specification that
-nothing checks. A transfer function matching no derivation is acceptable if it
-satisfies the condition — which is what makes generating these functions rather
-than deriving them plausible.
+That condition is the complete specification of a transfer function. It states
+exactly what the fixed-point layer below consumes, and it is phrased in terms
+of concrete steps and `contains`, so it is directly executable as a test. Those
+two properties are why the transfer layer is specified by a condition: the same
+statement serves as the contract the proof relies on and as the check the
+harness runs.
 
 ### The transfer function
 
-For `x = y.f`, the pre-condition must: drop any constraint on `x`, whose prior
-value is dead; require the cells the command reads, `y ↦ ŷ` and `ŷ.f ↦ v̂`,
-where `v̂` is whatever the post-condition says `x` holds; and add `ŷ ≠ null`,
-since otherwise the read would have thrown rather than reaching the post-state.
-Cells the post-condition left in `irrelevant` must first be materialized, which
-is where the aliasing case split arises.
+Backward over `x := a`: after the command `x` holds the value of `a` evaluated
+*before* it, and every other variable is unchanged. So the post-condition's
+interval for `x` becomes a constraint on the operands of `a`, and `x` itself is
+unconstrained in the pre-state. Backward over `assume b`: the store is
+unchanged, so the pre-condition is the post-condition refined by `b`.
 
 ```scala
-/** Backward transfer for `x = y.f`. Must satisfy the soundness condition above. */
-def transfer(c: FieldRead, post: AbsMemory): Set[AbsMemory] =
-  val FieldRead(x, y, f) = c
-  // The value read flows to x; if the post leaves x in `irrelevant`, it is fresh.
-  val vHat = post.cells.getOrElse(AKey.Local(x), fresh())
-  for
-    // Materialize y ↦ ŷ out of `irrelevant`, one disjunct per aliasing guess.
-    (p1, yHat) <- materializeLocal(post, y)
-    // Materialize ŷ.f ↦ v̂, again splitting on whether ŷ aliases a base in rel(μ̂).
-    p2         <- materializeField(p1, yHat, f, vHat)
-  yield
-    p2.remove(AKey.Local(x))                  // x's prior value is dead
-      .withDisequality(yHat, SymValue.Null)   // the read did not throw
+/** Backward transfer. Must satisfy the soundness condition above. */
+def transfer(c: Command, post: AbsState): AbsState = (c, post) match
+  case (_, AbsState.Bottom) =>
+    AbsState.Bottom
+  case (Command.Assign(x, a), AbsState.Env(at)) =>
+    // Constrain a's operands to land in x's post-interval, with x itself freed.
+    narrow(a, at.getOrElse(x, Interval.Top), AbsState.Env(at - x))
+  case (Command.Assume(b), env) =>
+    // assume does not write the store; it only blocks.
+    refine(b, env)
+
+/** Shrink `env` so every store it contains evaluates `a` within `target`. */
+def narrow(a: Expr, target: Interval, env: AbsState): AbsState = a match
+  case Expr.Lit(n)  => if target.holds(n) then env else AbsState.Bottom
+  case Expr.Var(y)  => env.meet(y, target)
+  case Expr.Add(l, r) => ...   // subtract each side's range from `target`
+  case Expr.Mul(l, r) => ...   // sign cases; division by an interval spanning 0
 ```
 
-Three things the condition governs and the test must police: `fresh()`'s
-freshness, the completeness of the aliasing enumeration, and whether
-`materializeField` propagates the disequalities that keep distinct bases
-distinct.
+Five cases worth checking by hand, and the ones a generated implementation
+tends to get wrong:
+
+| command | post | correct pre |
+| --- | --- | --- |
+| `x := 5` | `x ↦ [0,10]` | `⊤` |
+| `x := 5` | `x ↦ [6,10]` | `⊥` |
+| `x := x + 1` | `x ↦ [0,10]` | `x ↦ [-1,9]` |
+| `x := y` | `x ↦ [0,10], y ↦ [5,20]` | `y ↦ [5,10]` |
+| `assume x < 10` | `x ↦ [0,10]` | `x ↦ [0,9]` |
+
+The fourth row is the instructive one: `x`'s post-interval has to be
+intersected into `y`, because `y` is what the assignment read. The two natural
+ways to get it wrong behave differently under the test. Returning
+`y ↦ [5,20]` — forgetting the intersection — is weaker than the correct answer
+and therefore still sound, so the test passes it; that is imprecision, measured
+separately. Returning `y ↦ [5,9]` — narrowing too far — is unsound, and a run
+with `y = 10` exhibits it: the post-state `x = 10, y = 10` satisfies the
+post-condition, while the pre-state `y = 10` falls outside the computed
+pre-condition.
+
+### The fixed-point judgments (Ch. 4, Fig. 4.2)
+
+The transfer function is applied repeatedly, backwards, until an invariant map
+`I` from locations to abstract states stops changing. These judgments say when
+that map is a proof.
+
+An edge is inductive when the pre-condition it computes is already covered by
+the invariant at its source location:
+
+```
+        transfer(c, I(ℓ')) ⊑ I(ℓ)
+  ─────────────────────────────────────  [edge-inductive]
+          I ⊢ (ℓ —c→ ℓ') ok
+```
+
+Ch. 4's corresponding rule, `a-app-step`, wraps this in a rule of consequence
+on both sides. Having a transfer function collapses that: it already produces
+the pre-condition, so only the one entailment remains.
+
+The map is an inductive invariant for an error condition `P` at `ℓ_err` when it
+covers `P` and every transition is inductive:
+
+```
+  P ⊑ I(ℓ_err)      I ⊢ t ok  for all t ∈ p
+  ──────────────────────────────────────────  [inductive]
+            p ⊢ I  may-witness  P
+```
+
+And the error condition is refuted when the invariant at the initial location
+excludes the initial state:
+
+```
+  p ⊢ I may-witness P      σ_init ⊭ I(ℓ_init)
+  ───────────────────────────────────────────  [refute]
+          p ⊢ P  unreachable
+```
+
+`I` is computed by the standard worklist (Ch. 4 §4.1.2): initialize `I(ℓ_err)`
+to the error condition and every other location to `⊥`, then repeatedly pop a
+transition, apply `transfer` to the state at its target, and join the result
+into the state at its source, re-enqueuing predecessors on change. Intervals
+have infinite ascending chains, so loop heads need widening.
+
+Widening and the worklist order affect termination and precision, not
+soundness. Soundness comes from re-checking `[inductive]` against the map the
+algorithm settles on, so the search may be as heuristic as it likes while the
+result stays certified.
+
+This layer is sound for any domain that supplies three things:
+
+| | condition | who writes it |
+| --- | --- | --- |
+| `transfer` | `σ' --c--> σ` and `σ ⊨ post` ⟹ `σ' ⊨ transfer(c, post)` | generated |
+| `⊑` | `A ⊑ B` and `σ ⊨ A` ⟹ `σ ⊨ B` | hand-written |
+| `excludesInit` | `excludesInit(A)` ⟹ `σ_init ⊭ A` | hand-written |
+
+All three are phrased in `contains` and all three are testable against observed
+states. Only the first is generated, and only the first varies per command.
 
 ### The generate-and-test loop
 
 The soundness condition quantifies over concrete steps, which is what a
-debugger enumerates. Neither the model nor a human inspects the abstract domain
-implementation:
+debugger enumerates:
 
 1. **Implement.** The model writes `transfer` for one command against the
-   soundness condition.
-2. **Attack.** The model writes probe programs aimed at breaking it — aliased
-   receivers, null fields, a cell written then re-read, reads of cells the
-   post-condition leaves in `irrelevant`.
+   condition.
+2. **Attack.** The model writes probe programs aimed at breaking it — an
+   assignment whose source variable is also constrained in the post-condition,
+   arithmetic that overflows an interval bound, a loop whose guard narrows a
+   range, expressions mixing signs under multiplication.
 3. **Observe.** Run each probe under JDI with breakpoints on both sides of the
-   command, recording `(μ', μ)` at every hit.
-4. **Check.** For post-conditions `μ̂ ∧ π` that contain `μ`, assert that some
-   disjunct of `transfer(c, μ̂ ∧ π)` contains `μ'`.
+   command, recording `(σ', σ)` at every hit.
+4. **Check.** For post-conditions that contain `σ`, assert that
+   `transfer(c, post)` contains `σ'`.
 5. **Refine or reject.** A failure returns the command, the post-condition, the
    computed pre-condition, and the excluded concrete pre-state.
 
 ```scala
-class FieldReadSoundness extends munit.FunSuite:
-  test("x = y.f transfer is sound on observed steps") {
+class AssignSoundness extends munit.FunSuite:
+  test("x := a transfer is sound on observed steps") {
     for
       probe          <- probes                       // step 2
       (c, pre, post) <- Debugger.observeSteps(probe) // step 3
-      postAbs        <- Abstraction.containing(post) // any μ̂ ∧ π with post ⊨ μ̂ ∧ π
+      postAbs        <- Abstraction.containing(post) // any σ̂ with post ⊨ σ̂
     do
       val preAbs = transfer(c, postAbs)              // step 4
-      assert(preAbs.exists(d => contains(pre, d).isDefined),
+      assert(contains(pre, preAbs),
              s"unsound: $c\n  post ⊨ $postAbs\n  pre ∉ γ($preAbs)")
   }
 ```
@@ -230,20 +299,18 @@ class FieldReadSoundness extends munit.FunSuite:
 > concrete steps that any violation of the soundness condition appears in at
 > least one observed step.
 
-This is an assumption of the overall technique, not a theorem, and it is what
-replaces the derivation a human would otherwise write. It is the reason the
-command language is kept small: the assumption is only credible for transfer
-functions whose behavior a modest probe set can cover. Everything downstream is
-sound *given* that each transfer function satisfies its condition, so this
-assumption is where the technique is most exposed.
+This is an assumption of the technique, not a theorem, and it is what stands in
+for a proof of each transfer function. It is the reason the command language is
+kept small and the reason transfer functions are written one command at a time:
+the assumption is credible exactly to the degree that a modest probe set can
+cover the function's behavior. The fixed-point layer is proved once and for
+all, so this assumption is the whole exposed surface.
 
-Two consequences. The loop catches unsoundness only: a transfer returning the
-weakest pre-condition passes every probe and is useless. Precision must be
-measured separately — for this domain, by whether the backward fixed point
-keeps at least one materialized cell, since a state that is entirely
-`irrelevant` concretizes to the empty initial memory (Ch. 5 §5.2). And a
-transfer unsound on a path no probe takes passes, which makes step 2 —
-adversarial probe generation — as important as step 1.
+Two consequences. The loop catches unsoundness only — a transfer returning `⊤`
+passes every probe and proves nothing — so precision is measured separately, by
+whether the fixed point reaches an `I(ℓ_init)` that excludes `σ_init`. And a
+transfer unsound on a path no probe takes passes, which makes step 2 as
+important as step 1.
 
 Scala 3 (LTS 3.3.6) project built with sbt 1.11.7.
 
