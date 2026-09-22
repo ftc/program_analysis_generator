@@ -14,6 +14,7 @@ The key insight that should make this possible is that the soundness of the abst
 Each abstract domain must implement a "contains" method that checks an observed state for containment in an abstraction.
 Abstract domains are tested by running sample programs and observing the pre and post states of commands then testing the transfer function against the soundness condition.
 
+[Add example of a simple separation logic abstract domain, the soudness condition, and how the heap can be observed by a debugger and be used to test a transfer function. This example should follow the backward semantics of the Historia work.]
 
 Scala 3 (LTS 3.3.6) project built with sbt 1.11.7.
 
