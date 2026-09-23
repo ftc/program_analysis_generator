@@ -7,6 +7,19 @@ may write and code it may not.
 This document is for review and iteration. Decisions I made on thin evidence
 are marked **[decide]**, and the open questions are collected at the end.
 
+> **Status, 2026-09-23. This plan is out of date.** It describes a design in
+> which soundness is checked per obligation against observed pre/post states.
+> `README.md` has since been restructured around a different probe: reject a
+> domain when it proves a location unreachable that a program actually reaches.
+> Under that design `contains`, `alpha` and `Store` leave the domain interface,
+> nothing in a domain is human-written, and §6 (Observation) is unnecessary.
+>
+> What survives unchanged: the engine/domain split and its isolation (§1, §2),
+> the Java-vs-Scala language boundary and its rationale (§1), the Historia
+> take/drop mapping (§3), dynamic loading (§5), and Phases 0, 2, 4, 5, 8.
+> What needs rewriting: §4 (the contract), §6, and Phases 1, 3, 6, 7, 9, 10.
+> Read `README.md` for the current design and `misc.md` for the reasoning.
+
 ## 1. The boundary
 
 Two kinds of code, separated physically so the separation can be enforced by
@@ -33,6 +46,16 @@ This costs you Java in exactly one place: the domain spec, roughly a hundred
 lines per domain. It has to be Java rather than Scala because the model-written
 transfer compiles against it, and a Scala spec would put the Scala library on
 the domain classpath and end the hermetic `javac` build described in Phase 8.
+
+Out-of-process domains — letting the model write Python behind a JSON protocol
+— were considered and rejected. The contract's core property is that the domain
+state `S` is opaque to the engine, and across a process boundary that leaves
+only bad options: serialize `S` and lose the opacity, or hold opaque handles and
+make the domain process own the entire worklist's memory. Either way entailment,
+which is the hot path during merging, becomes an RPC. In-process Java keeps `S`
+a plain JVM object passed by reference. If a Python domain is ever wanted, it
+becomes one hand-written `DomainSpec` that bridges out-of-process, rather than a
+cost the whole contract pays.
 
 The split inside a domain is the load-bearing part. Everything the engine
 trusts is phrased in `contains`, so `contains` cannot itself be generated —
@@ -278,6 +301,10 @@ that `S` values do not leak across them.
 
 ## 6. Observation
 
+> This section is the part most likely to be superseded. It exists to observe
+> *states*; if state questions reduce to location reachability, a print
+> statement and a run replace all of it. See `misc.md` §2.
+
 Staged, because JDI is a large amount of work and blocks nothing early.
 
 **Stage 1 — instrumented reference interpreter.** `engine/core` contains a
@@ -361,6 +388,13 @@ and the concrete state that witnesses the violation.
 probe corpus reports zero violations.
 
 ### Phase 7 — mutation corpus, and the `contains` gate
+
+> If the adversarial-agent design in `misc.md` §3 is adopted, this corpus
+> changes role: it stops being a test of the harness and becomes the
+> *adversary's* benchmark, scoring how reliably an attacking agent breaks
+> known-unsound domains. The corpus itself is the same either way, so building
+> it is not blocked on that decision.
+
 This phase tests the *harness*, and it is the one that puts a number on the
 testing-adequacy assumption. Maintain a corpus of deliberately unsound
 implementations — off-by-one narrowing, a dropped operand constraint, a

@@ -1,46 +1,67 @@
 # program-analysis-generator
 
 The goal of this project is to build a structure by which large language models may be used to generate the difficult to write pieces of a program analysis and rely on strict correctness tests to avoid unsoundness.
-The fundamental principle of this project is that every step of a program analysis must adhere to the soundness criteria.
-Implementations of each small scale piece of a program analysis must have direct ways of testing against observed runtime behavior.
+The fundamental principle is that every generated artifact is under pressure
+from both sides. Any unsound decision must be rejectable by observed behavior —
+an execution that contradicts it. Any imprecise decision must show up as a false
+alarm. The two pressures work differently: a witnessing execution makes
+unsoundness a hard rejection, while nothing witnesses safety, so precision is
+only ever a score. Both are needed, because proving nothing is sound and proving
+everything is precise.
+
+Soundness is therefore a requirement and precision an objective to maximize.
+Perfect precision is not available — reachability is undecidable, so any sound
+analysis must raise false alarms on some programs. The goal is to drive the
+alarm rate down, not to zero.
 
 The analysis works in two phases:
 1. A forward, over-approximate, flow-insensitive analysis (e.g. an anderson's analysis or steensgaard analysis).  This pass computes a rough approximation of the call graph and the aliasing relationships between variables, pointers, etc.
 2. A backwards analysis that starts at the location of a defect capturing the failure condition and works backwards through the execution of the application to reach a proof if the initial state of the program can be excluded from a fixed point or an alarm if the initial point is reached.  The backward analysis can be over-approximate to produce a proof or under-approximate to produce a must-witness. In either case it is guided by the forward over-approximate analysis.
 
-**Humans never write transfer functions**
-A key part of this project is that (ideally) humans should never directly look at the abstract domain implementations.
-The key insight that should make this possible is that the soundness of the abstract domain defines a way to test every step of the transfer function.
-Each abstract domain must implement a "contains" method that checks an observed state for containment in an abstraction.
-Abstract domains are tested by running sample programs and observing the pre and post states of commands then testing the transfer function against the soundness condition.
+**Humans never write abstract domains**
+A key part of this project is that humans never write or read any part of an
+abstract domain — not the transfer functions, not the state representation, not
+the operations over it.
+
+The key insight that makes this possible is that any question about program
+state reduces to the reachability of a program location, and reachability is
+observed by putting a print statement with a unique id at that location and
+running the program. So an abstract domain can be rejected without inspecting
+it and without any notion of what its states mean: if the domain proves a
+location unreachable and the program prints that location's id, the domain is
+unsound. Domains are tested by searching for such programs.
 
 ## Worked example: IMP and the interval domain
 
 An analysis here is assembled from two layers.
 
 - A **fixed-point layer**: domain-independent judgments that build an invariant
-  map backwards from an error condition and check that it is inductive. Written
+  map backwards from a target location and check that it is inductive. Written
   once, by hand, and proved once.
-- A **transfer layer**: one function per command per abstract domain. Generated,
-  and accepted only once it passes its soundness condition against observed
-  executions.
+- A **domain**: a state representation plus the operations over it. Generated
+  in full, and accepted only once an adversary has failed to break it.
 
-The interface between the layers is a set of conditions on the domain, all of
-them stated in terms of a single concretization test. This example works
-through both layers for IMP and the interval domain.
+Nothing in the domain is written by a human, and nothing in the domain is
+trusted. The only soundness probe is whether a location the analysis proved
+unreachable can be made to execute.
 
-The property under test throughout is **soundness**. Precision and termination
-are deliberately outside the contract: a transfer function that returns `⊤`
-everywhere satisfies every condition below and proves nothing, and a widening
-that never converges is caught by a step limit rather than by a soundness
-check. Both are quality problems, measured separately. Leaving them out keeps
-the contract small enough to be worth generating against.
+The property under test is **soundness**. Precision and termination are
+deliberately outside the contract: a domain that proves nothing is sound and
+useless, and a widening that never converges is caught by a step limit rather
+than by a soundness check. Both are quality problems, measured separately.
+Leaving them out keeps the contract small enough to be worth generating
+against.
 
 References are to Shawn Meier's dissertation: Chapter 5 §5.1 for the program
-representation, Chapter 4, Lemma 1 for the transfer soundness condition, and
-Chapter 4, Fig. 4.2 for the fixed-point judgments.
+representation and the reduction of assertions to location reachability,
+Chapter 4, Lemma 1 for the per-command soundness condition, and Chapter 4,
+Fig. 4.2 for the fixed-point judgments.
 
-### Programs (Ch. 5 §5.1, Fig. 5.1)
+Code below is Scala for readability. In the planned implementation the engine
+is Scala 3 but the domain interface and the domains themselves are Java 21, so
+a model writes Java; see `implementation_strategy.md`.
+
+### Programs, and why reachability is enough
 
 A program `p` is a set of transitions over an unstructured control-flow graph.
 Each transition `ℓ —c→ ℓ'` carries a source location, a command, and a target
@@ -54,38 +75,33 @@ conditions   b ::= a < a | a = a | ¬b
 ```
 
 Structured control flow compiles into this shape: `if` and `while` become
-branching transitions guarded by `assume`. An assertion compiles to the
-reachability of an error location `ℓ_err`.
+branching transitions guarded by `assume`. So does everything else we need.
 
-```scala
-enum Expr:
-  case Lit(n: BigInt)
-  case Var(x: String)
-  case Add(l: Expr, r: Expr)
-  case Mul(l: Expr, r: Expr)
+- **An assertion** becomes the reachability of a location. "It is always
+  possible to compile an assertion to the reachability of a location"
+  (`goaldirinclogic.tex:9`), which is why error conditions are formalized as an
+  *arbitrary* state at a location — `⊤` at `ℓ` in `chapter7.tex:40`.
+- **A question about state** becomes the same thing. To ask whether `P` holds
+  at `ℓ`, insert `ℓ —assume P→ ℓ_fresh` and ask whether `ℓ_fresh` is reachable.
+- **A constrained initial state** becomes an `assume` on the entry transition,
+  so `ℓ_init` can be taken to admit every store.
 
-enum Cond:
-  case Lt(l: Expr, r: Expr)
-  case Eq(l: Expr, r: Expr)
-  case Not(b: Cond)
+This is why the analysis needs no notion of an abstract state's meaning. Every
+query is "is `ℓ` reachable," and every answer of "no" is falsifiable by a single
+program that reaches `ℓ`.
 
-enum Command:
-  case Assign(x: String, a: Expr)
-  case Assume(b: Cond)
-```
+### Concrete semantics
 
-### Concrete states and what the debugger reports
-
-A concrete state `σ` maps variables to integers, so a snapshot is just the
-frame's locals — `StackFrame.getValues` under JDI.
+A concrete state `σ` maps variables to integers. `x := a` rebinds `x` to the
+value of `a` in `σ` and leaves every other variable alone; `assume b` steps only
+when `b` holds in `σ`, leaving `σ` unchanged.
 
 ```scala
 type Store = Map[String, BigInt]     // σ
 ```
 
-The concrete semantics `σ --c--> σ'` is the expected one: `x := a` rebinds `x`
-to the value of `a` in `σ` and leaves every other variable alone; `assume b`
-steps only when `b` holds in `σ`, leaving `σ` unchanged.
+Note that `Store` appears nowhere in what a domain must supply. The domain never
+sees a concrete state.
 
 ### The interval domain
 
@@ -99,9 +115,9 @@ enum Bound:
   case NegInf, PosInf
   case Fin(n: BigInt)
 
-/** [lo, hi] with lo ≤ hi. */
+/** [lo, hi] with lo ≤ hi, under the obvious ordering on Bound. */
 final case class Interval(lo: Bound, hi: Bound):
-  def holds(n: BigInt): Boolean = lo <= Bound.Fin(n) && Bound.Fin(n) <= hi
+  def holds(n: BigInt): Boolean = Bound.leq(lo, Bound.Fin(n)) && Bound.leq(Bound.Fin(n), hi)
 
 enum AbsState:
   case Bottom
@@ -109,27 +125,11 @@ enum AbsState:
 ```
 
 A variable absent from the map is unconstrained, so `Env(Map.empty)` is `⊤` and
-needs no separate constructor.
+needs no separate constructor. The model chose this representation; a different
+one — octagons, congruences, a disjunction of intervals — is a different domain,
+and choosing among them is part of what is being generated.
 
-### `contains` — the concretization test
-
-`σ ⊨ σ̂` holds when `σ̂` is not `⊥` and every variable's value lies in its
-interval. Small enough to state in full:
-
-(Shawn's note: there may be something we can do later where the contains can be considered consistent with sufficient testing as well, but this is a reasonable assumption for now)
-
-```scala
-/** σ ⊨ σ̂ */
-def contains(sigma: Store, sigmaHat: AbsState): Boolean = sigmaHat match
-  case AbsState.Bottom  => false
-  case AbsState.Env(at) => at.forall((x, i) => i.holds(sigma(x)))
-```
-
-This is the trusted kernel. It is the one component a human reads, because
-every other component is checked against it, and it is short enough that
-reading it is cheap: no fixed point, no case analysis, no search.
-
-### The triple and its soundness condition
+### The transfer function
 
 A backward triple `⊢ {P'} c {P}` reads right-to-left: *if an execution of `c`
 reaches a post-state satisfying `P`, then the pre-state of that execution
@@ -139,36 +139,24 @@ satisfies `P'`.* A transfer function computes `P'` from `c` and `P`:
 def transfer(c: Command, post: AbsState): AbsState
 ```
 
-Its soundness condition is that no concrete step escapes the computed
-pre-condition:
-
-```
-  σ' --c--> σ   and   σ ⊨ post   ⟹   σ' ⊨ transfer(c, post)
-```
-
-This is Ch. 4, Lemma 1 (*hoare triple soundness*, p. 89), with the state
-specialized to a variable store. Lemma 1 as stated there also carries a
-specification parameter for framework behavior, which this domain does not use:
+The condition that makes the fixed-point layer below sound is Ch. 4, Lemma 1
+(*hoare triple soundness*, p. 89):
 
 > If `⊢ {P'} c {P}` and `σ' --c--> σ` such that `σ ⊨ P`, then `σ' ⊨ P'`.
 
-That condition is the complete specification of a transfer function. It states
-exactly what the fixed-point layer below consumes, and it is phrased in terms
-of concrete steps and `contains`, so it is directly executable as a test. Those
-two properties are why the transfer layer is specified by a condition: the same
-statement serves as the contract the proof relies on and as the check the
-harness runs.
-
-### The transfer function
+That `⊨` is a concretization relation the domain *has* — every domain has one —
+but which is never written down in code and never checked directly. Lemma 1 is
+the mathematical reason the layers compose; it is not the thing we test. What we
+test is its consequence, below.
 
 Backward over `x := a`: after the command `x` holds the value of `a` evaluated
-*before* it, and every other variable is unchanged. So the post-condition's
-interval for `x` becomes a constraint on the operands of `a`, and `x` itself is
+*before* it, and every other variable is unchanged, so the post-condition's
+interval for `x` becomes a constraint on the operands of `a` and `x` itself is
 unconstrained in the pre-state. Backward over `assume b`: the store is
 unchanged, so the pre-condition is the post-condition refined by `b`.
 
 ```scala
-/** Backward transfer. Must satisfy the soundness condition above. */
+/** Backward transfer. */
 def transfer(c: Command, post: AbsState): AbsState = (c, post) match
   case (_, AbsState.Bottom) =>
     AbsState.Bottom
@@ -187,8 +175,9 @@ def narrow(a: Expr, target: Interval, env: AbsState): AbsState = a match
   case Expr.Mul(l, r) => ...   // sign cases; division by an interval spanning 0
 ```
 
-Five cases worth checking by hand, and the ones a generated implementation
-tends to get wrong:
+Five cases worth working by hand to see what "correct" means here. Nothing
+checks them directly — they are for the reader, and they are the kind of unit
+test a model would reasonably write for itself while iterating:
 
 | command | post | correct pre |
 | --- | --- | --- |
@@ -198,21 +187,19 @@ tends to get wrong:
 | `x := y` | `x ↦ [0,10], y ↦ [5,20]` | `y ↦ [5,10]` |
 | `assume x < 10` | `x ↦ [0,10]` | `x ↦ [0,9]` |
 
-The fourth row is the instructive one: `x`'s post-interval has to be
-intersected into `y`, because `y` is what the assignment read. The two natural
-ways to get it wrong behave differently under the test. Returning
-`y ↦ [5,20]` — forgetting the intersection — is weaker than the correct answer
-and therefore still sound, so the test passes it; that is imprecision, measured
-separately. Returning `y ↦ [5,9]` — narrowing too far — is unsound, and a run
-with `y = 10` exhibits it: the post-state `x = 10, y = 10` satisfies the
-post-condition, while the pre-state `y = 10` falls outside the computed
-pre-condition.
+The fourth row is the instructive one: `x`'s post-interval has to be intersected
+into `y`, because `y` is what the assignment read. The two natural ways to get
+it wrong behave very differently. Returning `y ↦ [5,20]` — forgetting the
+intersection — is weaker than the correct answer and therefore still sound; the
+analysis just proves less. Returning `y ↦ [5,9]` — narrowing too far — is
+unsound, and a program that reaches the target location with `y = 10` exhibits
+it.
 
 ### The fixed-point judgments (Ch. 4, Fig. 4.2)
 
 The transfer function is applied repeatedly, backwards, until an invariant map
 `I` from locations to abstract states stops changing. These judgments say when
-that map is a proof.
+that map is a proof. This layer is the human-written part of the system.
 
 An edge is inductive when the pre-condition it computes is already covered by
 the invariant at its source location:
@@ -223,115 +210,218 @@ the invariant at its source location:
           I ⊢ (ℓ —c→ ℓ') ok
 ```
 
-Ch. 4's corresponding rule, `a-app-step`, wraps this in a rule of consequence
-on both sides. Having a transfer function collapses that: it already produces
-the pre-condition, so only the one entailment remains.
+Ch. 4's corresponding rule, `a-app-step`, wraps this in a rule of consequence on
+both sides. Having a transfer function collapses that: it already produces the
+pre-condition, so only the one entailment remains.
 
-The map is an inductive invariant for an error condition `P` at `ℓ_err` when it
-covers `P` and every transition is inductive:
-
-```
-  P ⊑ I(ℓ_err)      I ⊢ t ok  for all t ∈ p
-  ──────────────────────────────────────────  [inductive]
-            p ⊢ I  may-witness  P
-```
-
-And the error condition is refuted when the invariant at the initial location
-excludes the initial state:
+Because every query is location reachability, the target carries no abstract
+state — `I(ℓ_target)` starts at `⊤`, matching `chapter7.tex:40`:
 
 ```
-  p ⊢ I may-witness P      σ_init ⊭ I(ℓ_init)
-  ───────────────────────────────────────────  [refute]
-          p ⊢ P  unreachable
+  I(ℓ_target) = ⊤      I ⊢ t ok  for all t ∈ p
+  ──────────────────────────────────────────────  [inductive]
+            p ⊢ I  covers  ℓ_target
 ```
 
-`I` is computed by the standard worklist (Ch. 4 §4.1.2): initialize `I(ℓ_err)`
-to the error condition and every other location to `⊥`, then repeatedly pop a
+And the target is refuted when the invariant at the entry admits no store at
+all. Since `ℓ_init` admits every store — initial constraints having been
+compiled into an `assume` — "excludes the initial state" is exactly `⊥`:
+
+```
+  p ⊢ I covers ℓ_target       isBottom(I(ℓ_init))
+  ───────────────────────────────────────────────  [refute]
+          p ⊢ ℓ_target  unreachable
+```
+
+`I` is computed by the standard worklist (Ch. 4 §4.1.2): initialize
+`I(ℓ_target)` to `⊤` and every other location to `⊥`, then repeatedly pop a
 transition, apply `transfer` to the state at its target, and join the result
 into the state at its source, re-enqueuing predecessors on change. Intervals
 have infinite ascending chains, so loop heads need widening.
 
-Widening and the worklist order affect termination and precision, not
-soundness. Soundness comes from re-checking `[inductive]` against the map the
-algorithm settles on, so the search may be as heuristic as it likes while the
-result stays certified.
+Widening and the worklist order affect termination and precision, not soundness.
+Soundness comes from re-checking `[inductive]` against the map the algorithm
+settles on, so the search may be as heuristic as it likes while the result stays
+certified.
 
-This layer is sound for any domain supplying the following, each with exactly
-one obligation:
+This layer works for any domain supplying the following. All of it is generated,
+and none of it mentions a concrete state:
 
-| | condition | who writes it |
-| --- | --- | --- |
-| `contains` | `σ ⊨ ŝ` — defines what the domain means | hand-written |
-| `transfer` | `σ' --c--> σ` and `σ ⊨ post` ⟹ `σ' ⊨ transfer(c, post)` | generated |
-| `α` | `σ ⊨ α(σ)` | generated |
-| `⊑` | `A ⊑ B` and `σ ⊨ A` ⟹ `σ ⊨ B` | generated |
-| `⊔` / `▽` | `σ ⊨ A` ⟹ `σ ⊨ A ⊔ B`, and symmetrically for `B` | generated |
-| `excludesInit` | `excludesInit(A)` ⟹ `σ_init ⊭ A` | generated |
+| | |
+| --- | --- |
+| `S` | the state representation |
+| `top`, `bottom`, `isBottom` | the extremes, and the refutation test |
+| `entails(a, b)` | `⊑`, used by `[edge-inductive]` |
+| `join`, `widen` | merging at control-flow joins and loop heads |
+| `transfer(c, post)` | the backward abstract semantics |
 
-Every obligation is phrased in `contains` and every one is testable against
-observed states. Only `contains` is written by hand, because it is what the
-others are checked against — there is nothing left to check it with. Note what
-is absent: no requirement that `transfer` be the best abstract transformer,
-that `α` and `contains` form a Galois connection, that `⊔` be a least upper
-bound, or that `▽` converge.
+### The soundness probe
+
+A refutation is a falsifiable claim about the real world: *no execution reaches
+`ℓ_target`*. One program that reaches it refutes the refutation.
+
+```
+  p ⊢ ℓ_target unreachable       some run of p reaches ℓ_target
+  ─────────────────────────────────────────────────────────────
+                    the domain is unsound
+```
+
+Observing the right-hand premise costs a print statement:
+
+```
+ℓ_target:  print("REACHED-7f3a9c");
+```
+
+Compile, run, grep stdout. No debugger, no state inspection, no instrumented
+interpreter, and no notion of what the domain's states mean. The evidence is
+that the program printed the id, which is about as close to bedrock as evidence
+gets and does not depend on any component of this project being correct.
+
+Two properties of this probe are worth being explicit about.
+
+**It runs one way.** Printed ⟹ reachable ⟹ the refutation was unsound. *Not*
+printing proves nothing — the input may simply not have triggered it. So a
+witness has to be exhibited, never argued.
+
+**It is not a coarse test, it is a universal encoding.** Granularity is the
+tester's choice. Guarding the print with `assume x == 5 && y == 3` immediately
+after a command turns it into a question about that command, and narrows blame
+to the backward path from that point. What is lost relative to inspecting the
+domain is not power but *locality of feedback* — see Future ideas.
 
 ### The generate-and-test loop
 
-The soundness condition quantifies over concrete steps, which is what a
-debugger enumerates:
+Two agents with opposed objectives, and no human in either.
 
-1. **Implement.** The model writes `transfer` for one command against the
-   condition.
-2. **Attack.** The model writes probe programs aimed at breaking it — an
-   assignment whose source variable is also constrained in the post-condition,
-   arithmetic that overflows an interval bound, a loop whose guard narrows a
-   range, expressions mixing signs under multiplication.
-3. **Observe.** Run each probe under JDI with breakpoints on both sides of the
-   command, recording `(σ', σ)` at every hit.
-4. **Check.** For post-conditions that contain `σ`, assert that
-   `transfer(c, post)` contains `σ'`.
-5. **Refine or reject.** A failure returns the command, the post-condition, the
-   computed pre-condition, and the excluded concrete pre-state.
+1. **Generate.** A model writes the whole domain — representation and all
+   operations — against the interface above.
+2. **Attack.** A separate adversary agent searches for a program `p` and a
+   location `ℓ` such that the domain proves `ℓ` unreachable. This is a
+   well-posed and rather natural task: *write a program that breaks this
+   analyzer*.
+3. **Run.** Compile `p` with a print at `ℓ` and execute it.
+4. **Verdict.** If it prints, the domain is unsound and is rejected, with the
+   witness program as the counterexample.
+5. **Score.** Among domains no adversary has broken, count how many locations
+   each one proves.
+
+Step 5 is not optional. A domain that proves nothing survives every adversary
+forever, so soundness alone selects for uselessness. The dual requirement
+mirrors the synthesis acceptance in `chapter7.tex:40` — prove the targets *and*
+leave the reachable locations reachable.
+
+The two agents should not be the same model. If one writes both the domain and
+its attacker, there is no reason to expect it to attack hard.
 
 ```scala
-class AssignSoundness extends munit.FunSuite:
-  test("x := a transfer is sound on observed steps") {
+class DomainSoundness extends munit.FunSuite:
+  test("no refuted location is reachable") {
     for
-      probe          <- probes                       // step 2
-      (c, pre, post) <- Debugger.observeSteps(probe) // step 3
-      postAbs        <- Abstraction.containing(post) // any σ̂ with post ⊨ σ̂
+      (p, target) <- adversary.candidates(domain)   // step 2
+      if analysis(domain, p, target).refuted        // domain claims unreachable
     do
-      val preAbs = transfer(c, postAbs)              // step 4
-      assert(contains(pre, preAbs),
-             s"unsound: $c\n  post ⊨ $postAbs\n  pre ∉ γ($preAbs)")
+      val out = Runner.compileAndRun(p.withPrintAt(target))
+      assert(!out.contains(target.id),              // step 4
+             s"unsound: domain refuted $target but this program reaches it:\n$p")
   }
 ```
 
 ### The assumption this rests on
 
-> **Testing adequacy.** For a transfer function small enough to handle one
-> command in one domain, a reasonable set of generated probes exercises enough
-> concrete steps that any violation of the soundness condition appears in at
-> least one observed step.
+> **Adversarial adequacy.** If a domain is unsound, an adversary with a
+> reasonable budget finds a program and a location that exhibit it.
 
 This is an assumption of the technique, not a theorem, and it is what stands in
-for a proof of each transfer function. It is the reason the command language is
-kept small and the reason transfer functions are written one command at a time:
-the assumption is credible exactly to the degree that a modest probe set can
-cover the function's behavior. The fixed-point layer is proved once and for
-all, so this assumption is the whole exposed surface.
+for a proof of the domain. It is strictly harder to satisfy than a per-command
+testing assumption would be: the adversary has to construct a program that both
+triggers the flaw *and* drives execution to the location, rather than merely
+touching the command. Against that, it needs no trust in anything the model
+wrote, and it is the only assumption on the list.
 
-Two consequences. The loop catches unsoundness only. A transfer returning `⊤`
-passes every probe and proves nothing, and a widening that never converges
-passes every probe and never terminates; precision is measured by whether the
-fixed point reaches an `I(ℓ_init)` that excludes `σ_init`, and termination by a
-step limit. Neither is a soundness failure and neither is tested here. And a
-transfer unsound on a path no probe takes passes, which makes step 2 as
-important as step 1.
+Calibrating it is a measurement, not an argument. Seed known-unsound domains and
+score the adversary on how many it breaks; that kill rate is what makes "the
+adversary found nothing" mean something.
+
+Two consequences. The probe catches unsoundness only, so precision is a separate
+score — how many locations a surviving domain proves. And a domain unsound only
+on behavior no adversary constructs will pass, which makes step 2 the part of
+the loop most worth investing in.
+
+## Future ideas
+
+### A concretization test, and per-obligation checking
+
+The design above discards a lot of signal. An alternative is to have each domain
+also supply
+
+```scala
+def contains(sigma: Store, s: S): Boolean     // σ ⊨ ŝ
+def alpha(sigma: Store): S                    // abstraction of one state
+```
+
+and then check every operation directly against observed executions rather than
+end to end:
+
+| | obligation |
+| --- | --- |
+| `transfer` | `σ' --c--> σ` and `σ ⊨ post` ⟹ `σ' ⊨ transfer(c, post)` |
+| `alpha` | `σ ⊨ alpha(σ)` |
+| `entails` | `A ⊑ B` and `σ ⊨ A` ⟹ `σ ⊨ B` |
+| `join` / `widen` | `σ ⊨ A` ⟹ `σ ⊨ A ⊔ B`, and symmetrically |
+| `bottom` | `σ ⊭ ⊥` |
+
+This is the Lemma 1 condition tested directly instead of through its
+consequence. It needs the pre- and post-state of each command, which means an
+instrumented interpreter or a JDI debugger reading `StackFrame.getValues`.
+
+*(Shawn's note: there may be something we can do later where the contains can be
+considered consistent with sufficient testing as well, but this is a reasonable
+assumption for now)*
+
+**What it buys.** Signal density — thousands of checks per program run, versus
+one bit per (program, location) pair each costing a full fixed-point
+computation. And locality: "your `Add` case in `narrow` is wrong, here is the
+counterexample" instead of "this domain is unsound somewhere." For a repair
+loop, that difference is most of the value.
+
+**What it costs.** `contains` becomes the thing every other obligation is
+checked against, so it cannot itself be checked the same way. If it is written
+by a human it is the one human artifact per domain. If it is generated it can be
+*wrong in a way that makes every other check pass* — a `contains` whose
+concretization is too small makes every obligation vacuous and refutes
+everything. A fast oracle that can lie is worse than no fast oracle.
+
+**The resolution, if we want both.** Let the model generate `contains` and
+`alpha` as its own scratch oracle for iteration, and keep reachability as the
+acceptance criterion. Then `contains` never has to be trusted — only useful to
+the generator. If it is wrong, the model's own fast tests mislead it, the
+adversary breaks the result, and the feedback is that `contains` was wrong too.
+
+### When we would need this
+
+Two triggers, either of which would bring it back:
+
+- **The reachability oracle proves too expensive.** Each query is a full
+  backward fixed point, and the adversary's search is over programs rather than
+  inputs. If that turns out to dominate the cost of a campaign, dense per-command
+  checks become the inner loop and reachability the acceptance gate.
+- **We cannot drive the behavior.** The probe requires the adversary to make
+  execution *arrive* at a location. That is free in IMP, where the adversary
+  writes the whole program. It is not free once behavior runs through a
+  framework, a library, or the OS: in an Android app the framework decides
+  whether a callback fires at all, so a witness may be unconstructible even
+  though the location is genuinely reachable. This is exactly the situation that
+  made framework models necessary in the first place (Ch. 4), and it is where a
+  probe based on observed states would keep working when a probe based on
+  constructed executions stops.
 
 Scala 3 (LTS 3.3.6) project built with sbt 1.11.7.
 
 ## Layout
+
+Nothing described above is built yet. This is the current skeleton; the target
+layout — `engine/{api,core,harness,cli}` plus `domains/` — is in
+`implementation_strategy.md` §2.
 
 ```
 build.sbt                     build definition
