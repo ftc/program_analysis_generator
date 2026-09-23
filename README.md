@@ -4,9 +4,9 @@ The goal of this project is to build a structure by which large language models 
 The fundamental principle is that every generated artifact is under pressure
 from both sides. Any unsound decision must be rejectable by observed behavior —
 an execution that contradicts it. Any imprecise decision must show up as a false
-alarm. The two pressures work differently: a witnessing execution makes
-unsoundness a hard rejection, while nothing witnesses safety, so precision is
-only ever a score. Both are needed, because proving nothing is sound and proving
+alarm. The two pressures work differently: an execution that contradicts a claim
+makes unsoundness a hard rejection, while nothing can demonstrate safety, so
+precision is only ever a score. Both are needed, because proving nothing is sound and proving
 everything is precise.
 
 Soundness is therefore a requirement and precision an objective to maximize.
@@ -281,11 +281,13 @@ Inspecting states during execution would give a denser signal at the cost of
 needing to know what an abstract state means; that alternative is in Future
 ideas.
 
-Two properties of this probe are worth being explicit about.
+We call such a program a **reaching run**: a program, its arguments, and the
+location it gets to. It is the only artifact in this project that proves
+anything, and two of its properties are worth being explicit about.
 
 **It runs one way.** Printed ⟹ reachable ⟹ the refutation was unsound. *Not*
 printing proves nothing — the input may simply not have triggered it. So a
-witness has to be exhibited, never argued.
+reaching run has to be exhibited, never argued.
 
 **It is not a coarse test, it is a universal encoding.** Granularity is the
 tester's choice. Guarding the print with `assume x == 5 && y == 3` immediately
@@ -304,7 +306,7 @@ Two agents with opposed objectives, and no human in either.
    See below.
 3. **Run.** Compile `p` with a print at `ℓ` and execute it.
 4. **Verdict.** If it prints, the domain is unsound and is rejected, with the
-   witness program as the counterexample.
+   reaching run as the counterexample.
 5. **Score.** Among domains no adversary has broken, count how many locations
    each one proves.
 
@@ -332,9 +334,9 @@ The loop runs two agents with opposed objectives. The generator writes domains
 and is scored on how many locations it proves. The adversary tries to show a
 domain wrong, and is scored on how often it succeeds.
 
-The adversary's deliverable is a **corpus of reachable locations**: pairs of a
-program and a location that the domain proves unreachable and that a run
-demonstrably executes. This is the initial focus, because it is the piece that
+The adversary's deliverable is a **corpus of reaching runs**: a program, its
+arguments, and a location that the domain proves unreachable and that running
+the program demonstrably executes. This is the initial focus, because it is the piece that
 currently does not exist. In the dissertation the equivalent corpus was
 assembled by hand — framework models were validated against roughly ten
 reachable locations, which were *"hand selected to demonstrate the unsound
@@ -360,7 +362,7 @@ looking.
 analyzer* is concrete, creative, and settled by a single run. The agent knows
 whether it succeeded without anyone grading it.
 
-**It can only falsify.** A witness proves unsoundness; failing to find one
+**It can only falsify.** A reaching run proves unsoundness; failing to find one
 proves nothing. The adversary never certifies a domain, it only fails to reject
 it — which is why the assumption below is about the adversary's reach rather
 than about the domain's correctness.
@@ -436,7 +438,8 @@ of this README claimed that attacking a transfer function was a vaguer job than
 attacking the analysis as a whole. That was wrong. The success criterion is
 exactly as sharp: *find a command, a post-condition, and an observed step
 `σ' --c--> σ` such that `σ ⊨ post` but `σ' ⊭ transfer(c, post)`.* That triple is
-a witness, checkable in one evaluation, and the agent knows whether it has one.
+a counterexample, checkable in one evaluation, and the agent knows when it has
+one.
 
 The real difference is not crispness but the shape of the search, and it favours
 this design. A per-obligation adversary only has to write a program that
@@ -477,7 +480,7 @@ Two triggers, either of which would bring it back:
   execution *arrive* at a location. That is free in IMP, where the adversary
   writes the whole program. It is not free once behavior runs through a
   framework, a library, or the OS: in an Android app the framework decides
-  whether a callback fires at all, so a witness may be unconstructible even
+  whether a callback fires at all, so a reaching run may be unconstructible even
   though the location is genuinely reachable. This is exactly the situation that
   made framework models necessary in the first place (Ch. 4), and it is where a
   probe based on observed states would keep working when a probe based on
