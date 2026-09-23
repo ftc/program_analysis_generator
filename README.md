@@ -25,9 +25,16 @@ An analysis here is assembled from two layers.
   and accepted only once it passes its soundness condition against observed
   executions.
 
-The interface between the layers is three conditions on the domain, all of them
-stated in terms of a single concretization test. This example works through
-both layers for IMP and the interval domain.
+The interface between the layers is a set of conditions on the domain, all of
+them stated in terms of a single concretization test. This example works
+through both layers for IMP and the interval domain.
+
+The property under test throughout is **soundness**. Precision and termination
+are deliberately outside the contract: a transfer function that returns `⊤`
+everywhere satisfies every condition below and proves nothing, and a widening
+that never converges is caught by a step limit rather than by a soundness
+check. Both are quality problems, measured separately. Leaving them out keeps
+the contract small enough to be worth generating against.
 
 References are to Shawn Meier's dissertation: Chapter 5 §5.1 for the program
 representation, Chapter 4, Lemma 1 for the transfer soundness condition, and
@@ -249,16 +256,24 @@ soundness. Soundness comes from re-checking `[inductive]` against the map the
 algorithm settles on, so the search may be as heuristic as it likes while the
 result stays certified.
 
-This layer is sound for any domain that supplies three things:
+This layer is sound for any domain supplying the following, each with exactly
+one obligation:
 
 | | condition | who writes it |
 | --- | --- | --- |
+| `contains` | `σ ⊨ ŝ` — defines what the domain means | hand-written |
 | `transfer` | `σ' --c--> σ` and `σ ⊨ post` ⟹ `σ' ⊨ transfer(c, post)` | generated |
-| `⊑` | `A ⊑ B` and `σ ⊨ A` ⟹ `σ ⊨ B` | hand-written |
-| `excludesInit` | `excludesInit(A)` ⟹ `σ_init ⊭ A` | hand-written |
+| `α` | `σ ⊨ α(σ)` | generated |
+| `⊑` | `A ⊑ B` and `σ ⊨ A` ⟹ `σ ⊨ B` | generated |
+| `⊔` / `▽` | `σ ⊨ A` ⟹ `σ ⊨ A ⊔ B`, and symmetrically for `B` | generated |
+| `excludesInit` | `excludesInit(A)` ⟹ `σ_init ⊭ A` | generated |
 
-All three are phrased in `contains` and all three are testable against observed
-states. Only the first is generated, and only the first varies per command.
+Every obligation is phrased in `contains` and every one is testable against
+observed states. Only `contains` is written by hand, because it is what the
+others are checked against — there is nothing left to check it with. Note what
+is absent: no requirement that `transfer` be the best abstract transformer,
+that `α` and `contains` form a Galois connection, that `⊔` be a least upper
+bound, or that `▽` converge.
 
 ### The generate-and-test loop
 
@@ -306,9 +321,11 @@ the assumption is credible exactly to the degree that a modest probe set can
 cover the function's behavior. The fixed-point layer is proved once and for
 all, so this assumption is the whole exposed surface.
 
-Two consequences. The loop catches unsoundness only — a transfer returning `⊤`
-passes every probe and proves nothing — so precision is measured separately, by
-whether the fixed point reaches an `I(ℓ_init)` that excludes `σ_init`. And a
+Two consequences. The loop catches unsoundness only. A transfer returning `⊤`
+passes every probe and proves nothing, and a widening that never converges
+passes every probe and never terminates; precision is measured by whether the
+fixed point reaches an `I(ℓ_init)` that excludes `σ_init`, and termination by a
+step limit. Neither is a soundness failure and neither is tested here. And a
 transfer unsound on a path no probe takes passes, which makes step 2 as
 important as step 1.
 
