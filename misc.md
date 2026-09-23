@@ -38,6 +38,25 @@ construction.
 thing that grounds row 1), and treat mutation kill rate as primary evidence
 rather than a metric, since row 4 is otherwise unvalidated.
 
+### Update 2026-09-23 — the table above describes the superseded design
+
+Under the reachability probe now in `README.md`, this collapses to two rows:
+
+| # | Claim | How established |
+| --- | --- | --- |
+| 1 | The executor implements the intended semantics | Stage 1: our interpreter. Stage 2: `javac` + the JVM, i.e. the intended semantics *is* what Java does |
+| 2 | The adversary is strong enough that its silence means something | mutant kill rate (plan Phase 8) |
+
+Everything else is covered end to end. A broken certifier emits a refutation
+that is wrong, and the adversary catches it. A domain whose implicit semantics
+disagrees with the executor's is, by definition, wrong relative to the executor —
+also caught. `contains`, the checkers and the api's obligation statements are
+gone from the trusted base because they are gone from the system.
+
+The old row 1 was the interpreter's fidelity to real execution; it survives, but
+Stage 2 discharges it with a code generator and a print statement instead of JDI,
+which is a much smaller thing to get right.
+
 ---
 
 ## 2. Reachability as the oracle, and the print-statement observer

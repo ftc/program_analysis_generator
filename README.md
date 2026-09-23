@@ -277,6 +277,10 @@ interpreter, and no notion of what the domain's states mean. The evidence is
 that the program printed the id, which is about as close to bedrock as evidence
 gets and does not depend on any component of this project being correct.
 
+Inspecting states during execution would give a denser signal at the cost of
+needing to know what an abstract state means; that alternative is in Future
+ideas.
+
 Two properties of this probe are worth being explicit about.
 
 **It runs one way.** Printed ⟹ reachable ⟹ the refutation was unsound. *Not*
@@ -296,9 +300,8 @@ Two agents with opposed objectives, and no human in either.
 1. **Generate.** A model writes the whole domain — representation and all
    operations — against the interface above.
 2. **Attack.** A separate adversary agent searches for a program `p` and a
-   location `ℓ` such that the domain proves `ℓ` unreachable. This is a
-   well-posed and rather natural task: *write a program that breaks this
-   analyzer*.
+   location `ℓ` such that the domain proves `ℓ` unreachable but `p` reaches it.
+   See below.
 3. **Run.** Compile `p` with a print at `ℓ` and execute it.
 4. **Verdict.** If it prints, the domain is unsound and is rejected, with the
    witness program as the counterexample.
@@ -309,9 +312,6 @@ Step 5 is not optional. A domain that proves nothing survives every adversary
 forever, so soundness alone selects for uselessness. The dual requirement
 mirrors the synthesis acceptance in `chapter7.tex:40` — prove the targets *and*
 leave the reachable locations reachable.
-
-The two agents should not be the same model. If one writes both the domain and
-its attacker, there is no reason to expect it to attack hard.
 
 ```scala
 class DomainSoundness extends munit.FunSuite:
@@ -326,17 +326,70 @@ class DomainSoundness extends munit.FunSuite:
   }
 ```
 
+### The adversary
+
+The loop runs two agents with opposed objectives. The generator writes domains
+and is scored on how many locations it proves. The adversary tries to show a
+domain wrong, and is scored on how often it succeeds.
+
+The adversary's deliverable is a **corpus of reachable locations**: pairs of a
+program and a location that the domain proves unreachable and that a run
+demonstrably executes. This is the initial focus, because it is the piece that
+currently does not exist. In the dissertation the equivalent corpus was
+assembled by hand — framework models were validated against roughly ten
+reachable locations, which were *"hand selected to demonstrate the unsound
+behavior"* (`conclusionandfuture.tex:21`). Automating that selection is the
+adversary's job, and it is the difference between an evaluation technique and a
+training signal.
+
+**What it hunts for.** The adversary wants places where the analysis claims too
+much, never too little. Imprecision is safe — an imprecise domain simply fails
+to refute, and pays for that in its score. So the productive targets are the
+decisions that over-claim:
+
+- a transfer function that narrows harder than the command justifies;
+- an `entails` that reports `A ⊑ B` when some state in `A` is outside `B`;
+- an `isBottom` that calls a satisfiable state empty;
+- a widening that drops a reachable case rather than merely blurring one.
+
+Loops, multiplication across zero, and any constraint that couples two variables
+in a domain that cannot represent the coupling are the natural places to start
+looking.
+
+**Why this is a good task for a model.** *Write a program that breaks this
+analyzer* is concrete, creative, and settled by a single run. The agent knows
+whether it succeeded without anyone grading it.
+
+**It can only falsify.** A witness proves unsoundness; failing to find one
+proves nothing. The adversary never certifies a domain, it only fails to reject
+it — which is why the assumption below is about the adversary's reach rather
+than about the domain's correctness.
+
+**Calibrate it before believing it.** Seed deliberately unsound domains and
+measure how many the adversary breaks within a budget. That kill rate is what
+converts "the adversary found nothing" from an empty statement into evidence,
+and it is the same corpus that would otherwise be used to test a checker.
+
+**Do not let one model play both roles.** An agent asked to write a domain and
+then attack it has no reason to attack hard. Separate agents, and preferably
+separate models.
+
+**The two pressures compose.** A domain that proves nothing offers the adversary
+no surface at all — and scores zero. Reaching for precision is exactly what
+exposes a domain to attack. The generator's score and the adversary's kill rate
+are the two pressures named at the top of this README, made operational.
+
 ### The assumption this rests on
 
 > **Adversarial adequacy.** If a domain is unsound, an adversary with a
 > reasonable budget finds a program and a location that exhibit it.
 
 This is an assumption of the technique, not a theorem, and it is what stands in
-for a proof of the domain. It is strictly harder to satisfy than a per-command
-testing assumption would be: the adversary has to construct a program that both
-triggers the flaw *and* drives execution to the location, rather than merely
-touching the command. Against that, it needs no trust in anything the model
-wrote, and it is the only assumption on the list.
+for a proof of the domain. It is a demanding one: the adversary has to construct
+a program that both triggers the flaw *and* drives execution to the location.
+Against that, it needs no trust in anything the model wrote, and it is the only
+assumption on the list. Future ideas discusses a cheaper probe with a weaker
+assumption and a heavier trust cost.
 
 Calibrating it is a measurement, not an argument. Seed known-unsound domains and
 score the adversary on how many it breaks; that kill rate is what makes "the
@@ -377,6 +430,21 @@ instrumented interpreter or a JDI debugger reading `StackFrame.getValues`.
 *(Shawn's note: there may be something we can do later where the contains can be
 considered consistent with sufficient testing as well, but this is a reasonable
 assumption for now)*
+
+**An adversary works here too, and its task is no less crisp.** An earlier draft
+of this README claimed that attacking a transfer function was a vaguer job than
+attacking the analysis as a whole. That was wrong. The success criterion is
+exactly as sharp: *find a command, a post-condition, and an observed step
+`σ' --c--> σ` such that `σ ⊨ post` but `σ' ⊭ transfer(c, post)`.* That triple is
+a witness, checkable in one evaluation, and the agent knows whether it has one.
+
+The real difference is not crispness but the shape of the search, and it favours
+this design. A per-obligation adversary only has to write a program that
+*executes the command*. A reachability adversary has to write one that executes
+the flawed decision *and* drives control all the way to the refuted location.
+The second search is strictly harder, which is why the assumption above is the
+demanding one. What the per-obligation adversary pays for that advantage is the
+oracle: it cannot state its own success criterion without `contains`.
 
 **What it buys.** Signal density — thousands of checks per program run, versus
 one bit per (program, location) pair each costing a full fixed-point
