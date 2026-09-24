@@ -41,10 +41,10 @@ What it shows:
 | Campaign | generated domains, verdicts, proof counts, adversary kill rate |
 | Query | one `analyze` run: verdict, step count, where it stopped |
 | CFG | a method's control-flow graph, with the lowered `Cfg` edges |
-| State | `I(ℓ)` at every program point, and the same map before certification |
+| State | `I(ℓ)` at every location, and the same map before certification |
 | Certification | which `[edge-inductive]` check failed, if any |
 | Reaching run | the adversary's `.java`, its output, and the refuted target |
-| Config | model endpoints and credentials (see `implementation_strategy.md` §8) |
+| Config | model endpoints and credentials (`implementation_strategy.md` §10) |
 
 The State and CFG views are the ones that will actually earn their keep: a
 domain that refutes something it should not is best understood by walking `I`
@@ -58,7 +58,7 @@ has a text equivalent the CLI must provide, or the engine becomes undebuggable:
 | view | CLI equivalent |
 | --- | --- |
 | CFG | `pag ir --cfg` — lowered transitions, one per line |
-| State | `pag analyze --show-invariant` — `I(ℓ)` per program point |
+| State | `pag analyze --show-invariant` — `I(ℓ)` per location |
 | Certification | the failing `[edge-inductive]` edge, named, on failure |
 | Reaching run | `pag check` output — probe path, stdout, verdict |
 | Campaign | a results directory plus `--json` |

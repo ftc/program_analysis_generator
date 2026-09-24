@@ -4,7 +4,7 @@ A plan for a prototype of the design in `README.md`: a generate-and-test loop
 over IMP and the interval domain, with a hard boundary between code a model may
 write and code it may not.
 
-Regenerated 2026-09-23 against the reachability-probe design. Decisions made on
+Regenerated 2026-09-23 against the reachability-check design. Decisions made on
 thin evidence are marked **[decide]**; open questions are collected at the end.
 Ideas considered and parked live in `misc.md`.
 
@@ -17,7 +17,7 @@ making it falsifiable, and running two agents against it.
 ```
   generator ──writes──> domain D
                           │
-                          ├── analyze(D, p, ℓ) ──> Refuted | Alarm | Exhausted
+                          ├── analyze(D, p, ℓ) ──> Refuted | Alarm | Inconclusive
                           │        │
   adversary ──searches──> │        └── Refuted?  ──> run p from σ_init
                           │                             │
@@ -41,6 +41,7 @@ each side is written in what its author handles best.
 | Domain contract + IR | human | **Java 21** | `engine/api` | compiled jar |
 | **Abstract domains** | **generator agent** | **Java 21** | `domains/<d>/` | read-write |
 | **Probe programs / reaching runs** | **adversary agent** | **Java 21** | `probes/<campaign>/` | read-write |
+| Campaign driver | human | Scala 3 | `campaign/` — separate codebase | none |
 
 Everything at or below the contract is Java; everything above it is Scala 3. The
 engine is Scala because that is what a human maintains. The contract and domains
@@ -70,16 +71,21 @@ engine/                    sbt multi-project, human-only
   core/                    Scala 3. worklist, invariant map, certifier
   harness/                 Scala 3. executor, probe runner, verdict, scoring,
                            mutation corpus, agent drivers
+  results/                 Scala 3. result ADTs + codecs, shared with campaign/ (§13)
   cli/                     Scala 3. config, domain loading, entry point
 domains/
   interval/                Java. the reference fixture, and later a target
     src/ ... build.sh      javac against api.jar. No sbt, no network.
   <generated domains>/
+campaign/                  the outer loop. Separate codebase, drives pag by
+                           subprocess; never linked against the engine (§12)
 probes/
-  <campaign>/              adversary output: programs, initial stores, verdicts
+  <campaign>/              adversary output: programs, arguments, verdicts
 corpora/
   scoring/                 programs used to measure proof count
   mutants/                 deliberately unsound domains, for calibration
+results/
+  <campaign>/              durable per-attempt records, so a campaign resumes
 config/                    run configurations
 docker/                    compose files and mount definitions
 ```
@@ -113,13 +119,13 @@ parked in `dashboard.md`. The CLI is the interface for now.
 | `WitnessExplanation` | `CandidateTrace` (§8) |
 | `WitnessedQry` | folded into `Verdict.Alarm` plus a `CandidateTrace` |
 | `ExecutorConfig` constructing the interpreter | `config/*.conf` plus `EngineConfig` |
-| step limits and timeouts | kept, and reported as a distinct verdict |
+| step limits and timeouts | kept as an **iteration limit**, surfaced as `Incomplete` |
+| `ApproxMode` / nine `DropQryPolicy` variants | **dropped** — under-approximate machinery (§8); weakening belongs to the domain |
 
 Drop outright: APKs, Android, framework models and callback handling; Z3 and the SMT encoding
 (entailment is a domain method — a domain may use a solver internally, the
 engine must not know); message histories, CBCFTL, specifications, synthesis;
-path nodes, witness explanations, the results database; `ApproxMode` /
-`DropQryPolicy` and the subsumption-mode variants; Scala 2.13.
+path nodes, witness explanations, the results database; the subsumption-mode variants; Scala 2.13.
 
 Historia's `AbstractInterpreter` is ~1200 lines and `TransferFunctions` ~1000,
 largely because the IR is real Java and the domain is entangled with the solver
@@ -407,8 +413,8 @@ of them. The query's abstract state is `⊤` throughout — Historia uses
 reaching the target never enter the invariant map at all. That is the whole
 reason the domain can start from `⊤` and stay small, and it is the property the
 separation-logic work in the dissertation leans on hardest. The cost is that
-every query pays for its own fixed point, which is why §7's probe is expensive
-and §11 asks about adversary budget.
+every query pays for its own fixed point, which is why the check in §9 is expensive
+and §16 asks about adversary budget.
 
 **This must be loud in the generator prompt.** A model's prior for
 "the interval transfer function for `x := a`" is the *forward* one. The
@@ -421,12 +427,28 @@ exist partly for this.
 ## 7. The engine
 
 ```scala
+/** What the analysis learned. Never how it stopped. */
 enum Verdict:
-  case Refuted                      // certified unreachable
-  case Alarm                        // fixed point reached, target not excluded
-  case Exhausted(reason: String)    // step limit, or widening did not converge
+  case Refuted                        // certified unreachable
+  case Alarm                          // searched fully, could not prove it
+  case Inconclusive(why: Incomplete)  // did not search fully
 
-def analyze[S](d: Domain[S], cfg: Cfg, q: Query, lim: Limits): Verdict
+/** Why a search was incomplete. All three stop it, so exactly one can fire. */
+enum Incomplete:
+  case IterationLimit(at: Int)
+  case Deadline(afterMs: Long)
+  case DomainFailure(op: String, error: Throwable)
+
+/** The verdict plus what the search cost. Collected at every recording level. */
+final case class AnalysisResult(
+  verdict:    Verdict,
+  iterations: Int,
+  unexplored: Int,        // still in the worklist when the budget ran out
+  elapsedMs:  Long,
+  widenedAt:  Set[Loc]
+)
+
+def analyze[S](d: Domain[S], cfg: Cfg, q: Query, lim: Limits): AnalysisResult
 ```
 
 Two clearly separated stages, because the README's soundness argument depends on
@@ -436,7 +458,7 @@ the separation:
 `d.bottom()` everywhere else. Pop a transition `ℓ —step→ ℓ'`, compute
 `d.transfer(step, I(ℓ'))`, join it into `I(ℓ)` — or widen there, at a loop head
 per `IrProvider.isLoopHead` — and re-enqueue predecessors of `ℓ` if `I(ℓ)` grew.
-Stop on an empty worklist or the step limit. This stage may be arbitrarily
+Stop on an empty worklist or the iteration limit. This stage may be arbitrarily
 heuristic.
 
 **Certify.** Independently re-check, against the settled map:
@@ -448,7 +470,7 @@ heuristic.
 ```
 
 Both stages call the recorder (§8) unconditionally — a failing
-`[edge-inductive]` check records `Terminal.Uncertified` at the offending node,
+`[edge-inductive]` check records `StopReason.Uncertified` at the offending node,
 which is otherwise very hard to locate. Only a map passing all three yields
 `Refuted`. If certification fails the result is `Alarm` regardless of what the
 worklist concluded. Keeping these apart means
@@ -508,7 +530,7 @@ why it exists; and nothing about provenance touches `S`.
 ```scala
 opaque type NodeId = Long
 
-/** A program point with an abstract state, as the analysis saw it. */
+/** A location with an abstract state, as the analysis saw it. */
 final case class DNode(id: NodeId, loc: Loc, state: Any /* S, opaque */)
 
 /** Why one node follows from another. Recorded in analysis order: target → entry. */
@@ -518,22 +540,23 @@ enum Derivation:
   case Widen(prevNode: NodeId)       // this state came from widening at a loop head
 
 /** Why exploration stopped at a node. Recorded once, never part of identity. */
-enum Terminal:
+enum StopReason:
   case Subsumed(by: NodeId)          // absorbed into an existing state
-  case Dropped(reason: String)       // step limit, or an approximation policy
+  case Unexplored                    // still in the worklist when the budget ran out
   case Bottom                        // transfer produced ⊥; this branch is refuted
-  case Entry                         // reached ℓ_init — an alarm candidate
+  case ReachedInit                   // reached ℓ_init — an alarm candidate
   case Uncertified(edge: Step)       // [edge-inductive] failed here
 ```
 
-- **`Subsumed`, `Dropped` and `Bottom` are distinct constructors**, not three
+- **`Subsumed`, `Unexplored` and `Bottom` are distinct constructors**, not three
   readings of an empty set. That alone removes problem 1 and most of 7.
 - **Edges are directed the way the analysis moved** (target → entry) and the
   reverse view is derived, not a second field. Reading a trace means walking the
   reverse view from an `Entry` node to the query. No `headOption` anywhere: a
   reader that wants one path asks for one and is told how many there were.
-- **`DNode` is immutable and its identity is its `NodeId`.** `Terminal` lives in
-  a side map keyed by id, so marking a node subsumed cannot change its identity.
+- **`DNode` is immutable and its identity is its `NodeId`.** `StopReason` lives
+  in a side map keyed by id, so marking a node subsumed cannot change its
+  identity.
 - **`S` is untouched.** No provenance, no alternates, no flags. The graph stores
   the state the analysis had; the domain never learns the graph exists.
 - **Recording is an interface with a no-op implementation**, not a mode that
@@ -542,7 +565,7 @@ enum Terminal:
 
 ### What a trace is, and is not
 
-A `CandidateTrace` is a path from an `Entry` node to the query. It is
+A `CandidateTrace` is a path from a `ReachedInit` node to the query. It is
 **admissible within the abstraction and nothing more.** Joins mean the state at
 a location was assembled from several predecessors, so the reconstructed path is
 one selection through the DAG; it need not correspond to any concrete execution.
@@ -559,14 +582,14 @@ the other thing executed.
 
 ### Dropping intermediate states
 
-The graph is O(worklist steps), which will not be affordable in a campaign, so
+The graph is O(worklist iterations), which will not be affordable in a campaign, so
 recording has levels:
 
 | level | keeps | cost | use |
 | --- | --- | --- | --- |
 | `Off` | nothing | none | campaign runs |
 | `Terminal` | terminal nodes, one parent pointer each | O(terminals × depth) | alarm triage |
-| `Full` | every node and edge kind | O(steps) | debugging a specific query |
+| `Full` | every node and edge kind | O(iterations) | debugging a specific query |
 
 Under `Terminal` the DAG degenerates to a forest and a reconstructed path is one
 arbitrary derivation — *which is exactly Historia's behaviour*. The difference
@@ -584,7 +607,7 @@ widening, drops — which is the part that actually matters when debugging. So:
 reconstruct-from-`I` for reporting an alarm, `Full` recording for understanding
 one.
 
-## 9. The probe: executing a reaching run
+## 9. The reachability check
 
 A reaching run is concrete and self-contained:
 
@@ -660,7 +683,222 @@ Credentials are named by environment variable, never written to the config file
 and never to the repo. Every result records which agent config produced
 it, so a campaign can be attributed to the models that ran it.
 
-## 11. Phases
+## 11. The command line
+
+One binary, `pag`, with subcommands. It is the only interface until the
+dashboard is built, so it has to carry what the dashboard would have shown —
+`dashboard.md` lists that correspondence.
+
+```
+pag ir      <classes> [--method M] [--cfg]            what the front end produced
+pag run     <classes> [-- args...]                    execute, report locations visited
+pag analyze --domain <jar> --classes <dir> --at M:L   verdict and invariant map
+pag check   --domain <jar> --classes <dir> --at M:L   analyze, then try to falsify
+```
+
+`--at main:14` is the `Reachable(method, line)` query. `--json` works on all of
+them; human-readable text is the default. `--config <file>` supplies domains and
+limits in bulk instead of flags, for campaign use.
+
+One later subcommand, `score` (proof count over the scoring corpus), once there
+is a corpus. Nothing else: **`pag` does only what can be done without a network
+or a credential.** Anything that talks to a model lives in the campaign driver
+(§12), which drives `pag` through these exit codes rather than linking against
+it.
+
+### `analyze` prints the invariant map
+
+With no dashboard this is the only way to see what a domain did, so the map is
+the default output rather than something behind a flag:
+
+```
+$ pag analyze --domain domains/interval/out/interval.jar \
+              --classes probes/c07/out --at main:14
+
+classes   probes/c07/out            9 locations · profile int-main-v1
+domain    interval-ref 0.1.0        api 0.3.1
+query     Reachable(main, 14) → ℓ7
+
+  ℓ0  i0 = 2147483647     ⊥
+  ℓ1  i1 = 0              ⊥
+  ℓ2  ⟨loop head⟩         i0 ↦ [2147483647,+∞)  i1 ↦ [0,3]   ▽
+  ℓ3  i0 = i0 + 1         i0 ↦ [2147483647,+∞)  i1 ↦ [0,2]
+  ℓ4  i1 = i1 + 1         i0 ↦ [2147483648,+∞)  i1 ↦ [0,2]
+  ℓ5  assume !(i1 < 3)    i0 ↦ [2147483647,+∞)  i1 ↦ [3,3]
+  ℓ7  assume i0 < 0       ⊤                                  ← target
+  ℓ8  return              ⊤
+
+worklist    34 iterations · widened at ℓ2 · 41ms
+certified   9/9 edges inductive
+entry       I(ℓ0) = ⊥
+
+REFUTED
+```
+
+`--record full` additionally writes the derivation graph (§8) and, on an
+`Alarm`, renders a `CandidateTrace` from the entry to the query. On an
+`Inconclusive` the report names the `Incomplete` case and how many locations
+were left `Unexplored`.
+
+### `check` is the reachability check
+
+The whole of §9 in one invocation, and what Phase 5's done-when exercises:
+
+```
+$ pag check --domain domains/interval/out/gen-04.jar \
+            --classes probes/c07/out --at main:14
+
+analysis    REFUTED            34 iterations · 41ms
+execution   REACHED-14         instrumented copy · 12ms
+
+UNSOUND — the domain refuted main:14, but the program reaches it
+reaching run   probes/c07/Probe.java
+```
+
+### Exit codes are the agent-facing contract
+
+The generator and adversary drivers script these, so they must not have to parse
+prose:
+
+| code | meaning |
+| --- | --- |
+| 0 | completed; `Refuted` or `Alarm`, nothing contradicted |
+| 1 | usage or I/O error |
+| 2 | profile violation — the program did not load (§5.2) |
+| 3 | **unsound** — a reaching run contradicted a refutation |
+| 4 | inconclusive — `IterationLimit` or `Deadline` |
+| 5 | domain failure — generated code threw or hung |
+
+4 and 5 are separate because they call for opposite responses: 4 says raise the
+budget, 5 says the domain is broken and the generator needs a stack trace.
+
+## 12. The campaign driver — a separate codebase
+
+The outer loop is **not part of the engine and not a `pag` subcommand.** It is a
+separate codebase that drives `pag` through subprocesses, reading exit codes and
+`--json`. Nothing is shared at the source level.
+
+**Campaign** keeps its meaning as the unit of work: one run of the loop over a
+set of domains with a fixed profile, api version, corpora and agent configs.
+Everything a campaign produces records which campaign produced it, because
+changing any of those inputs makes results incomparable.
+
+### Why separate
+
+- **Hangs.** A generated `transfer` in a tight loop cannot be killed from inside
+  the engine's JVM (§7). Killing a process can. This alone decides it.
+- **It is the crash-prone part.** Orchestration, HTTP clients, retries, rate
+  limits, partial failures. That code churns and falls over; the engine should
+  not inherit its blast radius.
+- **The engine stays offline.** No API clients, no credentials, no network — so
+  Phase 9's isolation is a property of the engine rather than something enforced
+  around it, and `pag` stays a pure function of its inputs.
+- **The trusted part stays small.** Engine correctness is what the project rests
+  on. Keeping an LLM orchestrator out of it keeps the auditable surface honest.
+
+### What it does
+
+Generate a domain → build it → `pag analyze` over the scoring corpus → hand it
+to the adversary → `pag check` each candidate → collect reaching runs → feed
+failures back → repeat. Plus `mutants`: score an adversary against the seeded
+mutant corpus, which needs the adversary and therefore lives here too.
+
+### What it has to survive
+
+| failure | response |
+| --- | --- |
+| `pag` exits non-zero | read the code (§11) and route: 2 is a bad probe, 3 a rejection, 5 a broken domain |
+| `pag` hangs | kill the process after a wall-clock bound; that is the real timeout |
+| model API fails or rate-limits | retry with backoff; do not lose the attempt |
+| the driver itself crashes | resume — a campaign runs for hours over paid APIs, so progress must be durable, not in memory |
+
+Durable progress is the requirement that shapes the rest of its design, and it
+is the same need as the deferred dashboard's event store. A directory of JSON
+per attempt is probably enough to start; SQLite behind the same interface is the
+upgrade.
+
+### Written in Scala 3
+
+Decided: one language on the human-written side. The only source-level coupling
+to the engine is `engine/results` (§13); everything else goes through
+subprocesses and exit codes.
+
+## 13. Serialization
+
+Results cross a process boundary (§12) and are stored durably, so the format is
+a real decision. Two requirements pull against each other: **readable, because
+there is no dashboard and `cat` is how a campaign gets debugged**, and **fast,
+because Historia's serialization got annoyingly slow.** Both are satisfiable.
+
+### One codec set, two wire formats, chosen in config
+
+```hocon
+serialization {
+  format = "json"      # or "cbor"
+}
+```
+
+[Borer](https://github.com/sirthias/borer) is the fit: the same `Encoder` and
+`Decoder` instances serve JSON and CBOR, with Scala 3 derivation for case
+classes and sealed traits and no code generation. Switching is a different entry
+point on the same codecs, not a different type hierarchy.
+
+`pag dump <file>` prints any stored record as JSON whatever it was written as,
+so choosing CBOR never costs inspectability — it only moves it behind a command.
+
+### Why not protobuf
+
+Protobuf does give both formats, since ScalaPB can project messages to JSON. The
+objections are the other costs: a code-generation step, a second set of
+generated types to convert to and from, and a `.proto` schema as the contract
+when a small shared module (below) already serves. Its wins — cross-language,
+strict long-lived schema evolution, streaming very large payloads — are not in
+play. Revisit if a non-JVM component appears.
+
+### What actually crosses, and where speed matters
+
+The surface is small on purpose. **The IR never crosses the boundary:** the
+driver passes paths and a query, and the engine loads the program itself.
+
+| payload | size | format matters |
+| --- | --- | --- |
+| `AnalysisResult` | a verdict and four scalars | no |
+| `CheckResult`, attempt records | small, one per query | no |
+| derivation graph at `Full` | O(worklist iterations) | **yes** |
+
+So the format switch earns its keep in exactly one place. That is also where
+Historia's slowness lived — writing every path node — which is why recording
+levels (§8) are the first lever and the format is the second.
+
+**Default to JSON and switch on measurement, but build the seam now.** Designing
+for two formats costs one indirection; retrofitting it means touching every call
+site, the same argument as putting the recorder interface in at Phase 4.
+
+### The shared contract
+
+`engine/results` — a small module holding the result ADTs and their codecs,
+depended on by both the engine and `campaign/`. One definition, no schema to
+keep in sync. Deliberately *not* `engine/api`, which is what generated domains
+compile against and should not accumulate result types.
+
+Two rules learned from Historia, where 147 codec declarations were spread across
+thirty files with **27 `RW.merge` sites enumerating sum types by hand**:
+
+- **Codecs live in one object**, never scattered as implicits. Order-dependent
+  resolution across files is most of what made that unpleasant.
+- **Derive sums, never enumerate them.** Scala 3's `Mirror` derivation covers
+  sealed hierarchies, so adding a case cannot silently break a codec.
+
+Every record carries a versioned envelope — engine version, api version, profile
+name, campaign id — which is the actual compatibility need and is independent of
+format.
+
+**One gotcha.** The IR types are Java records and sealed interfaces, which Scala
+3 derivation does not reach. If the derivation graph is ever serialized rather
+than rendered as text, `Loc` and `Step` need hand-written codecs. Two by hand is
+fine; twenty-seven is what went wrong before.
+
+## 14. Phases
 
 Each phase names a deliverable and a done-when that is a runnable check.
 
@@ -682,8 +920,9 @@ own module with the no-`soot.*`-elsewhere build rule; the language profile and
 its validator; lowering from source IR to `Cfg`; and the Stage 1 interpreter.
 Most of the work is separating IR translation from the APK, callback and
 class-hierarchy machinery `SootWrapper` currently mixes into it.
-*Done when:* a hand-written `.java` probe compiles, loads through
-`SootIrProvider`, and its visited-location sequence matches a fixture — **and** a
+*Done when:* `pag ir` and `pag run` work — a hand-written `.java` probe
+compiles, loads through `SootIrProvider`, and its visited-location sequence
+matches a fixture — **and** a
 probe containing a second method, a field reference, or a method call is
 rejected at load with a message naming the construct and the profile setting
 that would enable it — **and** the build fails if any module
@@ -695,25 +934,28 @@ generator, so write it the way generated code should look.
 *Done when:* the five transfer cases in `README.md` pass as unit tests.
 
 ### Phase 4 — the analysis engine
-Worklist, invariant map, widening, step limit, and the certifier as a separate
+Worklist, invariant map, widening, iteration limit, and the certifier as a separate
 pass. The recorder interface (§8) with `NullRecorder` only — the graph comes
 next, but the call sites go in now so they are never retrofitted.
-*Done when:* a program whose target is unreachable gets `Refuted` and one whose
-target is reachable gets `Alarm` — **and** a test that deliberately corrupts the
-worklist result still cannot produce `Refuted`, because certification is
-independent.
+*Done when:* `pag analyze` prints the map in §11's format; a program whose
+target is unreachable gets `Refuted` and one whose target is reachable gets
+`Alarm`; a domain that throws in `transfer` yields
+`Inconclusive(DomainFailure(...))` rather than taking the run down; and a test
+that deliberately corrupts the worklist result still cannot produce `Refuted`,
+because certification is independent.
 
 ### Phase 4.5 — the derivation graph
 `Full` recording, the reverse view, `CandidateTrace` extraction, and a text
 renderer. `Terminal` level and reconstruct-from-`I` can wait until something is
 slow.
 *Done when:* an `Alarm` produces a trace from `ℓ_init` to the query that a human
-can read; a `Refuted` query shows every branch ending in `Bottom`, `Subsumed` or
-`Dropped` with no branch unaccounted for; and a deliberately broken `entails`
+can read; a `Refuted` query shows every branch ending in `Bottom` or `Subsumed`, with none
+left `Unexplored`; and a deliberately broken `entails`
 surfaces as `Uncertified` at the edge that failed.
 
 ### Phase 5 — the probe and the verdict
-`ReachingRun`, the runner, and the rejection path with a serialized counterexample.
+`pag check`, `ReachingRun`, the runner, and the rejection path with a
+serialized counterexample. Exit codes as §11.
 *Done when:* an end-to-end test using a deliberately broken transfer function
 produces a refutation, a hand-written reaching run, and a rejection. This is the first
 point at which the whole idea is demonstrated, with a human standing in for the
@@ -763,14 +1005,16 @@ cannot read `engine/core`; an adversary container can read a domain but not
 write it.
 
 ### Phase 10 — the generator agent
-Driver: generate → build → analyze on a smoke corpus → report. Bounded retries,
-every attempt logged with api version, corpus hash, and outcome.
+First code in `campaign/` (§12): generate → build → `pag analyze` on a smoke
+corpus → report. Bounded retries, durable per-attempt records, every attempt
+logged with api version, corpus hash and outcome.
 *Done when:* a small model produces a domain that compiles, loads, and refutes at
 least one target, working from the contract and the reference example alone.
 
 ### Phase 11 — the adversary agent
-Driver: read domain → query `analyze` for refuted targets → propose probes →
-run → report. Score against the Phase 8 mutants first, then turn it on generated
+In `campaign/`: read domain → `pag analyze` for refuted targets → propose probes
+→ `pag check` → report. Also `mutants`, which scores an adversary against the
+seeded corpus and needs the adversary, so it belongs here rather than in `pag`. Score against the Phase 8 mutants first, then turn it on generated
 domains.
 *Done when:* the adversary's kill rate on mutants is reported, and it finds at
 least one genuine reaching run against a generated domain.
@@ -781,21 +1025,23 @@ disjunction; the forward flow-insensitive phase; and the Future-ideas triggers i
 `README.md` — cost, and behavior that cannot be driven because it runs through a
 framework, library, or the OS.
 
-## 12. What each phase de-risks
+## 15. What each phase de-risks
 
 - 1 and 3: is the eight-method contract expressible enough to write a real
   domain against?
 - 4: does certifying the settled map actually work, independent of the worklist?
 - 4.5: can we see why a query came out the way it did? Historia's experience is
   that this is where the debugging time goes, and retrofitting it is painful.
-- 5: does the central idea hold end to end, with a human as adversary?
+- 5: does the central idea hold end to end, with a human as adversary — and are
+  the exit codes a contract an agent driver can actually script against?
 - 6: does the isolation boundary survive JVM classloading?
 - 8: is the adversary strong enough for its silence to mean anything? **This is
   the phase most likely to change the design, and a crude version of it is worth
   pulling forward into Phase 5.**
-- 10 and 11: is the contract legible enough for a small model, in both roles?
+- 10 and 11: is the contract legible enough for a small model, in both roles —
+  and does the subprocess boundary actually hold when a generated domain hangs?
 
-## 13. Open questions
+## 16. Open questions
 
 1. **Adversary budget and stopping rule.** How long does an adversary search
    before a domain is provisionally accepted? Phase 8's calibration should set
@@ -810,8 +1056,10 @@ framework, library, or the OS.
    expensive after Phase 3.
 5. **Scoring corpus scope.** Shared across domains, or per-domain? Only a shared
    corpus makes proof counts comparable.
-6. **Alarm vs. Exhausted in scoring.** A domain that times out is not the same as
-   one that finishes and cannot prove. Decide whether both count against it.
+6. **Aggregating `DomainFailure`.** One throw is a per-query `Inconclusive`, but
+   a domain that throws on half the corpus is broken and should be rejected like
+   an unsound one — with a stack trace instead of a reaching run. That is a
+   campaign-level policy, not a verdict; where the threshold sits is open.
 7. **Java version floor.** Pinned at 21 for record patterns and
    pattern-matching-for-switch, which give the model exhaustiveness checking on
    the IR.
@@ -822,13 +1070,16 @@ framework, library, or the OS.
 9. **Front-end scope.** `SootIrProvider` v1 reads plain class files. Whether it
    should also accept a jar or a directory tree matters only for the scoring
    corpus, and can wait.
-11. **The other query forms.** `Reachable` is deliberately the only one.
+10. **The other query forms.** `Reachable` is deliberately the only one.
     Historia's `ReceiverNonNull`, `CallinReturnNonNull`, `MemoryLeak` and
     `InitialQueryWithStackTrace` had grown messy, and the plan is to re-engineer
     them rather than port them. Until then the reduction in `README.md` covers
     the gap: a question about state becomes a question about a location, by
     guarding a fresh location with an `assume`. Keeping `Query` a sealed trait
     with one case is the only concession made to that future.
+11. **Campaign resumption granularity.** Per generated domain, per query, or per
+    agent call? Finer means less lost work and more bookkeeping; a campaign runs
+    for hours over paid APIs, so this is not cosmetic.
 12. **Recording level defaults.** `Full` is right while building, `Off` right
     for campaigns, and it is not obvious which the adversary should use — it
     inspects refutations, and a trace may be exactly the hint it needs to

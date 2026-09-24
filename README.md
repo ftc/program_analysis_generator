@@ -42,12 +42,12 @@ An analysis here is assembled from two layers.
   in full, and accepted only once an adversary has failed to break it.
 
 Nothing in the domain is written by a human, and nothing in the domain is
-trusted. The only soundness probe is whether a location the analysis proved
+trusted. The only soundness check is whether a location the analysis proved
 unreachable can be made to execute.
 
 The property under test is **soundness**. Precision and termination are
 deliberately outside the contract: a domain that proves nothing is sound and
-useless, and a widening that never converges is caught by a step limit rather
+useless, and a widening that never converges is caught by an iteration limit rather
 than by a soundness check. Both are quality problems, measured separately.
 Leaving them out keeps the contract small enough to be worth generating
 against.
@@ -255,7 +255,7 @@ and none of it mentions a concrete state:
 | `join`, `widen` | merging at control-flow joins and loop heads |
 | `transfer(c, post)` | the backward abstract semantics |
 
-### The soundness probe
+### The reachability check
 
 A refutation is a falsifiable claim about the real world: *no execution reaches
 `ℓ_target`*. One program that reaches it refutes the refutation.
@@ -283,7 +283,7 @@ ideas.
 
 We call such a program a **reaching run**: a program, its arguments, and the
 location it gets to. It is the only artifact in this project that proves
-anything, and two of its properties are worth being explicit about.
+anything, and two properties of the check are worth being explicit about.
 
 **It runs one way.** Printed ⟹ reachable ⟹ the refutation was unsound. *Not*
 printing proves nothing — the input may simply not have triggered it. So a

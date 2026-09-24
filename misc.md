@@ -40,7 +40,7 @@ rather than a metric, since row 4 is otherwise unvalidated.
 
 ### Update 2026-09-23 — the table above describes the superseded design
 
-Under the reachability probe now in `README.md`, this collapses to two rows:
+Under the reachability check now in `README.md`, this collapses to two rows:
 
 | # | Claim | How established |
 | --- | --- | --- |
