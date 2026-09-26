@@ -62,13 +62,44 @@ In-process Java keeps `S` a plain JVM object passed by reference. If a Python
 domain is ever wanted it becomes one bridge implementation, not a cost the whole
 contract pays.
 
+### The trust base
+
+A verdict rests on a small amount of human-written code that nothing else in
+the loop checks for it (`misc.md` §1 has the argument):
+
+| code | where | the claim it carries |
+| --- | --- | --- |
+| loading, profile check, lifting, lowering | `frontend-soot`, `core` | the `Cfg` a domain analyses means what the bytecode does |
+| `instrumentReach` | `frontend-soot` | a marker prints exactly when its `Loc` is reached |
+| Stage 1 interpreter, run and marker check | `harness` | the executor implements the intended semantics |
+| certifier | `core` | only a certified map yields `Refuted` |
+
+A defect here does not show up as a bad domain; it shows up as a good domain
+rejected or a bad one accepted, long after the defect was written, and it is
+the most frustrating kind of bug this project can have. So this code is held to
+a higher bar than the rest, as a standing rule:
+
+- **Exhaustively unit tested.** Every row of every rule table — each lifting
+  rewrite (§5.7), each lowering case (§5.3), each profile rule with a passing
+  and a failing fixture (§5.2) — has its own test, written with the code.
+- **Reviewed by Shawn before it merges.** Changes to these modules are called
+  out as trust-base changes, not folded into larger diffs.
+- **Cross-checked end to end.** Stage 1 and Stage 2 agreeing on a corpus, with
+  markers at every location (Phase 2b), is a standing test that runs in CI.
+
+*Decided — Shawn, 2026-09-26.* `probe-lib`'s `Rand` is deliberately *not* in
+this table: it can break replay, but not a verdict (`misc.md` §1).
+
 ## 3. Repository layout
 
 ```
 engine/                    sbt multi-project, human-only
   api/                     contract + IR. Pure Java, no Scala dependency.
+  probe-lib/               Pure Java, no dependencies. pag.probe.Rand (§5.6),
+                           the only library a probe may call
   frontend-soot/           Scala 3. the ONLY module allowed to import soot.*
-  core/                    Scala 3. worklist, invariant map, certifier
+  core/                    Scala 3. profile check, lowering, worklist,
+                           invariant map, certifier
   harness/                 Scala 3. executor, probe runner, verdict, scoring,
                            mutation corpus, agent drivers
   results/                 Scala 3. result ADTs + codecs, shared with campaign/ (§13)
@@ -80,7 +111,7 @@ domains/
 campaign/                  the outer loop. Separate codebase, drives pag by
                            subprocess; never linked against the engine (§12)
 probes/
-  <campaign>/              adversary output: programs, arguments, verdicts
+  <campaign>/              adversary output: programs, inputs, verdicts
 corpora/
   scoring/                 programs used to measure proof count
   mutants/                 deliberately unsound domains, for calibration
@@ -90,9 +121,10 @@ config/                    run configurations
 docker/                    compose files and mount definitions
 ```
 
-`engine/api` is an sbt subproject with `crossPaths := false` and
-`autoScalaLibrary := false`, so the published jar is plain Java with no Scala
-coupling and no binary-compatibility constraint on domains.
+`engine/api` and `engine/probe-lib` are sbt subprojects with
+`crossPaths := false` and `autoScalaLibrary := false`, so the published jars are
+plain Java with no Scala coupling and no binary-compatibility constraint on
+domains or probes.
 
 Domains are a sibling of `engine/` rather than a subdirectory: they build with a
 different toolchain, mount differently, and keeping them outside means the
@@ -120,7 +152,7 @@ parked in `dashboard.md`. The CLI is the interface for now.
 | `WitnessedQry` | folded into `Verdict.Alarm` plus a `CandidateTrace` |
 | `ExecutorConfig` constructing the interpreter | `config/*.conf` plus `EngineConfig` |
 | step limits and timeouts | kept as an **iteration limit**, surfaced as `Incomplete` |
-| `ApproxMode` / nine `DropQryPolicy` variants | **dropped** — under-approximate machinery (§8); weakening belongs to the domain |
+| `ApproxMode` / nine `DropQryPolicy` variants | **dropped** — the engine never abandons a state, and weakening belongs to the domain (§7) |
 
 Drop outright: APKs, Android, framework models and callback handling; Z3 and the SMT encoding
 (entailment is a domain method — a domain may use a solver internally, the
@@ -157,6 +189,17 @@ language later is a matter of enabling constructs rather than migrating the IR.
 What v1 actually accepts is a *profile* — a config setting — not a property of
 the types.
 
+A program passes through four stages, each its own pass:
+
+```
+  load (§5.5) ──> profile check (§5.2) ──> lifting (§5.7) ──> lowering (§5.3) ──> Cfg
+  bytecode → IR    is it in the subset?     BigInteger calls     branches → assume,
+                                            → arithmetic         calls → Call
+```
+
+The profile check and lifting can each be switched off in config; loading and
+lowering cannot.
+
 ### 5.1 The source IR
 
 Mirrors `ir/IRWrapper.scala`, trimmed of what we will not model for a long time
@@ -166,21 +209,29 @@ representable; §5.2 decides what is *loadable*.
 ```java
 package pag.api.ir;
 
-public record Loc(String method, int index) {}
+/** Where a state lives. Mirrors Historia's Loc; the Internal prefix leaves room
+    for Callback*/Callin* locations when framework modelling returns. */
+public sealed interface Loc {
+    record InternalMethodEntry(String method)                implements Loc {}  // Historia: InternalMethodInvoke
+    record AppLoc(String method, int index, boolean isPre)   implements Loc {}  // before/after command `index`
+    record InternalMethodExit(String method)                 implements Loc {}  // Historia: InternalMethodReturn
+}
 
 public sealed interface Cmd {
     record Assign(LVal target, RVal source, Loc loc)  implements Cmd {}
     record Goto(RVal cond, Loc trueLoc, Loc loc)      implements Cmd {}  // conditional
     record Nop(Loc loc)                               implements Cmd {}
     record Return(Optional<RVal> value, Loc loc)      implements Cmd {}
-    record Invoke_(Invoke call, Loc loc)              implements Cmd {}  // disabled in v1
+    record InvokeStmt(Invoke call, Loc loc)           implements Cmd {}  // result discarded
     record Throw(Loc loc)                             implements Cmd {}  // disabled in v1
 }
 
 public sealed interface RVal {
-    record IntConst(int v)                            implements RVal {}
+    record IntConst(BigInteger v)                     implements RVal {}  // int, long and lifted constants
     record BoolConst(boolean v)                       implements RVal {}
     record Binop(RVal l, BinOp op, RVal r)            implements RVal {}
+    record Invoke(InvokeKind kind, String declaringClass, String name,
+                  Optional<RVal> receiver, List<RVal> args) implements RVal {}  // v1: listed callees only
     record Cast(String type, RVal v)                  implements RVal {}  // disabled in v1
     record NewObject(String className)                implements RVal {}  // disabled in v1
     record StringConst(String v)                      implements RVal {}  // disabled in v1
@@ -188,55 +239,121 @@ public sealed interface RVal {
     record ArrayLength(Local l)                       implements RVal {}  // disabled in v1
 }
 
+public enum InvokeKind { Static, Virtual, Special, Interface }
+
 public sealed interface LVal extends RVal {
     record Local(String name, String type)                           implements LVal {}
-    record Param(String name, String type)                           implements LVal {}  // disabled in v1
+    record Param(int index, String type)                             implements LVal {}  // v1: main's args binding only
     record This(String className)                                    implements LVal {}  // disabled in v1
     record Field(Local base, String declType, String name)           implements LVal {}  // disabled in v1
-    record StaticField(String declaringClass, String name)           implements LVal {}  // disabled in v1
+    record StaticField(String declaringClass, String name)           implements LVal {}  // v1: BigInteger constants only
     record ArrayRef(RVal base, RVal index)                           implements LVal {}  // disabled in v1
 }
 
-public enum BinOp { Mult, Div, Add, Sub, Lt, Le, Eq, Ne, Ge }
+public enum BinOp { Mult, Add, Sub, Lt, Le, Gt, Ge, Eq, Ne }
 
 public record Method(String name, List<Cmd> body) {}
 public record Program(List<Method> methods, Loc entry) {}
 ```
 
 `Goto` carries its own branch target, as in Historia. Fall-through is the next
-index in the method body.
+index in the method body. An unconditional jump is `Goto(BoolConst(true), …)`.
+
+`BinOp` has all six comparisons so that negating a branch condition during
+lowering (§5.3) is an operator flip — `¬(a ≤ b)` is `a > b` — rather than an
+operand swap that would make the printed CFG stop matching the source. Domains
+see all six as well: `Step.Assume` conditions are never normalized to a smaller
+set. *Decided — Shawn, 2026-09-26:* complexity goes to growing toward full Java,
+not to shrinking what a domain sees.
+
+`Invoke` is a faithful translation of a Jimple invoke expression, including its
+`InvokeKind` and, for instance calls, its receiver. The kind is a source-IR fact only: lowering erases it (§5.3), so
+the distinction between static, virtual and special dispatch never reaches a
+domain. A call whose result is used is an `Assign` with an `Invoke` source; one
+whose result is discarded is an `InvokeStmt`.
+
+Jimple begins every method that takes parameters with an identity statement,
+`r0 := @parameter0: java.lang.String[]` for `main`. It translates to
+`Assign(Local r0, Param(0, "java.lang.String[]"))`.
 
 ### 5.2 The language profile
 
-What the prototype accepts is declared in config and enforced at program load.
-Anything outside the profile is a **loading failure** naming the offending
-construct and the setting that would enable it — never a silent skip and never a
-`TopExpr`-style escape hatch.
+What the prototype accepts is declared in config and enforced by the **profile
+check**, a pass of its own in `core` that runs between loading (§5.5) and
+lowering (§5.3). Loading translates everything the IR can represent; the profile
+check decides what is *accepted*. Anything outside the profile is a **profile
+violation** naming the offending construct, its source line, and the setting
+that would enable it — never a silent skip and never a `TopExpr`-style escape
+hatch. The check reports every violation in a program, not just the first.
 
 ```hocon
 language {
-  name      = "int-main-v1"
-  methods   = ["main"]                                  # a second method fails to load
-  types     = ["int"]
-  commands  = ["Assign", "Goto", "Nop", "Return"]
+  enforce   = true                                      # false skips the profile check
+  lift      = true                                      # false skips lifting (§5.7)
+  name      = "bigint-main-v1"
+  methods   = ["main"]                                  # a second method is a violation
+  types     = ["java.math.BigInteger"]                  # plus compare temps (below)
+  commands  = ["Assign", "Goto", "Nop", "Return", "InvokeStmt"]
   lvals     = ["Local"]
-  rvals     = ["Local", "IntConst", "BoolConst", "Binop"]
-  operators = ["Add", "Sub", "Mult", "Div", "Lt", "Le", "Eq", "Ne", "Ge"]
-  intWidth  = "unbounded"                               # or 32 for real Java semantics
+  rvals     = ["Local", "IntConst", "Binop", "Invoke", "StaticField"]
+  operators = ["Lt", "Le", "Gt", "Ge", "Eq", "Ne"]      # only on compare temps (below)
+  invokes   = ["Static", "Virtual"]
+  callees   = ["java.math.BigInteger.valueOf",
+               "java.math.BigInteger.add", "java.math.BigInteger.subtract",
+               "java.math.BigInteger.multiply", "java.math.BigInteger.negate",
+               "java.math.BigInteger.compareTo", "java.math.BigInteger.equals",
+               "pag.probe.Rand.randInt"]               # §5.6; any other call is a violation
+  staticFields = ["java.math.BigInteger.ZERO", "java.math.BigInteger.ONE",
+                  "java.math.BigInteger.TWO", "java.math.BigInteger.TEN"]
+  mainArgs  = "unread"                                  # any read of main's args is a violation
 }
 ```
 
-So v1 is *single-method, int-locals, conditional-goto Java* — a genuine subset,
-not a lookalike. Adding fields, calls, or a second method later is a config
-change plus whatever lowering and domain support it implies, not an IR rewrite.
+So v1 is *single-method, `BigInteger`-locals, conditional-goto Java with one
+source of nondeterminism* — a genuine subset, not a lookalike. Every value is a
+mathematical integer, so there is no overflow to model and no wraparound for an
+adversary to exploit: `BigInteger` never wraps, and the JVM agrees with the
+analysis's semantics by construction. `divide`, `mod`, `pow` and every other
+`BigInteger` method are violations, which also keeps division by zero out.
+Adding fields, more callees, or a second method later is a config change plus
+whatever lifting, lowering and domain support it implies, not an IR rewrite.
 
-`intWidth` settles the wraparound question raised against the previous draft.
-Start at `unbounded` so Phases 0–5 are about whether the loop works at all, then
-flip to `32` as a deliberate difficulty step. That flip is worth its own
-milestone: a generated interval domain will very likely treat `x + 1` as
-monotone and miss that `Integer.MAX_VALUE + 1` wraps, which is a realistic,
-short-to-trigger unsoundness and therefore an excellent first genuine target for
-the adversary. **[decide]** whether to reach it before or after Phase 10.
+*Decided — Shawn, 2026-09-24:* `BigInteger` only, replacing `int` and the
+`intWidth` setting. Programs over Java `int` with 32-bit wraparound are a
+possible later profile and a deliberate difficulty step — a generated interval
+domain will very likely miss that `Integer.MAX_VALUE + 1` wraps — but they need
+their own lifting and are out of scope for now.
+
+Three rules need more than a list membership test:
+
+- **`methods`** counts user methods. `javac` generates a default constructor
+  `<init>` for every class; the check ignores it when it is the generated
+  `super()` call and nothing else, and counts it otherwise.
+- **`mainArgs = "unread"`** permits exactly one use of `main`'s parameter: the
+  identity binding `r0 := @parameter0` that Jimple always emits. Any other
+  occurrence of `r0` — `args.length`, `args[0]`, passing it on — is a
+  violation. Programs get their inputs from `Rand` (§5.6), never from `args`.
+- **`types`** applies to every local except that one `args` local and the
+  *compare temps*: an `int` local assigned the result of `compareTo`, or a
+  `boolean` local assigned the result of `equals`. Each compare temp must be
+  used exactly once, by the `if` that immediately follows it, compared against
+  `0`. Any other use — `int c = a.compareTo(b); if (c < 0 && d)` — is a
+  violation rather than something lifting tries to handle. This is the shape
+  `javac` emits for `if (a.compareTo(b) < 0)`, and lifting (§5.7) depends on it.
+- **`staticFields`** is read-only: a `StaticField` may appear only as the source
+  of an `Assign`, and only for the listed constants.
+- **`null`** is never accepted, and neither is `new BigInteger(...)`; the only
+  ways to make a value are `valueOf`, the four constants, arithmetic, and
+  `randInt`.
+
+**`enforce = false`** skips the pass entirely, for inspecting what the front end
+produced from a program outside the subset (`pag ir` on an arbitrary class).
+What happens downstream is then unspecified: lowering still turns the `args`
+binding into a no-op (§5.3), so a program that reads `args` hands the domain a
+local that was never assigned, and a disabled construct may reach a domain that
+was never asked to handle it. The profile check is what makes the analysis of a
+program meaningful; turning it off is for looking, not for verdicts. **[decide]**
+whether `analyze` and `check` should refuse to run with `enforce = false`.
 
 Domains are checked against the profile too: the load-time smoke test (Phase 6)
 exercises every enabled command and operator, so enabling a construct that an
@@ -254,21 +371,77 @@ A `Goto(cond, trueLoc)` at `ℓ` with fall-through `ℓ_next` lowers to
   ℓ —assume(cond)→ trueLoc        ℓ —assume(!cond)→ ℓ_next
 ```
 
-so a domain only ever sees two command forms, and branching never becomes its
-problem:
+so branching never becomes a domain's problem. A domain sees three command
+forms; a fourth, `Skip`, is handled by the engine alone:
 
 ```java
 public sealed interface Step {
-    record Assign(LVal target, RVal source) implements Step {}
-    record Assume(RVal cond)                implements Step {}
+    record Assign(LVal target, RVal source)                       implements Step {}
+    record Assume(RVal cond)                                      implements Step {}
+    record Call(Optional<Local> target, String callee, List<RVal> args) implements Step {}
+    record Skip()                                                 implements Step {}  // engine-only identity
 }
 
 public record Transition(Loc from, Step step, Loc to) {}
-public record Cfg(List<Transition> transitions, Loc init) {}
+public record Cfg(List<Transition> transitions, Loc init, Loc exit) {}
 ```
 
+Lowering runs after lifting (§5.7), so with lifting on it never sees a
+`BigInteger` call — only arithmetic, comparisons, and `randInt`.
+
+**Locations follow Historia.** Each command `i` in method `m` has two locations,
+`pre(i) = AppLoc(m, i, true)` and `post(i) = AppLoc(m, i, false)`, and the method
+has an `InternalMethodEntry(m)` and an `InternalMethodExit(m)`. A command's
+effect is the edge `pre(i) → post(i)`; control flow between commands is an
+unlabelled `skip` edge. `ℓ_init` is `InternalMethodEntry(main)` and `Cfg.exit`
+is `InternalMethodExit(main)`.
+
+| source IR at `i` | transitions |
+| --- | --- |
+| *(method entry)* | `InternalMethodEntry(m) —skip→ pre(0)` |
+| `Assign(x, e)`, `e` not an `Invoke` | `pre(i) —x := e→ post(i) —skip→ pre(i+1)` |
+| `Assign(x, Invoke(_, C, n, recv, args))` | `pre(i) —call(x, "C.n", recv ++ args)→ post(i) —skip→ pre(i+1)` |
+| `InvokeStmt(Invoke(_, C, n, recv, args))` | `pre(i) —call(—, "C.n", recv ++ args)→ post(i) —skip→ pre(i+1)` |
+| `Assign(r0, Param(0, _))` in `main` | `pre(i) —skip→ post(i) —skip→ pre(i+1)` |
+| `Nop` | `pre(i) —skip→ post(i) —skip→ pre(i+1)` |
+| `Goto(true, t)` | `pre(i) —skip→ post(i) —skip→ pre(t)` |
+| `Goto(c, t)` | `pre(i) —skip→ post(i)`, then `post(i) —assume(c)→ pre(t)` and `post(i) —assume(¬c)→ pre(i+1)`, `¬` flipping the operator |
+| `Return` | `pre(i) —skip→ post(i) —skip→ InternalMethodExit(m)` |
+
+`skip` is `Step.Skip`, a fourth `Step` case that the engine handles itself as
+the identity: it never calls `transfer` on it, so domains still implement three
+forms. `[edge-inductive]` over a `skip` edge is `entails(I(ℓ'), I(ℓ))`. The
+branch `assume`s sit on the edges *out of* `post(i)`, as in Historia, where
+`resolveSuccessors` from the post-location of an `If` picks the target.
+
+Why keep `isPre` when v1 could do with one location per command: it is what
+lets calls slot in later without renumbering. A call at `i` will become
+`pre(i) → InternalMethodEntry(callee)` and `InternalMethodExit(callee) → post(i)`,
+so the call site's before and after are distinct locations with the callee
+between them — the shape Historia's `ControlFlowResolver` already has. *Decided —
+Shawn, 2026-09-24.*
+
+**Queries and markers use `pre`.** `findLine` resolves a line to the `pre`
+locations of its commands, and `instrumentReach` prints before the command's
+first bytecode unit, which is the `pre` location. `post` locations and the
+method entry/exit are addressable by the engine but not by `--at` in v1.
+
+`Step.Call` is where the invoke kind disappears: the callee is a plain qualified
+name with no dispatch kind, and a receiver, if any, becomes the first argument. Every callee a profile admits comes
+with a stated meaning in the contract's documentation, and the domain implements
+that meaning in `transfer`. With lifting on, v1 has one callee left by the time lowering runs,
+`pag.probe.Rand.randInt`,
+whose meaning is *any integer*: the backward transfer of `call(x, randInt)` frees
+`x` and constrains nothing else (§5.6). Receivers, argument binding and dispatch
+arrive with the profile setting that admits a second user method, and are a
+change to lowering rather than to `Step`.
+
+The `args` binding lowers to a no-op because `mainArgs = "unread"` guarantees
+nothing reads the local it binds. With `enforce = false` that guarantee is gone
+(§5.2).
+
 Initial constraints also lower to an `assume` on the entry transition, which is
-what makes `[refute]` in §6 a plain `isBottom` (README, "Programs, and why
+what makes `[refute]` in §7 a plain `isBottom` (README, "Programs, and why
 reachability is enough").
 
 ### 5.4 The domain interface
@@ -294,6 +467,9 @@ public interface Domain<S> {
 }
 ```
 
+- `transfer` handles all three `Step` forms. For `Call` it must recognise each
+  callee the active profile admits; the smoke test (Phase 6) calls it once per
+  admitted callee, so an unrecognised one fails at load.
 - `transfer` returns one state. A domain needing disjunction carries it inside
   `S`, with `join` as its union, so the engine never learns about it. **[decide]**
 - The obligations these methods must satisfy are real but unstated in code —
@@ -312,8 +488,13 @@ package pag.api.ir;
 
 /** The only way a program enters the system. */
 public interface IrProvider {
-    /** Methods found in the given compilation unit, already in api.ir form. */
-    List<Method> load(Path classesOrJar) throws ProfileViolation;
+    /**
+     * Methods found in the given compilation unit, already in api.ir form.
+     * Translates everything api.ir can represent; the profile check (§5.2)
+     * decides what is accepted. Throws only for bytecode api.ir cannot
+     * represent at all (switch, monitors, exception handlers).
+     */
+    List<Method> load(Path classesOrJar) throws Untranslatable;
 
     /** Source file and line for a Loc, for error messages and tooling. */
     Optional<SourceRef> sourceOf(Loc loc);
@@ -321,15 +502,27 @@ public interface IrProvider {
 ```
 
 `SootIrProvider` is the v1 implementation and lives alone in
-`engine/frontend-soot`, which is the only module with Soot on its classpath. The
-build fails if any other module references it, so replacing Soot later means
+`engine/frontend-soot`, which is the only module with Soot
+(`org.soot-oss:soot:4.7.1`, the latest stable release as of 2026-09) on its
+compile classpath. `cli` depends on it as `frontendSoot % "runtime->runtime"`
+and obtains the `IrProvider` through `ServiceLoader`, so neither `soot.*` nor
+`SootIrProvider` is visible to any other module at compile time. The rule is
+enforced by the compiler rather than by a lint, and replacing Soot later means
 writing a second `IrProvider` rather than auditing the analysis for leaks.
+
+Two Soot settings are load-bearing, not tuning. `G.reset()` before every load,
+because Soot's `Scene` is a process-wide singleton. And the `jb` phases
+`jb.dae` (dead-assignment elimination) and `jb.uce` (unreachable-code
+elimination) are **off**: the first deletes assignments to locals that are never
+read, the second deletes statements with no path to them — and a statement with
+no path to it is exactly what a reachability query may ask about. Either would
+mean the IR analysed is not the code executed, which §9 depends on.
 
 The cleanup that matters here is not cosmetic. Historia's `SootWrapper` is ~2150
 lines because it carries APK loading, callback resolution, class-hierarchy
 queries and framework modelling alongside the actual IR translation. For a
 single-main-method Java subset the translation itself is small; the work in
-Phase 2 is separating it from everything else rather than porting it.
+Phase 2a is separating it from everything else rather than porting it.
 
 **The adversary's output format falls out of this.** Since programs are read from
 class files, the adversary writes *Java source*, `javac` compiles it, and the
@@ -358,6 +551,93 @@ reached, so the instrumented copy and the original agree on the only question
 being asked. Several prints may fire; the runner only asks whether the marker
 appeared at all. Doing it in bytecode rather than in source is what lets the same
 mechanism work later on code we did not write.
+
+### 5.6 Nondeterminism
+
+A program with no input has exactly one execution, and a domain that tracks
+constants exactly proves every unreachable location in it. The abstraction
+collapses to concrete execution and nothing interesting is being tested. So v1
+programs get their input from one call:
+
+```java
+package pag.probe;
+
+public final class Rand {
+    /** The next input. The analysis knows nothing about the value returned. */
+    public static BigInteger randInt() { ... }
+}
+```
+
+`engine/probe-lib` holds this class and nothing else. It is human-written, part
+of the trust base, and small enough to read in one sitting.
+
+**The adversary chooses every value.** `-Dpag.inputs=10,-3,99999999999`
+supplies the values `randInt` returns, in order; they may be of any size. There
+is no random generator and no seed: the name says what the analysis may assume
+about the value, not how it is produced. A reaching run is therefore replayable
+by construction — its inputs *are* the list. When the list is used up,
+`randInt` throws, so a run never continues on a value nobody chose. An adversary
+that wants randomness asks its shell for a number and puts it in the list.
+*Decided — Shawn, 2026-09-26:* adversary-chosen values only; a seeded
+generator was considered and dropped as unneeded.
+
+**Why our own class.** The analysis matches the call by signature, so the
+signature should be one we own and never changes, and `probe-lib` has no
+dependencies so the Phase 9 containers stay JDK-only. The name avoids
+`Instrumentation`, which collides with `java.lang.instrument.Instrumentation`
+and with our own use of *instrument* for `instrumentReach`.
+
+**The meaning a domain implements.** `call(x, "pag.probe.Rand.randInt", [])`
+assigns `x` an arbitrary integer, so backward it frees `x` and leaves every
+other variable's constraint untouched — `README.md`'s `x := randInt()`.
+
+### 5.7 Lifting
+
+`BigInteger` arithmetic is method calls in bytecode. Lifting is the pass that
+turns them back into arithmetic, so a domain sees `y := x + 1` and
+`assume(y < z)` rather than `y = x.add(ONE)` and a `compareTo` result. It is a
+pass of its own in `core`, between the profile check and lowering, rewriting
+source IR to source IR.
+
+| source IR (from Jimple) | lifted |
+| --- | --- |
+| `r := BigInteger.valueOf(n)` | `r := n` |
+| `r := BigInteger.ZERO` / `ONE` / `TWO` / `TEN` | `r := 0` / `1` / `2` / `10` |
+| `r := a.add(b)` / `subtract` / `multiply` | `r := a + b` / `a - b` / `a * b` |
+| `r := a.negate()` | `r := 0 - a` |
+| `$i := a.compareTo(b)` then `if $i OP 0 goto t` | `nop` then `if a OP b goto t` |
+| `$z := a.equals(b)` then `if $z == 0 goto t` | `nop` then `if a ≠ b goto t` |
+| `$z := a.equals(b)` then `if $z != 0 goto t` | `nop` then `if a = b goto t` |
+| `r := Rand.randInt()` | unchanged; lowering makes it a `Call` |
+
+**Constant substitution.** After the rewrites above, a temp assigned a constant
+and used exactly once has the constant substituted at its use:
+`$r := 0; … if x <= $r` becomes `$r := 0; … if x <= 0`. The assignment stays in
+place, dead, so locations are unchanged. This matters because the analysis runs
+backward: without it a domain meets `x <= $r` before `$r := 0`, and a
+non-relational domain can use neither. Jimple forces the temp — call arguments
+must be locals or literals — so every `BigInteger` comparison with a literal
+would otherwise be lost. Only single-use temps assigned in the same basic block
+as their use are substituted; anything else is left alone. *Decided — Shawn,
+2026-09-26.*
+
+**Lifting never adds or removes a command.** A fused compare leaves a `Nop` where
+the temp was assigned, so every `Loc` still names the same bytecode unit it did
+after loading. `findLine`, `sourceOf` and `instrumentReach` all key on `Loc`,
+and that correspondence is what lets a marker in the executed class mean the
+location the analysis reasoned about.
+
+Lifting relies on the profile check having passed: it assumes every compare
+temp has exactly the one use the check enforces, and fails loudly — a bug, not
+a violation — if it finds otherwise.
+
+**`lift = false`** skips the pass. Lowering then turns every `BigInteger` call
+into a `Step.Call` with the receiver as first argument, static-field reads reach
+the domain as `StaticField` sources, and compare temps stay `int`/`boolean`
+locals. A domain for that setting must implement each `BigInteger` method as a
+callee, which is a much harder contract; the switch exists so the lifted and
+unlifted forms can be compared with `pag ir`, and so a later experiment can hand
+a generator the unlifted form deliberately.
 
 ## 6. Direction: goal-directed backward analysis
 
@@ -421,7 +701,7 @@ and §16 asks about adversary budget.
 signature `transfer(step, post) -> pre` does not prevent writing a forward
 transfer by mistake — it just makes the argument names the only clue. Whatever
 Phase 10 sends the generator has to state the direction, the reading of the
-triple, and at least one worked backward example. The five cases in `README.md`
+triple, and at least one worked backward example. The six cases in `README.md`
 exist partly for this.
 
 ## 7. The engine
@@ -480,6 +760,23 @@ property worth a test of its own (Phase 4).
 Note that `[refute]` is `isBottom` rather than an `excludesInit` method: the
 entry admits every store, because initial constraints lower to an `assume` on
 the entry transition (§5.3).
+
+**The engine never abandons a state.** Every state the worklist produces is
+kept until it is joined, widened, or found already covered; nothing is skipped
+to save time. Skipping a state would leave out executions that reach the
+target, and a proof over an incomplete search is not a proof. When the budget
+runs out the result is `Inconclusive`, never `Refuted`. *Decided — Shawn.*
+
+**A hang is not a `DomainFailure`.** `Deadline` is checked between worklist
+iterations, never inside a domain call, and a JVM thread cannot be safely
+stopped from outside. So a generated `transfer` stuck in `while (true) {}` is
+unkillable from inside `pag`; only the campaign driver killing the process
+stops it (§12). `DomainFailure` covers what the engine *can* observe: a throw,
+or a `null` return.
+
+**Weakening is entirely the domain's.** The engine cannot look inside `S`, so
+any loss of precision happens in the domain's `join` and `widen`, however the
+domain chooses. The engine has no weakening policy of its own.
 
 ## 8. The derivation graph
 
@@ -612,11 +909,11 @@ one.
 A reaching run is concrete and self-contained:
 
 ```scala
-final case class ReachingRun(source: Path, classes: Path, args: List[String], query: Reachable)
+final case class ReachingRun(source: Path, classes: Path, inputs: List[BigInt], query: Reachable)
 ```
 
 The analysis refutes "reachable on *any* input," so a reaching run names the
-specific arguments that get there. Verdict: run it; if `REACHED-<id>` appears on
+specific inputs `Rand.randInt` returns on the way there (§5.6). Verdict: run it; if `REACHED-<id>` appears on
 stdout, the domain is unsound.
 
 Because §5.5 reads the IR from a class file, the artifact analysed and the
@@ -625,22 +922,22 @@ no source-to-source translation between them, which is what the previous draft's
 two-stage executor was trying to work around.
 
 **Stage 1 — reference interpreter.** `engine/harness` interprets the `Cfg` and
-records visited locations. Fast, deterministic, no process launch, and useful
+records visited locations, answering each `randInt` call from the same input list,
+and stopping when it runs out, as `Rand` does. Fast, deterministic, no process launch, and useful
 for debugging. The executor here is our own code, so a disagreement with Stage 2
 is a bug in it.
 
 **Stage 2 — run the class file.** `IrProvider.instrumentReach` writes a copy of
 the classes that prints `REACHED-<id>` on arrival at the queried location; then
-`java -cp <copy> Probe <args>`, grep stdout for the marker. The instrumented copy
+`java -Dpag.inputs=<values> -cp <copy>:probe-lib.jar Probe`, grep stdout for the marker. The instrumented copy
 differs from the analysed one by a `println` that touches no local and no
 control flow, so the two agree on whether the location is reached. The executor
 is the JVM, so the evidence depends on nothing this project wrote beyond that
 insertion. This is the verdict of record; Stage 1 exists for speed and
 inspection, not for adjudication.
 
-With `intWidth = 32` the two stages agree by construction. With
-`intWidth = unbounded` they do not, so the Stage 1 interpreter must also use
-unbounded integers and the cross-check below only holds within `int` range.
+The two stages agree by construction: Stage 1 computes in `BigInt`, and the
+program computes in `BigInteger`, so neither wraps.
 
 Stage 2 is what makes the README's claim ("does not depend on any component of
 this project being correct") literally true, so it should not be deferred
@@ -691,7 +988,7 @@ dashboard is built, so it has to carry what the dashboard would have shown —
 
 ```
 pag ir      <classes> [--method M] [--cfg]            what the front end produced
-pag run     <classes> [-- args...]                    execute, report locations visited
+pag run     <classes> [--inputs 3,-7,...]             execute, report locations visited
 pag analyze --domain <jar> --classes <dir> --at M:L   verdict and invariant map
 pag check   --domain <jar> --classes <dir> --at M:L   analyze, then try to falsify
 ```
@@ -711,29 +1008,44 @@ it.
 With no dashboard this is the only way to see what a domain did, so the map is
 the default output rather than something behind a flag:
 
+For this probe (lines 10–15 of `Probe.java`):
+
+```java
+BigInteger x = Rand.randInt();
+if (x.compareTo(BigInteger.ZERO) > 0) {
+    BigInteger y = x.add(BigInteger.ONE);
+    if (y.compareTo(BigInteger.ZERO) < 0) {
+        x = BigInteger.ZERO;                       // line 14: the target
+    }
+}
+```
+
 ```
 $ pag analyze --domain domains/interval/out/interval.jar \
               --classes probes/c07/out --at main:14
 
-classes   probes/c07/out            9 locations · profile int-main-v1
+classes   probes/c07/out            26 locations · profile bigint-main-v1
 domain    interval-ref 0.1.0        api 0.3.1
-query     Reachable(main, 14) → ℓ7
+query     Reachable(main, 14) → pre(10)
 
-  ℓ0  i0 = 2147483647     ⊥
-  ℓ1  i1 = 0              ⊥
-  ℓ2  ⟨loop head⟩         i0 ↦ [2147483647,+∞)  i1 ↦ [0,3]   ▽
-  ℓ3  i0 = i0 + 1         i0 ↦ [2147483647,+∞)  i1 ↦ [0,2]
-  ℓ4  i1 = i1 + 1         i0 ↦ [2147483648,+∞)  i1 ↦ [0,2]
-  ℓ5  assume !(i1 < 3)    i0 ↦ [2147483647,+∞)  i1 ↦ [3,3]
-  ℓ7  assume i0 < 0       ⊤                                  ← target
-  ℓ8  return              ⊤
+  entry                             ⊥
+  pre(1)   x = Rand.randInt()       ⊥
+  pre(4)   if x <= 0 goto 11        ⊥
+  pre(6)   y = x + 1                x ↦ (-∞,-2]
+  pre(9)   if y >= 0 goto 11        y ↦ (-∞,-1]
+  pre(10)  x = 0                    ⊤                  ← target
+  pre(11)  return                   ⊥
+  (post locations, nops and constant temps elided)
 
-worklist    34 iterations · widened at ℓ2 · 41ms
-certified   9/9 edges inductive
-entry       I(ℓ0) = ⊥
+worklist    12 iterations · no widening · 4ms
+certified   27/27 edges inductive
+entry       I(entry) = ⊥
 
 REFUTED
 ```
+
+The constants in each comparison reach the domain as constants because lifting
+substitutes them (§5.7).
 
 `--record full` additionally writes the derivation graph (§8) and, on an
 `Alarm`, renders a `CandidateTrace` from the entry to the query. On an
@@ -746,13 +1058,13 @@ The whole of §9 in one invocation, and what Phase 5's done-when exercises:
 
 ```
 $ pag check --domain domains/interval/out/gen-04.jar \
-            --classes probes/c07/out --at main:14
+            --classes probes/c07/out --at main:12 --inputs 5
 
-analysis    REFUTED            34 iterations · 41ms
-execution   REACHED-14         instrumented copy · 12ms
+analysis    REFUTED            9 iterations · 3ms
+execution   REACHED-12         inputs [5] · instrumented copy · 12ms
 
-UNSOUND — the domain refuted main:14, but the program reaches it
-reaching run   probes/c07/Probe.java
+UNSOUND — the domain refuted main:12, but the program reaches it
+reaching run   probes/c07/Probe.java  inputs [5]
 ```
 
 ### Exit codes are the agent-facing contract
@@ -764,13 +1076,15 @@ prose:
 | --- | --- |
 | 0 | completed; `Refuted` or `Alarm`, nothing contradicted |
 | 1 | usage or I/O error |
-| 2 | profile violation — the program did not load (§5.2) |
+| 2 | did not load — untranslatable bytecode (§5.5) or a profile violation (§5.2) |
 | 3 | **unsound** — a reaching run contradicted a refutation |
 | 4 | inconclusive — `IterationLimit` or `Deadline` |
-| 5 | domain failure — generated code threw or hung |
+| 5 | domain failure — generated code threw or returned null |
 
 4 and 5 are separate because they call for opposite responses: 4 says raise the
-budget, 5 says the domain is broken and the generator needs a stack trace.
+budget, 5 says the domain is broken and the generator needs a stack trace. A
+domain that *hangs* produces no exit code at all — `pag` never finishes, and the
+campaign driver's wall-clock kill is what reports it (§7, §12).
 
 ## 12. The campaign driver — a separate codebase
 
@@ -903,9 +1217,10 @@ fine; twenty-seven is what went wrong before.
 Each phase names a deliverable and a done-when that is a runnable check.
 
 ### Phase 0 — skeleton
-sbt multi-project for `engine`: `api` (pure Java), plus `core`, `harness`, `cli`
-in Scala 3. A `build.sh` for `domains/interval` running `javac` against a fixed
-classpath. CI runs both.
+sbt multi-project for `engine`: `api` and `probe-lib` (pure Java), plus
+`frontend-soot`, `core`, `harness`, `cli` in Scala 3, with `cli` depending on
+`frontend-soot` at runtime only (§5.5). A `build.sh` for `domains/interval`
+running `javac` against a fixed classpath. CI runs both.
 *Done when:* both build, a placeholder test passes in each, and `build.sh`
 succeeds with networking disabled.
 
@@ -914,24 +1229,40 @@ Write `engine/api` as §5. Get it reviewed before building on it.
 *Done when:* a stub domain compiles against `api.jar` alone with `javac`, and
 `jdeps` reports no dependency outside `java.*` and `pag.api.*`.
 
-### Phase 2 — IR, profile, lowering, executor
-A cleaned `api.ir` extracted from Historia's `IRWrapper`; `SootIrProvider` in its
-own module with the no-`soot.*`-elsewhere build rule; the language profile and
-its validator; lowering from source IR to `Cfg`; and the Stage 1 interpreter.
-Most of the work is separating IR translation from the APK, callback and
-class-hierarchy machinery `SootWrapper` currently mixes into it.
-*Done when:* `pag ir` and `pag run` work — a hand-written `.java` probe
-compiles, loads through `SootIrProvider`, and its visited-location sequence
-matches a fixture — **and** a
-probe containing a second method, a field reference, or a method call is
-rejected at load with a message naming the construct and the profile setting
-that would enable it — **and** the build fails if any module
-outside `engine/frontend-soot` imports `soot.*`.
+### Phase 2a — load, check, lift, lower, print
+The first milestone: load a simple Java program and inspect its CFG from the
+command line. A cleaned `api.ir` extracted from Historia's `IRWrapper` (§5.1);
+`SootIrProvider` with `load` and `sourceOf` only (§5.5); the profile check
+(§5.2); lowering (§5.3); `pag ir`. Most of the work is separating IR translation
+from the APK, callback and class-hierarchy machinery `SootWrapper` currently
+mixes into it. `findLine`, `isLoopHead` and `instrumentReach` wait for the
+phases that use them.
+Lifting (§5.7) is in this phase too, since the CFG is unreadable without it.
+*Done when:* a fixture `.java` using `Rand.randInt`, `BigInteger` arithmetic,
+a loop and a branch, compiled in the test with `javax.tools`, loads through
+`SootIrProvider` and `pag ir --cfg` matches a golden file — **and** fixtures
+that read `args`, call `divide`, call a non-`BigInteger` method, use `null`,
+declare a second method, or use a field each exit with code 2 and a message
+naming the construct, its line and the profile setting — **and** the `args`
+fixture loads under `enforce = false` — **and** under `lift = false` the same
+golden fixture prints `BigInteger` calls with its location numbering unchanged
+— **and** no module but `frontend-soot` can compile against `soot.*`.
+
+### Phase 2b — the Stage 1 executor
+`probe-lib`'s `Rand` (§5.6), the Stage 1 interpreter (§9), `pag run`, and
+`findLine` for resolving `--at`.
+*Done when:* `pag run --inputs …` on a fixture reproduces a visited-location
+sequence recorded in a fixture file, and the same fixture run as a real class
+file with `-Dpag.inputs` reaches the same markers — **and** the **all-locations
+cross-check** runs in CI: for every fixture, instrument a marker at every `pre`
+location, run Stage 2, and require that the markers printed equal the `pre`
+locations Stage 1 visited, in order. This one test checks trust-base claims A
+and B (`misc.md` §1) at once.
 
 ### Phase 3 — the reference interval domain
 Written by hand, in Java, as a fixture. Also the worked example shown to the
 generator, so write it the way generated code should look.
-*Done when:* the five transfer cases in `README.md` pass as unit tests.
+*Done when:* the six transfer cases in `README.md` pass as unit tests.
 
 ### Phase 4 — the analysis engine
 Worklist, invariant map, widening, iteration limit, and the certifier as a separate
@@ -1029,6 +1360,8 @@ framework, library, or the OS.
 
 - 1 and 3: is the eight-method contract expressible enough to write a real
   domain against?
+- 2a: does Soot stay behind `IrProvider`, and does the Jimple `javac` produces
+  for the subset actually look like the source it came from?
 - 4: does certifying the settled map actually work, independent of the worklist?
 - 4.5: can we see why a query came out the way it did? Historia's experience is
   that this is where the debugging time goes, and retrofitting it is painful.
@@ -1046,7 +1379,7 @@ framework, library, or the OS.
 1. **Adversary budget and stopping rule.** How long does an adversary search
    before a domain is provisionally accepted? Phase 8's calibration should set
    this empirically rather than by guess.
-2. **Does the adversary see the domain source?** Assumed yes (§8). It is a
+2. **Does the adversary see the domain source?** Assumed yes (§10). It is a
    machine, and reading targets the search. Confirm.
 3. **Reaching-run minimization.** A found run may be large. Shrinking it before
    it becomes generator feedback is probably worth it, and is standard
@@ -1063,10 +1396,8 @@ framework, library, or the OS.
 7. **Java version floor.** Pinned at 21 for record patterns and
    pattern-matching-for-switch, which give the model exhaustiveness checking on
    the IR.
-8. **When to flip `intWidth` to 32.** Before Phase 10 makes wraparound the
-   adversary's first realistic target and tests the loop on a genuine bug; after
-   Phase 10 keeps the first generated domain easier to get right. Flagged
-   **[decide]** in §5.2.
+8. ~~**When to flip `intWidth` to 32.**~~ *Superseded:* v1 is `BigInteger`
+   only and has no `intWidth` (§5.2); `int` programs are a possible later profile.
 9. **Front-end scope.** `SootIrProvider` v1 reads plain class files. Whether it
    should also accept a jar or a directory tree matters only for the scoring
    corpus, and can wait.
@@ -1088,3 +1419,11 @@ framework, library, or the OS.
     (needs call/return and a stack), fields (needs a heap domain), or arrays.
     Each is a different kind of work, and the choice determines what the second
     domain has to represent.
+14. **Constants behind temps.** Jimple arguments must be locals or literals, so
+    `x.compareTo(BigInteger.ZERO)` becomes `$r = ZERO; … x.compareTo($r)`, and
+    lifting yields `$r := 0` then `assume(x > $r)`. A *backward* non-relational
+    domain meets the `assume` first and `$r := 0` only afterwards, so it cannot
+    use the constant — the interval domain would prove nothing about any
+    comparison with a literal. Lifting could substitute a temp that is assigned
+    a constant and used once, leaving its assignment in place so locations are
+    unchanged. *Decided:* yes, in lifting (§5.7).

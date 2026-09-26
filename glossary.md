@@ -36,7 +36,7 @@ reaches a post-state satisfying `P`, its pre-state satisfies `P'`.
 `[edge-inductive]`. Historia's `canSubsume`, without the solver.
 
 **Join** `⊔`, **widen** `▽` — merge at control-flow joins and at loop heads
-respectively. Widening has no convergence obligation here (plan §1, scope).
+respectively. Widening has no convergence obligation here (`README.md`, "The property under test").
 
 **Compute / Certify** — the engine's two stages (plan §7). Compute runs the worklist
 and may be arbitrarily heuristic; Certify independently re-checks the settled
@@ -60,36 +60,91 @@ Measured by **proof count**.
 ## 2. The language and the IR
 
 **Source IR** — `Cmd` / `RVal` / `LVal` / `BinOp` (§5.1), Historia's shapes,
-Soot/Jimple-flavoured. What `IrProvider` produces.
+Soot/Jimple-flavoured. What `IrProvider` produces. Represents more than any
+profile accepts.
+
+**`Invoke`**, **`InvokeKind`** — a call in the source IR, with its dispatch kind
+(`Static`, `Virtual`, `Special`, `Interface`). The kind exists only in the
+source IR; lowering erases it.
 
 **`Cfg`** — the lowered form: a set of `Transition(from, Step, to)` plus an entry.
 What the analysis and the domain see.
 
 **Lowering** — source IR → `Cfg`. Turns a conditional `Goto` into two
-`assume`-guarded transitions so a domain never sees branching.
+`assume`-guarded transitions so a domain never sees branching, and an `Invoke`
+into a `Call` so a domain never sees dispatch. Table in §5.3.
 
-**`Step`** — `Assign` or `Assume`. The only two command forms a domain handles.
+**`Step`** — `Assign`, `Assume`, `Call` or `Skip`. A domain handles the first
+three; the engine handles `Skip` as the identity.
+
+**`Call`** — the `Step` form of an invocation: an optional target local, a
+qualified callee name, and arguments. No dispatch kind, no receiver. Each callee
+a profile admits has a documented meaning the domain implements; in v1 the only
+one is `randInt`.
 
 **`assume`** — a transition that blocks unless its condition holds. Carries all
 branching, and also carries initial-state constraints on the entry transition.
 
-**Language profile** — the config (§5.2) declaring which IR constructs load.
-Anything outside it is a **loading failure**, never a silent skip.
+**Language profile** — the config (§5.2) declaring which source-IR constructs
+are accepted, which callees and static fields may be used, and whether `main`
+may read `args`. v1's is `bigint-main-v1`.
 
-**`intWidth`** — `32` (real Java, wrapping) or `unbounded` (mathematical
-integers). Staged: `unbounded` first, `32` as a deliberate difficulty step.
+**Profile check** — the pass in `core`, between loading and lowering, that
+enforces the language profile. Reports every **profile violation** with the
+construct, its line, and the setting that would allow it — never a silent skip.
+`language.enforce = false` turns the pass off, for inspecting programs outside
+the subset; results from such a run are not verdicts.
 
-**Location**, `Loc` — a position in a method, written `ℓ`. Because commands sit
-on CFG edges, a location is a position *between* commands, and states live at
-positions. A method with commands `0..n` has positions `0..n+1`.
+**Untranslatable** — bytecode the source IR cannot represent at all (switch,
+monitors, exception handlers). Distinct from a profile violation: one is a limit
+of the IR, the other a limit of what we choose to accept. Both exit with code 2.
+
+**`Rand.randInt()`**, **nondeterminism** — `pag.probe.Rand.randInt()` returns a
+`BigInteger` and is the only source of input in a v1 program; the README writes
+it `x := randInt()`. Lives in `engine/probe-lib`. Backward, it frees its target.
+Without it every program has one execution and the abstraction is trivial
+(§5.6). Despite the name, nothing is random: the adversary chooses every value.
+
+**Inputs** — the list of values `randInt` returns in one run, in order,
+supplied as `-Dpag.inputs=…` (JVM) or `--inputs` (`pag run`). Chosen by the
+adversary; a run that asks for more than the list holds stops. What makes a run
+replayable.
+
+**`BigInteger` subset** — v1 programs use `java.math.BigInteger` for every
+value, so all arithmetic is over mathematical integers and nothing wraps. There
+is no `intWidth` setting; `int` programs with wraparound are a possible later
+profile (§5.2).
+
+**Lifting** — the pass (§5.7), between the profile check and lowering, that
+rewrites `BigInteger` calls into arithmetic and comparisons, so a domain sees
+`y := x + 1` rather than `y = x.add(ONE)`. Never adds or removes a command, so
+locations survive it. `language.lift = false` turns it off.
+
+**Compare temp** — the `int` or `boolean` local `javac` introduces for
+`a.compareTo(b)` or `a.equals(b)` in a condition. Must be used exactly once, by
+the next `if`; lifting fuses the pair into one comparison.
+
+**Location**, `Loc` — where a state lives, written `ℓ`. Mirrors Historia: an
+`AppLoc(method, index, isPre)` just before (`pre`) or just after (`post`) command
+`index`, plus `InternalMethodEntry(m)` and `InternalMethodExit(m)` per method
+(§5.3). A command is the edge from its `pre` to its `post`.
 
 Classically *program point* means a position and *location* means a statement's
-address — Historia keeps both in `AppLoc` with an `isPre` flag. Edge-carried
-commands dissolve that distinction here, so **use *location* for both** and
-retire *program point*.
+address — Historia keeps both in `AppLoc` with an `isPre` flag, and so do we.
+**Use *location* for all of them** and retire *program point*; say `pre` or
+`post` when the side matters.
 
-**`ℓ_init`** — the entry location. Admits every store, because initial
-constraints lower to an `assume`.
+**`skip`** — `Step.Skip`, the unlabelled edge between locations (`post(i)` to
+`pre(i+1)`, entry to `pre(0)`, a return to the exit). The engine treats it as
+the identity and never passes it to a domain.
+
+**`ℓ_init`** — `InternalMethodEntry(main)`. Admits every store, because initial
+constraints lower to an `assume` on its outgoing edge.
+
+**`InternalMethodEntry`**, **`InternalMethodExit`** — a method's entry and exit
+locations; Historia's `InternalMethodInvoke` / `InternalMethodReturn`. The
+*Internal* prefix is kept so `Callback*` and `Callin*` locations can return
+later without a clash.
 
 ---
 
@@ -115,7 +170,8 @@ exactly one can fire. There is no "we pruned" case; see *abandoning*.
 unexplored count, elapsed time, where it widened. Always collected, so a
 campaign keeps these even at recording level `Off`.
 
-**`DomainFailure`** — generated code threw, returned null, or hung. Every call
+**`DomainFailure`** — generated code threw or returned null. A hang is not one:
+`pag` cannot stop it, so the campaign driver kills the process instead (§7). Every call
 into a domain is wrapped; one exception must not end a campaign.
 
 **Alarm** — the analysis could not prove the target unreachable. Not a claim that
@@ -162,13 +218,13 @@ certification fail at its edge; the *query* is then `Inconclusive` rather than
 `Alarm`, because the failure was our budget and not the domain's imprecision.
 Only `Alarm` counts against proof count; `Inconclusive` is excluded from scoring.
 
-**Weakening vs abandoning** — *weakening* replaces a state with a weaker one and
-is sound for proving; *abandoning* skips a path and is not. Historia's
-`DropQryPolicy` interface does both — `shouldDropOrModify` returns `None` to
-abandon and `Some(weakened)` to weaken — and its abandoning policies belong to
-the under-approximate mode. This engine never abandons, and cannot weaken either
-since `S` is opaque to it, so **all weakening lives in the domain's `join` and
-`widen`**.
+**Abandoning** — skipping a state so it is never explored. **The engine never
+does this** (§7): a proof over an incomplete search is not a proof. Historia's
+`DropQryPolicy` could; none of it is carried over.
+
+**Weakening** — replacing a state with a less precise one. Entirely the
+domain's business, inside `join` and `widen`; the engine has no weakening
+policy (§7).
 
 ---
 
@@ -197,7 +253,7 @@ running a program. `pag check` performs it.
 **Probe program**, or just *probe* — a Java program the adversary writes, in
 `probes/<campaign>/`. The artifact, never the mechanism.
 
-**`ReachingRun`** — a program, its arguments, and the location it gets to, where
+**`ReachingRun`** — a program, its inputs, and the location it gets to, where
 the domain proved that location unreachable. **The only artifact in this project
 that proves anything.** Formerly called a witness.
 
@@ -207,7 +263,7 @@ that proves anything.** Formerly called a witness.
 **Marker** — the `REACHED-<id>` string. Presence on stdout is the verdict.
 
 **Executor** — what runs a program. Stage 1 is our interpreter; Stage 2 is
-`javac` plus the JVM, and is the verdict of record.
+`javac` plus the JVM, and is the verdict of record. Both take the same inputs.
 
 ---
 
@@ -259,7 +315,8 @@ driver's. Plan §11.
 **`--at M:L`** — the query, i.e. `Reachable(method, line)`.
 
 **Exit codes** — the agent-facing contract, so drivers never parse prose:
-`0` completed, `1` usage/IO, `2` profile violation, `3` unsound (a reaching run
+`0` completed, `1` usage/IO, `2` did not load (untranslatable or a profile
+violation), `3` unsound (a reaching run
 contradicted a refutation), `4` inconclusive, `5` domain failure. 4 and 5 differ
 because one says raise the budget and the other says the domain is broken.
 
@@ -284,15 +341,28 @@ on every record. The actual compatibility need, independent of format.
 **`engine/api`** — the contract and the IR. Pure Java, no Scala dependency. The
 only engine code an agent sees.
 
-**`engine/frontend-soot`** — the only module allowed to import `soot.*`.
+**`engine/probe-lib`** — pure Java, no dependencies, holds `pag.probe.Rand`.
+The only library a probe may call.
 
-**`engine/core`** — worklist, invariant map, certifier.
+**`engine/frontend-soot`** — the only module with Soot (4.7.1) on its compile
+classpath. `cli` sees it at runtime only, through `ServiceLoader`.
+
+**`engine/core`** — profile check, lowering, worklist, invariant map, certifier.
 
 **`engine/harness`** — executor, probe runner, verdict, scoring, mutation corpus,
 agent drivers.
 
+**Trust base** — the human-written code a verdict rests on unchecked: the
+front end (loading through lowering), `instrumentReach`, the executor, and the
+certifier (§2). Exhaustively unit tested and reviewed before merge, as a
+standing rule. `Rand` is outside it: a bug there breaks replay, not verdicts.
+
+**All-locations cross-check** — the standing CI test that runs each fixture
+under Stage 1 and, with a marker at every `pre` location, under Stage 2, and
+requires the same locations in the same order (Phase 2b).
+
 **`IrProvider`** — the one interface through which programs enter: `load`,
-`findLine`, `isLoopHead`, `instrumentReach`.
+`sourceOf`, `findLine`, `isLoopHead`, `instrumentReach`.
 
 ---
 
@@ -308,7 +378,7 @@ agent drivers.
 | `WitnessedQry` | search state meaning the entry was reached | `Verdict.Alarm` plus a `CandidateTrace` |
 | `InitialQuery` | `Reachable`, `ReceiverNonNull`, `CallinReturnNonNull`, … | `Reachable` only; the rest to be re-engineered |
 | **consistent** | consistent with known reachable locations | *avoid* — see `misc.md` §5 |
-| **witness** | an alarm that reached the initial state | *retired*, except **must-witness** |
+| **witness** | an alarm that reached the initial state | *retired* |
 
 ---
 
@@ -330,14 +400,14 @@ limit** and prose says "worklist iterations". `Step` remains the command type.
 **4. `Entry` was a stop reason *and* a location.** ✅ *Resolved* by
 `StopReason.ReachedInit`.
 
-**5. *program point* vs *location*.** ✅ *Resolved.* **Location** everywhere;
-§5.3 of the plan now states why the classical distinction does not arise here.
+**5. *program point* vs *location*.** ✅ *Resolved.* **Location** everywhere,
+with `pre`/`post` when the side matters; §5.3 of the plan defines them.
 
 **6. *corpus* is unqualified in several places.** With four corpora (§8 above), bare
 "the corpus" is ambiguous. Always qualify.
 
 **7. *target* is doing two jobs.** A *target location* is where a query points; a
-*target* in `intWidth`/profile prose means the language we aim at. Minor, but
+*target* in profile prose means the language we aim at. Minor, but
 worth watching as the profile grows.
 
 **8. `Dropped` vs `Exhausted`.** ✅ *Resolved, and the concept was wrong.*
@@ -345,6 +415,4 @@ worth watching as the profile grows.
 `Incomplete` cases name mechanisms. `Dropped` is gone entirely: abandoning a
 path is under-approximate machinery and has no place in a verifier, so the
 per-node case is `Unexplored` (the budget ran out first). Plan §7 has the
-verdict table; plan §8 explains it against Historia's `ResultSummary.Timeout`, which
-confusingly means *inconclusive* rather than *timed out* — the same conflation
-this rename removes.
+verdict table and the rule that the engine never abandons a state.

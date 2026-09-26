@@ -16,7 +16,7 @@ alarm rate down, not to zero.
 
 The analysis works in two phases:
 1. A forward, over-approximate, flow-insensitive analysis (e.g. an anderson's analysis or steensgaard analysis).  This pass computes a rough approximation of the call graph and the aliasing relationships between variables, pointers, etc.
-2. A backwards analysis that starts at the location of a defect capturing the failure condition and works backwards through the execution of the application to reach a proof if the initial state of the program can be excluded from a fixed point or an alarm if the initial point is reached.  The backward analysis can be over-approximate to produce a proof or under-approximate to produce a must-witness. In either case it is guided by the forward over-approximate analysis.
+2. A backwards analysis that starts at the location of a defect capturing the failure condition and works backwards through the execution of the application to reach a proof if the initial state of the program can be excluded from a fixed point or an alarm if the initial point is reached.  The backward analysis is over-approximate: it produces a proof or an alarm, never a witness that the defect occurs. It is guided by the forward over-approximate analysis.
 
 **Humans never write abstract domains**
 A key part of this project is that humans never write or read any part of an
@@ -69,14 +69,22 @@ location; execution starts at `ℓ_init`.
 
 ```
 programs     p ::= ∅ | p, (ℓ —c→ ℓ')
-commands     c ::= x := a | assume b
-expressions  a ::= n | x | a + a | a * a
-conditions   b ::= a < a | a = a | ¬b
+commands     c ::= x := a | x := randInt() | assume b
+expressions  a ::= n | x | a + a | a - a | a * a
+conditions   b ::= a ⋈ a        ⋈ ∈ { <, ≤, >, ≥, =, ≠ }
 ```
 
 Structured control flow compiles into this shape: `if` and `while` become
-branching transitions guarded by `assume`. So does everything else we need.
+branching transitions guarded by `assume`, one per branch, the second guarded
+by the first's negation — which is always another comparison, so the grammar
+needs no `¬`. So does everything else we need.
 
+- **Input** is `x := randInt()`, which binds `x` to an arbitrary integer.
+  Without it a program has exactly one execution, and a domain that tracks
+  constants proves every unreachable location — the abstraction collapses into
+  running the program. In Java it is a static call to
+  `pag.probe.Rand.randInt()`, whose values the adversary chooses
+  (`implementation_strategy.md` §5.6).
 - **An assertion** becomes the reachability of a location. "It is always
   possible to compile an assertion to the reachability of a location"
   (`goaldirinclogic.tex:9`), which is why error conditions are formalized as an
@@ -93,8 +101,9 @@ program that reaches `ℓ`.
 ### Concrete semantics
 
 A concrete state `σ` maps variables to integers. `x := a` rebinds `x` to the
-value of `a` in `σ` and leaves every other variable alone; `assume b` steps only
-when `b` holds in `σ`, leaving `σ` unchanged.
+value of `a` in `σ` and leaves every other variable alone; `x := randInt()` rebinds
+`x` to any integer, and is the only nondeterminism; `assume b` steps only when `b`
+holds in `σ`, leaving `σ` unchanged.
 
 ```scala
 type Store = Map[String, BigInt]     // σ
@@ -152,8 +161,10 @@ test is its consequence, below.
 Backward over `x := a`: after the command `x` holds the value of `a` evaluated
 *before* it, and every other variable is unchanged, so the post-condition's
 interval for `x` becomes a constraint on the operands of `a` and `x` itself is
-unconstrained in the pre-state. Backward over `assume b`: the store is
-unchanged, so the pre-condition is the post-condition refined by `b`.
+unconstrained in the pre-state. Backward over `x := randInt()`: any value of `x` could
+have produced the post-state, so `x` is unconstrained in the pre-state and
+nothing else changes. Backward over `assume b`: the store is unchanged, so the
+pre-condition is the post-condition refined by `b`.
 
 ```scala
 /** Backward transfer. */
@@ -163,6 +174,9 @@ def transfer(c: Command, post: AbsState): AbsState = (c, post) match
   case (Command.Assign(x, a), AbsState.Env(at)) =>
     // Constrain a's operands to land in x's post-interval, with x itself freed.
     narrow(a, at.getOrElse(x, Interval.Top), AbsState.Env(at - x))
+  case (Command.RandInt(x), AbsState.Env(at)) =>
+    // x := randInt() — whatever x must be afterwards, some input produced it.
+    AbsState.Env(at - x)
   case (Command.Assume(b), env) =>
     // assume does not write the store; it only blocks.
     refine(b, env)
@@ -175,7 +189,7 @@ def narrow(a: Expr, target: Interval, env: AbsState): AbsState = a match
   case Expr.Mul(l, r) => ...   // sign cases; division by an interval spanning 0
 ```
 
-Five cases worth working by hand to see what "correct" means here. Nothing
+Six cases worth working by hand to see what "correct" means here. Nothing
 checks them directly — they are for the reader, and they are the kind of unit
 test a model would reasonably write for itself while iterating:
 
@@ -185,6 +199,7 @@ test a model would reasonably write for itself while iterating:
 | `x := 5` | `x ↦ [6,10]` | `⊥` |
 | `x := x + 1` | `x ↦ [0,10]` | `x ↦ [-1,9]` |
 | `x := y` | `x ↦ [0,10], y ↦ [5,20]` | `y ↦ [5,10]` |
+| `x := randInt()` | `x ↦ [0,10], y ↦ [1,2]` | `y ↦ [1,2]` |
 | `assume x < 10` | `x ↦ [0,10]` | `x ↦ [0,9]` |
 
 The fourth row is the instructive one: `x`'s post-interval has to be intersected
@@ -281,8 +296,8 @@ Inspecting states during execution would give a denser signal at the cost of
 needing to know what an abstract state means; that alternative is in Future
 ideas.
 
-We call such a program a **reaching run**: a program, its arguments, and the
-location it gets to. It is the only artifact in this project that proves
+We call such a program a **reaching run**: a program, the values its `randInt()`
+calls return, and the location it gets to. It is the only artifact in this project that proves
 anything, and two properties of the check are worth being explicit about.
 
 **It runs one way.** Printed ⟹ reachable ⟹ the refutation was unsound. *Not*
@@ -334,8 +349,8 @@ The loop runs two agents with opposed objectives. The generator writes domains
 and is scored on how many locations it proves. The adversary tries to show a
 domain wrong, and is scored on how often it succeeds.
 
-The adversary's deliverable is a **corpus of reaching runs**: a program, its
-arguments, and a location that the domain proves unreachable and that running
+The adversary's deliverable is a **corpus of reaching runs**: a program, the
+values its choices take, and a location that the domain proves unreachable and that running
 the program demonstrably executes. This is the initial focus, because it is the piece that
 currently does not exist. In the dissertation the equivalent corpus was
 assembled by hand — framework models were validated against roughly ten
@@ -491,8 +506,8 @@ Scala 3 (LTS 3.3.6) project built with sbt 1.11.7.
 ## Layout
 
 Nothing described above is built yet. This is the current skeleton; the target
-layout — `engine/{api,core,harness,cli}` plus `domains/` — is in
-`implementation_strategy.md` §2.
+layout — `engine/{api,probe-lib,frontend-soot,core,harness,results,cli}` plus
+`domains/` — is in `implementation_strategy.md` §3.
 
 ```
 build.sbt                     build definition

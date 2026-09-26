@@ -4,7 +4,8 @@ A web UI for inspecting the running system. **Not being built yet** — deferred
 2026-09-23 to keep focus on the core engine. The CLI is the interface in the meantime.
 
 A design mock-up exists, built around a real scenario (an interval domain that
-misses 32-bit wraparound, caught by the adversary):
+misses 32-bit wraparound, caught by the adversary — a scenario v1 can no longer
+produce, since the subset is `BigInteger`-only; the views are unaffected):
 <https://claude.ai/artifact/VjuobWygm5i436hSXTgCHR>
 
 ## Requirements

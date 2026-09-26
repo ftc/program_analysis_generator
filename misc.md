@@ -57,6 +57,29 @@ The old row 1 was the interpreter's fidelity to real execution; it survives, but
 Stage 2 discharges it with a code generator and a print statement instead of JDI,
 which is a much smaller thing to get right.
 
+### Update 2026-09-26 — what the BigInteger front end adds
+
+Loading, lifting and lowering sit between the class file that runs and the
+`Cfg` a domain analyses, so the two-row table above gains two rows:
+
+| # | Claim | If wrong | How established |
+| --- | --- | --- | --- |
+| A | Loading, profile check, lifting and lowering preserve meaning | a correct domain rejected, or an unsound one hidden (e.g. `subtract` lifted as `+`) | Stage 1 interprets the lowered `Cfg`, Stage 2 runs the JVM; agreement over a corpus |
+| B | `instrumentReach` puts each marker at the bytecode for its `Loc` | the same two failures | the all-locations cross-check (plan Phase 2b) |
+
+Both are loud rather than silent *provided the cross-check exists*, which is why
+it is a standing CI test rather than a one-off.
+
+**`Rand` is not in the trust base.** A rejection says "the domain proved `ℓ`
+unreachable for every input, and this run reached it." If `randInt` returned a
+value other than the one listed, the run is still a real execution and `ℓ` is
+still reachable, so the rejection still holds; if it throws, the run stops and
+no false marker can print. What a `Rand` bug breaks is replay — the recorded
+inputs may not reproduce the run — never a verdict.
+
+**Standing rule (Shawn):** everything in this table is exhaustively unit tested
+and reviewed before it merges. Plan §2, *The trust base*.
+
 ---
 
 ## 2. Reachability as the oracle, and the print-statement observer
