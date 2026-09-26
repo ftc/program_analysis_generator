@@ -1248,6 +1248,20 @@ fixture loads under `enforce = false` — **and** under `lift = false` the same
 golden fixture prints `BigInteger` calls with its location numbering unchanged
 — **and** no module but `frontend-soot` can compile against `soot.*`.
 
+Delivered as eight changes of about 200 lines each, reviewed one at a time
+(`CLAUDE.md`):
+
+| # | change | tested by |
+| --- | --- | --- |
+| 1 | multi-project build, empty modules, `Greeter` removed | `sbt test` green in every module |
+| 2 | `api` IR types: `Loc`, `Cmd`, `RVal`, `Step`, `Cfg` | compiles; a `javac` stub compiles against the jar |
+| 3 | `SootIrProvider`: straight-line code and `Return`; in-test fixture compilation | fixture → expected `Cmd` list |
+| 4 | translation of branches, calls, parameter binding; `Untranslatable` | one fixture per construct |
+| 5 | profile check | a passing and a failing fixture per rule |
+| 6 | lifting, including constant substitution | one test per table row |
+| 7 | lowering to `Cfg` with `pre`/`post`/entry/exit | one test per table row |
+| 8 | `pag ir --cfg` | golden file |
+
 ### Phase 2b — the Stage 1 executor
 `probe-lib`'s `Rand` (§5.6), the Stage 1 interpreter (§9), `pag run`, and
 `findLine` for resolving `--at`.
