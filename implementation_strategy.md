@@ -70,7 +70,7 @@ the loop checks for it (`misc.md` §1 has the argument):
 | code | where | the claim it carries |
 | --- | --- | --- |
 | loading, profile check, lifting, lowering | `frontend-soot`, `core` | the `Cfg` a domain analyses means what the bytecode does |
-| `instrumentReach` | `frontend-soot` | a marker prints exactly when its `Loc` is reached |
+| `reach` and its lowering | `probe-lib`, `core` | a marker prints exactly when the location of its `reach` call is reached |
 | Stage 1 interpreter, run and marker check | `harness` | the executor implements the intended semantics |
 | certifier | `core` | only a certified map yields `Refuted` |
 
@@ -84,8 +84,9 @@ a higher bar than the rest, as a standing rule:
   and a failing fixture (§5.2) — has its own test, written with the code.
 - **Reviewed by Shawn before it merges.** Changes to these modules are called
   out as trust-base changes, not folded into larger diffs.
-- **Cross-checked end to end.** Stage 1 and Stage 2 agreeing on a corpus, with
-  markers at every location (Phase 2b), is a standing test that runs in CI.
+- **Cross-checked end to end.** Stage 1 and Stage 2 agreeing on a corpus of
+  fixtures dense with `reach` calls (Phase 2b) is a standing test that runs in
+  CI.
 
 *Decided — Shawn, 2026-09-26.* `probe-lib`'s `Rand` is deliberately *not* in
 this table: it can break replay, but not a verdict (`misc.md` §1).
@@ -302,7 +303,8 @@ language {
                "java.math.BigInteger.add", "java.math.BigInteger.subtract",
                "java.math.BigInteger.multiply", "java.math.BigInteger.negate",
                "java.math.BigInteger.compareTo", "java.math.BigInteger.equals",
-               "pag.probe.Rand.randInt"]               # §5.6; any other call is a violation
+               "pag.probe.Rand.randInt",                # §5.6
+               "pag.probe.Reach.reach"]                 # §5.8; any other call is a violation
   staticFields = ["java.math.BigInteger.ZERO", "java.math.BigInteger.ONE",
                   "java.math.BigInteger.TWO", "java.math.BigInteger.TEN"]
   mainArgs  = "unread"                                  # any read of main's args is a violation
@@ -410,6 +412,7 @@ is `InternalMethodExit(main)`.
 | `Assign(x, e)`, `e` not an `Invoke` | `pre(i) —x := e→ post(i) —skip→ pre(i+1)` |
 | `Assign(x, Invoke(_, C, n, recv, args))` | `pre(i) —call(x, "C.n", recv ++ args)→ post(i) —skip→ pre(i+1)` |
 | `InvokeStmt(Invoke(_, C, n, recv, args))` | `pre(i) —call(—, "C.n", recv ++ args)→ post(i) —skip→ pre(i+1)` |
+| `InvokeStmt(Invoke(Static, "pag.probe.Reach", "reach", —, [id]))` | `pre(i) —skip→ post(i) —skip→ pre(i+1)`; `pre(i)` is the target of `Reachable(id)` (§5.8) |
 | `Assign(r0, Param(0, _))` in `main` | `pre(i) —skip→ post(i) —skip→ pre(i+1)` |
 | `Nop` | `pre(i) —skip→ post(i) —skip→ pre(i+1)` |
 | `Goto(true, t)` | `pre(i) —skip→ post(i) —skip→ pre(t)` |
@@ -429,10 +432,9 @@ so the call site's before and after are distinct locations with the callee
 between them — the shape Historia's `ControlFlowResolver` already has. *Decided —
 Shawn, 2026-09-24.*
 
-**Queries and markers use `pre`.** `findLine` resolves a line to the `pre`
-locations of its commands, and `instrumentReach` prints before the command's
-first bytecode unit, which is the `pre` location. `post` locations and the
-method entry/exit are addressable by the engine but not by `--at` in v1.
+**Queries use `pre`.** A query names a `reach` call (§5.8), and its target is
+that call's `pre` location. `post` locations and the method entry/exit are
+addressable by the engine but not by a query in v1.
 
 `Step.Call` is where the invoke kind disappears: the callee is a plain qualified
 name with no dispatch kind, and a receiver, if any, becomes the first argument. Every callee a profile admits comes
@@ -479,7 +481,9 @@ public interface Domain<S> {
   callee the active profile admits; the smoke test (Phase 6) calls it once per
   admitted callee, so an unrecognised one fails at load.
 - `transfer` returns one state. A domain needing disjunction carries it inside
-  `S`, with `join` as its union, so the engine never learns about it. **[decide]** shawn: this is fine for now, later we may need to pull the disjunction out to improve parallelism though.
+  `S`, with `join` as its union, so the engine never learns about it.
+  *Decided — Shawn, 2026-09-26:* fine for now; disjunction may later be pulled
+  out of `S` so the engine can explore disjuncts in parallel.
 - The obligations these methods must satisfy are real but unstated in code —
   Lemma 1 and its companions, w.r.t. a concretization each domain has and never
   writes down. The harness verifies their consequence, not them.
@@ -538,27 +542,19 @@ same class file is both translated by `IrProvider` and executed to check for a
 reaching run. Analyzing exactly the artifact that runs removes an entire class of
 disagreement, and removes the JSON program codec the previous draft needed.
 
-`IrProvider` also owns the two location services the rest of the system needs,
-because both are questions about bytecode and both belong in the one module that
-knows about it:
+`IrProvider` also owns one location service the engine needs, because it is a
+question about bytecode:
 
 ```java
-/** Every location on a source line. Historia's findLineInMethod. */
-List<Loc> findLine(String method, int line);
-
 /** Is this a loop head? Decides where the engine widens. */
 boolean isLoopHead(Loc loc);
-
-/** Write a copy of the classes printing REACHED-<id> on arrival at any of locs. */
-Path instrumentReach(Path classes, List<Loc> locs, Path outDir);
 ```
 
-`instrumentReach` is how a reaching run is observed (§9). Inserting a `println` before
-the first unit of each target location cannot change whether those locations are
-reached, so the instrumented copy and the original agree on the only question
-being asked. Several prints may fire; the runner only asks whether the marker
-appeared at all. Doing it in bytecode rather than in source is what lets the same
-mechanism work later on code we did not write.
+Historia's `findLineInMethod` (line → locations) and a bytecode-rewriting
+`instrumentReach` were both in earlier drafts. Neither is needed while targets
+are `reach` calls (§5.8): the target is found in the IR, and the marker is
+already in the program. Line-based queries can return later as a front-end
+service, when there is code we did not write.
 
 ### 5.6 Nondeterminism
 
@@ -592,8 +588,7 @@ generator was considered and dropped as unneeded.
 **Why our own class.** The analysis matches the call by signature, so the
 signature should be one we own and never changes, and `probe-lib` has no
 dependencies so the Phase 9 containers stay JDK-only. The name avoids
-`Instrumentation`, which collides with `java.lang.instrument.Instrumentation`
-and with our own use of *instrument* for `instrumentReach`.
+`Instrumentation`, which collides with `java.lang.instrument.Instrumentation`.
 
 **The meaning a domain implements.** `call(x, "pag.probe.Rand.randInt", [])`
 assigns `x` an arbitrary integer, so backward it frees `x` and leaves every
@@ -631,9 +626,8 @@ as their use are substituted; anything else is left alone. *Decided — Shawn,
 
 **Lifting never adds or removes a command.** A fused compare leaves a `Nop` where
 the temp was assigned, so every `Loc` still names the same bytecode unit it did
-after loading. `findLine`, `sourceOf` and `instrumentReach` all key on `Loc`,
-and that correspondence is what lets a marker in the executed class mean the
-location the analysis reasoned about.
+after loading. `sourceOf`, `isLoopHead` and query resolution all key on `Loc`,
+and error messages and the invariant map print through it.
 
 Lifting relies on the profile check having passed: it assumes every compare
 temp has exactly the one use the check enforces, and fails loudly — a bug, not
@@ -648,6 +642,39 @@ locals. A domain for that setting must implement each `BigInteger` method as a
 callee, which is a much harder contract; the switch exists so the lifted and
 unlifted forms can be compared with `pag ir`, and so a later experiment can hand
 a generator the unlifted form deliberately.
+
+### 5.8 Targets: `reach`
+
+A probe marks the locations it asks about with calls to one method:
+
+```java
+package pag.probe;
+
+public final class Reach {
+    /** Prints REACHED-<id> and has no other effect. */
+    public static void reach(int id) { ... }
+}
+```
+
+It lives in `probe-lib` beside `Rand`. `reach` touches no local, no field and
+no control flow; its only effect is one line on stdout. That makes it both
+halves of the reachability check at once:
+
+- **The analysis finds it** as an ordinary `InvokeStmt` with a literal
+  argument. `Reachable(7)` targets the `pre` location of the `reach(7)` call,
+  and lowering turns the call itself into a `skip` edge (§5.3), so a domain
+  never sees it.
+- **The run reports it**: `REACHED-7` on stdout is the marker, with no
+  rewriting of the class file.
+
+So the class file analysed and the class file executed are **the same file**,
+not a copy with a `println` inserted. That removes a bytecode-rewriting pass
+from the trust base, and with it the problem of mapping each `Loc` back to a
+bytecode offset.
+
+Profile rules: `pag.probe.Reach.reach` is always an admitted callee; its
+argument must be an `int` literal; each id appears at most once in a program.
+*Decided — Shawn, 2026-09-26.*
 
 ## 6. Direction: goal-directed backward analysis
 
@@ -665,14 +692,14 @@ is usually set up and a reader — or a generator agent — will assume otherwis
 
 So the analysis takes a **syntactic location in the program as an input**, and
 answers one question about it. There is no whole-program invariant here and no
-reusable result: ask about a different line and you run a different fixed point,
-from scratch.
+reusable result: ask about a different `reach` call and you run a different
+fixed point, from scratch.
 
-The query form, following Historia's `InitialQuery.Reachable(sig, line)`:
+The query form, adapted from Historia's `InitialQuery.Reachable(sig, line)`:
 
 ```scala
 sealed trait Query
-final case class Reachable(method: String, line: Int) extends Query
+final case class Reachable(id: Int) extends Query   // the reach(id) call
 ```
 
 `Reachable` is deliberately the only form. Historia's others —
@@ -685,19 +712,18 @@ a convenience layer over `Reachable` rather than additional power. `Query` stays
 a sealed trait with one case, which is the whole concession made to that
 future.
 
-Resolution is `IrProvider.findLine(method, line)` (§5.5), which mirrors
-Historia's `findLineInMethod`. A line maps to **several** locations, and the
-query is their disjunction: *reaching the line* means reaching any one of them.
-Historia's `makeReach` takes `locs.head` instead; we do not, because one source
-line can hold several statements with no dominance relation between them
-(`if (a) x(); else y();`), and taking the first would silently answer a
-different question.
+Resolution looks up the one `reach(id)` call in the lowered `Cfg`, and seeds
+`I(pre) = ⊤` there and `⊥` everywhere else. The query's abstract state is `⊤`
+— Historia uses `State.topState` — which is what keeps `[inductive]` in §7
+trivial.
 
-The disjunction needs no machinery. Seed `I(ℓ) = ⊤` at *every* location the line
-resolves to and run the same backward fixed point: join at merge points does the
-disjunction, and `I(entry)` ends up over-approximating the states that reach any
-of them. The query's abstract state is `⊤` throughout — Historia uses
-`State.topState` — which is what keeps `[inductive]` in §7 trivial.
+A line-based query (`Reachable(method, line)`, Historia's form) is the natural
+next form once targets are in code we did not write. A line then maps to
+**several** locations and the query is their disjunction, because one line can
+hold statements with no dominance relation between them (`if (a) x(); else
+y();`); Historia's `makeReach` takes `locs.head` and would silently answer a
+different question. Seeding `⊤` at every one of them handles it with no extra
+machinery.
 
 **Why backward.** The goal constrains the search: program fragments irrelevant to
 reaching the target never enter the invariant map at all. That is the whole
@@ -926,24 +952,22 @@ The analysis refutes "reachable on *any* input," so a reaching run names the
 specific inputs `Rand.randInt` returns on the way there (§5.6). Verdict: run it; if `REACHED-<id>` appears on
 stdout, the domain is unsound.
 
-Because §5.5 reads the IR from a class file, the artifact analysed and the
-artifact executed are the same class file up to an inserted `println`. There is
-no source-to-source translation between them, which is what the previous draft's
-two-stage executor was trying to work around.
+Because §5.5 reads the IR from a class file and the marker is the program's own
+`reach` call (§5.8), the artifact analysed and the artifact executed are the
+same class file, byte for byte. There is no translation and no rewriting
+between them.
 
 **Stage 1 — reference interpreter.** `engine/harness` interprets the `Cfg` and
-records visited locations, answering each `randInt` call from the same input list,
-and stopping when it runs out, as `Rand` does. Fast, deterministic, no process launch, and useful
+records visited locations and the `reach` ids it passes, answering each
+`randInt` call from the same input list and stopping when it runs out, as
+`Rand` does. Fast, deterministic, no process launch, and useful
 for debugging. The executor here is our own code, so a disagreement with Stage 2
 is a bug in it.
 
-**Stage 2 — run the class file.** `IrProvider.instrumentReach` writes a copy of
-the classes that prints `REACHED-<id>` on arrival at the queried location; then
-`java -Dpag.inputs=<values> -cp <copy>:probe-lib.jar Probe`, grep stdout for the marker. The instrumented copy
-differs from the analysed one by a `println` that touches no local and no
-control flow, so the two agree on whether the location is reached. The executor
-is the JVM, so the evidence depends on nothing this project wrote beyond that
-insertion. This is the verdict of record; Stage 1 exists for speed and
+**Stage 2 — run the class file.** `java -Dpag.inputs=<values> -cp
+<classes>:probe-lib.jar Probe`, and grep stdout for `REACHED-<id>`. The
+executor is the JVM and the program is unmodified, so the evidence depends on
+nothing this project wrote beyond `reach`'s one `println` and `Rand`. This is the verdict of record; Stage 1 exists for speed and
 inspection, not for adjudication.
 
 The two stages agree by construction: Stage 1 computes in `BigInt`, and the
@@ -967,7 +991,9 @@ the executor. Output: reaching runs. Scored on kill rate against the mutant corp
 Letting the adversary *read* the domain is a deliberate choice — it is a machine,
 the prohibition on reading domains applies to humans, and reading is what lets it
 target the search rather than fuzz blindly. It still has to produce an executable
-reaching run, so reading cannot substitute for evidence. **[decide]** shawn: I agree that we should let the adversaries inspect the domain. We want the adversaries to succeed whenever possible.
+reaching run, so reading cannot substitute for evidence. *Decided — Shawn,
+2026-09-26:* adversaries inspect the domain; we want them to succeed whenever
+possible.
 
 The two must not be the same model instance, and preferably not the same model.
 An agent asked to write a domain and then attack it has no reason to attack hard.
@@ -998,12 +1024,12 @@ dashboard is built, so it has to carry what the dashboard would have shown —
 
 ```
 pag ir      <classes> [--method M] [--cfg]            what the front end produced
-pag run     <classes> [--inputs 3,-7,...]             execute, report locations visited
-pag analyze --domain <jar> --classes <dir> --at M:L   verdict and invariant map
-pag check   --domain <jar> --classes <dir> --at M:L   analyze, then try to falsify
+pag run     <classes> [--inputs 3,-7,...]               execute, report locations visited
+pag analyze --domain <jar> --classes <dir> --reach ID   verdict and invariant map
+pag check   --domain <jar> --classes <dir> --reach ID   analyze, then try to falsify
 ```
 
-`--at main:14` is the `Reachable(method, line)` query. `--json` works on all of
+`--reach 7` is the `Reachable(7)` query: the `reach(7)` call (§5.8). `--json` works on all of
 them; human-readable text is the default. `--config <file>` supplies domains and
 limits in bulk instead of flags, for campaign use.
 
@@ -1025,25 +1051,25 @@ BigInteger x = Rand.randInt();
 if (x.compareTo(BigInteger.ZERO) > 0) {
     BigInteger y = x.add(BigInteger.ONE);
     if (y.compareTo(BigInteger.ZERO) < 0) {
-        x = BigInteger.ZERO;                       // line 14: the target
+        reach(1);                                  // the target
     }
 }
 ```
 
 ```
 $ pag analyze --domain domains/interval/out/interval.jar \
-              --classes probes/c07/out --at main:14
+              --classes probes/c07/out --reach 1
 
 classes   probes/c07/out            26 locations · profile bigint-main-v1
 domain    interval-ref 0.1.0        api 0.3.1
-query     Reachable(main, 14) → pre(10)
+query     Reachable(1) → pre(10)
 
   entry                             ⊥
   pre(1)   x = Rand.randInt()       ⊥
   pre(4)   if x <= 0 goto 11        ⊥
   pre(6)   y = x + 1                x ↦ (-∞,-2]
   pre(9)   if y >= 0 goto 11        y ↦ (-∞,-1]
-  pre(10)  x = 0                    ⊤                  ← target
+  pre(10)  reach(1)                 ⊤                  ← target
   pre(11)  return                   ⊥
   (post locations, nops and constant temps elided)
 
@@ -1068,13 +1094,13 @@ The whole of §9 in one invocation, and what Phase 5's done-when exercises:
 
 ```
 $ pag check --domain domains/interval/out/gen-04.jar \
-            --classes probes/c07/out --at main:12 --inputs 5
+            --classes probes/c08/out --reach 1 --inputs 5
 
 analysis    REFUTED            9 iterations · 3ms
-execution   REACHED-12         inputs [5] · instrumented copy · 12ms
+execution   REACHED-1          inputs [5] · 12ms
 
-UNSOUND — the domain refuted main:12, but the program reaches it
-reaching run   probes/c07/Probe.java  inputs [5]
+UNSOUND — the domain refuted reach(1), but the program reaches it
+reaching run   probes/c08/Probe.java  inputs [5]
 ```
 
 ### Exit codes are the agent-facing contract
@@ -1224,7 +1250,33 @@ fine; twenty-seven is what went wrong before.
 
 ## 14. Phases
 
-Each phase names a deliverable and a done-when that is a runnable check.
+Each phase names a deliverable and a done-when that is a runnable check. Phase
+numbers are names, not the order of work.
+
+### Order of work
+
+The project's real unknowns are whether a small model can write a sound,
+non-trivial *backward* domain (Phase 10) and whether an adversary can break one
+(Phases 8 and 11). Everything else is infrastructure we are fairly sure we can
+build. So the order reaches a crude version of those first and returns for the
+rest:
+
+1. **Phases 0, 1, 2a, 2b, 3, 4, 5** — as written: a program loads, runs, is
+   analysed with the reference domain, and a human-written reaching run
+   rejects a broken domain.
+2. **Crude Phase 10** — a generator loop in `campaign/` with no containers:
+   the generated jar goes on `pag`'s classpath by path, and "the corpus" is a
+   handful of hand-written probes. *Done when* a generated domain compiles,
+   loads and refutes one target.
+3. **Crude Phases 11 and 8** — an adversary proposing probes against three or
+   four hand-written mutants and one generated domain. *Done when* a kill rate
+   is reported, however rough.
+4. **Phases 4.5, 6, 7, 9**, then the full versions of **8, 10, 11**.
+
+*Decided — Shawn, 2026-09-26.* One cost to be aware of: until Phase 9,
+generated domain code runs unsandboxed on the development machine, with the
+developer's permissions. It comes from a local model and runs only inside
+`pag`, but it is arbitrary code; Phase 9 is what contains it.
 
 ### Phase 0 — skeleton
 sbt multi-project for `engine`: `api` and `probe-lib` (pure Java), plus
@@ -1245,11 +1297,10 @@ command line. A cleaned `api.ir` extracted from Historia's `IRWrapper` (§5.1);
 `SootIrProvider` with `load` and `sourceOf` only (§5.5); the profile check
 (§5.2); lowering (§5.3); `pag ir`. Most of the work is separating IR translation
 from the APK, callback and class-hierarchy machinery `SootWrapper` currently
-mixes into it. `findLine`, `isLoopHead` and `instrumentReach` wait for the
-phases that use them.
+mixes into it. `isLoopHead` waits for Phase 4, which uses it.
 Lifting (§5.7) is in this phase too, since the CFG is unreadable without it.
-*Done when:* a fixture `.java` using `Rand.randInt`, `BigInteger` arithmetic,
-a loop and a branch, compiled in the test with `javax.tools`, loads through
+*Done when:* a fixture `.java` using `Rand.randInt`, `reach`, `BigInteger`
+arithmetic, a loop and a branch, compiled in the test with `javax.tools`, loads through
 `SootIrProvider` and `pag ir --cfg` matches a golden file — **and** fixtures
 that read `args`, call `divide`, call a non-`BigInteger` method, use `null`,
 declare a second method, or use a field each exit with code 2 and a message
@@ -1263,7 +1314,7 @@ Delivered as eight changes of about 200 lines each, reviewed one at a time
 
 | # | change | tested by |
 | --- | --- | --- |
-| 1 | multi-project build, empty modules, `Greeter` removed | `sbt test` green in every module |
+| 1 | multi-project build, empty modules, `Greeter` removed; `probe-lib`'s `Rand` and `Reach` | `sbt test` green in every module; `Rand` and `Reach` unit tests |
 | 2 | `api` IR types: `Loc`, `Cmd`, `RVal`, `Step`, `Cfg` | compiles; a `javac` stub compiles against the jar |
 | 3 | `SootIrProvider`: straight-line code and `Return`; in-test fixture compilation | fixture → expected `Cmd` list |
 | 4 | translation of branches, calls, parameter binding; `Untranslatable` | one fixture per construct |
@@ -1273,15 +1324,14 @@ Delivered as eight changes of about 200 lines each, reviewed one at a time
 | 8 | `pag ir --cfg` | golden file |
 
 ### Phase 2b — the Stage 1 executor
-`probe-lib`'s `Rand` (§5.6), the Stage 1 interpreter (§9), `pag run`, and
-`findLine` for resolving `--at`.
+The Stage 1 interpreter (§9), `pag run`, and query resolution for `--reach`.
 *Done when:* `pag run --inputs …` on a fixture reproduces a visited-location
-sequence recorded in a fixture file, and the same fixture run as a real class
-file with `-Dpag.inputs` reaches the same markers — **and** the **all-locations
-cross-check** runs in CI: for every fixture, instrument a marker at every `pre`
-location, run Stage 2, and require that the markers printed equal the `pre`
-locations Stage 1 visited, in order. This one test checks trust-base claims A
-and B (`misc.md` §1) at once.
+sequence recorded in a fixture file — **and** the **stage cross-check** runs in
+CI: for every fixture, written with a `reach` call after nearly every
+statement, run it under Stage 1 and under Stage 2 with the same inputs, and
+require the `reach` ids Stage 1 passes to equal the `REACHED` ids Stage 2
+prints, in order. This one test checks trust-base claims A and B (`misc.md` §1)
+at once.
 
 ### Phase 3 — the reference interval domain
 Written by hand, in Java, as a fixture. Also the worked example shown to the
@@ -1403,14 +1453,12 @@ framework, library, or the OS.
 1. **Adversary budget and stopping rule.** How long does an adversary search
    before a domain is provisionally accepted? Phase 8's calibration should set
    this empirically rather than by guess.
-2. **Does the adversary see the domain source?** Assumed yes (§10). It is a
-   machine, and reading targets the search. Confirm.
+2. ~~**Does the adversary see the domain source?**~~ *Decided:* yes (§10).
 3. **Reaching-run minimization.** A found run may be large. Shrinking it before
    it becomes generator feedback is probably worth it, and is standard
    delta-debugging.
-4. **`S` or `Set<S>` from `transfer`.** Disjunction inside `S` keeps the engine
-   simple; the alternative is a signature change that is cheap in Phase 1 and
-   expensive after Phase 3.
+4. ~~**`S` or `Set<S>` from `transfer`.**~~ *Decided:* `S` for now (§5.4);
+   pulling disjunction out for parallelism is a possible later change.
 5. **Scoring corpus scope.** Shared across domains, or per-domain? Only a shared
    corpus makes proof counts comparable.
 6. **Aggregating `DomainFailure`.** One throw is a per-query `Inconclusive`, but

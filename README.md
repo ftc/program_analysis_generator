@@ -281,13 +281,15 @@ A refutation is a falsifiable claim about the real world: *no execution reaches
                     the domain is unsound
 ```
 
-Observing the right-hand premise costs a print statement:
+Observing the right-hand premise costs a print statement. The program marks
+the location with a call the analysis recognises and the run reports:
 
 ```
-ℓ_target:  print("REACHED-7f3a9c");
+ℓ_target:  reach(7);          // prints REACHED-7, and does nothing else
 ```
 
-Compile, run, grep stdout. No debugger, no state inspection, no instrumented
+Compile, run, grep stdout. The class file analysed and the class file run are
+the same file. No debugger, no state inspection, no instrumented
 interpreter, and no notion of what the domain's states mean. The evidence is
 that the program printed the id, which is about as close to bedrock as evidence
 gets and does not depend on any component of this project being correct.

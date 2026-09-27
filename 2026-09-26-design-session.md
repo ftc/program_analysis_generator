@@ -58,16 +58,31 @@ That became Phase 2a (§14), later cut into eight ~200-line changes.
     `check` refuse it — and lifting is lenient under it. *Why:* Shawn wants
     features added one at a time; a blanket bypass is the opposite, and
     starting strict is the cheap direction to change later.
-15. **Working agreement** in `CLAUDE.md`: ~200-line self-contained changes,
+15. **Consistency:** §5.4 and §10 answered inline by Shawn — disjunction stays
+    in `S` for now (may come out later for parallelism); adversaries read the
+    domain. §16 Q2 and Q4 closed.
+16. **Order of work** (§14): reach a crude generator (Phase 10) and adversary
+    (Phases 8, 11) right after Phase 5, before loading, isolation and the
+    scoring corpus. *Why:* those are the real unknowns. Cost: generated code
+    runs unsandboxed until Phase 9.
+17. **`reach(id)`** (§5.8) replaces bytecode instrumentation and line queries.
+    The probe calls `pag.probe.Reach.reach(7)`, which prints `REACHED-7` and
+    does nothing else; the analysis targets the call's `pre` location and
+    lowers it to `skip`. The analysed and executed class files are now the
+    same file, and the `Loc`→bytecode-offset problem disappears. `findLine`
+    and `instrumentReach` removed; `--at M:L` became `--reach ID`.
+18. **Working agreement** in `CLAUDE.md`: ~200-line self-contained changes,
     tests included, review between each, Shawn commits.
 
 ## Still open
 
+- Phase 8: whether an adversary that reads the domain inflates the measured
+  kill rate against hand-written mutants — under discussion.
 - §5.1: `Cmd` records carry `Loc loc` and `Goto` a `Loc trueLoc`, but `Loc` is
   now a sealed interface whose command positions are `AppLoc(m, i, isPre)`. A
   command's own position is an index, and a jump target is a `pre` location.
   To settle in change 2, before the types are written.
-- §5.4 and §10 **[decide]** markers and §16 are unchanged by this session.
+- §16's remaining questions are unchanged by this session.
 
 ## Next
 

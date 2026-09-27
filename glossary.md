@@ -153,8 +153,15 @@ later without a clash.
 
 **Query** — the input naming what to ask about. Sealed, one case for now.
 
-**`Reachable(method, line)`** — the only query form. Resolves through
-`findLine` to **every** location on that line; reaching the line means reaching
+**`reach(id)`** — `pag.probe.Reach.reach(int)`, the call a probe places at each
+location it asks about (§5.8). Prints `REACHED-<id>` and has no other effect;
+lowering makes it a `skip`. Its argument is an `int` literal, unique in the
+program. The marker is in the program itself, so nothing is rewritten.
+
+**`Reachable(id)`** — the only query form: is the `reach(id)` call reachable?
+Its target is that call's `pre` location. A line-based form,
+`Reachable(method, line)`, is deferred; it would resolve to **every** location
+on the line, and reaching the line would mean reaching
 any of them.
 
 **Target location** — a location a query resolves to. Seeded `I(ℓ) = top()`.
@@ -258,10 +265,9 @@ running a program. `pag check` performs it.
 the domain proved that location unreachable. **The only artifact in this project
 that proves anything.** Formerly called a witness.
 
-**`instrumentReach`** — writes a copy of the classes that prints
-`REACHED-<id>` on arrival at a target location.
 
-**Marker** — the `REACHED-<id>` string. Presence on stdout is the verdict.
+**Marker** — the `REACHED-<id>` string `reach(id)` prints. Presence on stdout is
+the verdict.
 
 **Executor** — what runs a program. Stage 1 is our interpreter; Stage 2 is
 `javac` plus the JVM, and is the verdict of record. Both take the same inputs.
@@ -313,7 +319,7 @@ Four distinct collections, easy to confuse:
 network and no credential; anything that talks to a model is the campaign
 driver's. Plan §11.
 
-**`--at M:L`** — the query, i.e. `Reachable(method, line)`.
+**`--reach ID`** — the query, i.e. `Reachable(ID)`.
 
 **Exit codes** — the agent-facing contract, so drivers never parse prose:
 `0` completed, `1` usage/IO, `2` did not load (untranslatable or a profile
@@ -354,16 +360,16 @@ classpath. `cli` sees it at runtime only, through `ServiceLoader`.
 agent drivers.
 
 **Trust base** — the human-written code a verdict rests on unchecked: the
-front end (loading through lowering), `instrumentReach`, the executor, and the
+front end (loading through lowering), `reach` and its lowering, the executor, and the
 certifier (§2). Exhaustively unit tested and reviewed before merge, as a
 standing rule. `Rand` is outside it: a bug there breaks replay, not verdicts.
 
-**All-locations cross-check** — the standing CI test that runs each fixture
-under Stage 1 and, with a marker at every `pre` location, under Stage 2, and
-requires the same locations in the same order (Phase 2b).
+**Stage cross-check** — the standing CI test that runs each fixture, written
+with a `reach` call after nearly every statement, under Stage 1 and Stage 2 and
+requires the same `reach` ids in the same order (Phase 2b).
 
 **`IrProvider`** — the one interface through which programs enter: `load`,
-`sourceOf`, `findLine`, `isLoopHead`, `instrumentReach`.
+`sourceOf`, `isLoopHead`.
 
 ---
 

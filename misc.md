@@ -65,7 +65,7 @@ Loading, lifting and lowering sit between the class file that runs and the
 | # | Claim | If wrong | How established |
 | --- | --- | --- | --- |
 | A | Loading, profile check, lifting and lowering preserve meaning | a correct domain rejected, or an unsound one hidden (e.g. `subtract` lifted as `+`) | Stage 1 interprets the lowered `Cfg`, Stage 2 runs the JVM; agreement over a corpus |
-| B | `instrumentReach` puts each marker at the bytecode for its `Loc` | the same two failures | the all-locations cross-check (plan Phase 2b) |
+| B | each `reach(id)` call lowers to the location the query targets | the same two failures | the stage cross-check (plan Phase 2b) |
 
 Both are loud rather than silent *provided the cross-check exists*, which is why
 it is a standing CI test rather than a one-off.
