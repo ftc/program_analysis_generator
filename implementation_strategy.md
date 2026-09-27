@@ -479,7 +479,7 @@ public interface Domain<S> {
   callee the active profile admits; the smoke test (Phase 6) calls it once per
   admitted callee, so an unrecognised one fails at load.
 - `transfer` returns one state. A domain needing disjunction carries it inside
-  `S`, with `join` as its union, so the engine never learns about it. **[decide]**
+  `S`, with `join` as its union, so the engine never learns about it. **[decide]** shawn: this is fine for now, later we may need to pull the disjunction out to improve parallelism though.
 - The obligations these methods must satisfy are real but unstated in code —
   Lemma 1 and its companions, w.r.t. a concretization each domain has and never
   writes down. The harness verifies their consequence, not them.
@@ -967,7 +967,7 @@ the executor. Output: reaching runs. Scored on kill rate against the mutant corp
 Letting the adversary *read* the domain is a deliberate choice — it is a machine,
 the prohibition on reading domains applies to humans, and reading is what lets it
 target the search rather than fuzz blindly. It still has to produce an executable
-reaching run, so reading cannot substitute for evidence. **[decide]**
+reaching run, so reading cannot substitute for evidence. **[decide]** shawn: I agree that we should let the adversaries inspect the domain. We want the adversaries to succeed whenever possible.
 
 The two must not be the same model instance, and preferably not the same model.
 An agent asked to write a domain and then attack it has no reason to attack hard.
