@@ -33,7 +33,7 @@ lands you in it with the whole stack visible.
 Structurally that means the dashboard **observes** the engine rather than driving
 it. `core` and `harness` emit events to an in-memory store; the dashboard reads
 that store and serves JSON; the page polls. Nothing in `core` imports anything
-from `dashboard`, so the engine runs headless in CI unchanged.
+from `dashboard`, so the engine runs headless unchanged.
 
 What it shows:
 

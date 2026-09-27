@@ -364,7 +364,7 @@ front end (loading through lowering), `reach` and its lowering, the executor, an
 certifier (§2). Exhaustively unit tested and reviewed before merge, as a
 standing rule. `Rand` is outside it: a bug there breaks replay, not verdicts.
 
-**Stage cross-check** — the standing CI test that runs each fixture, written
+**Stage cross-check** — the standing test in `sbt test` that runs each fixture, written
 with a `reach` call after nearly every statement, under Stage 1 and Stage 2 and
 requires the same `reach` ids in the same order (Phase 2b).
 

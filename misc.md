@@ -68,7 +68,7 @@ Loading, lifting and lowering sit between the class file that runs and the
 | B | each `reach(id)` call lowers to the location the query targets | the same two failures | the stage cross-check (plan Phase 2b) |
 
 Both are loud rather than silent *provided the cross-check exists*, which is why
-it is a standing CI test rather than a one-off.
+it is a standing test in `sbt test` rather than a one-off.
 
 **`Rand` is not in the trust base.** A rejection says "the domain proved `ℓ`
 unreachable for every input, and this run reached it." If `randInt` returned a

@@ -85,8 +85,8 @@ a higher bar than the rest, as a standing rule:
 - **Reviewed by Shawn before it merges.** Changes to these modules are called
   out as trust-base changes, not folded into larger diffs.
 - **Cross-checked end to end.** Stage 1 and Stage 2 agreeing on a corpus of
-  fixtures dense with `reach` calls (Phase 2b) is a standing test that runs in
-  CI.
+  fixtures dense with `reach` calls (Phase 2b) is a standing test in
+  `sbt test`.
 
 *Decided — Shawn, 2026-09-26.* `probe-lib`'s `Rand` is deliberately *not* in
 this table: it can break replay, but not a verdict (`misc.md` §1).
@@ -1281,10 +1281,12 @@ developer's permissions. It comes from a local model and runs only inside
 ### Phase 0 — skeleton
 sbt multi-project for `engine`: `api` and `probe-lib` (pure Java), plus
 `frontend-soot`, `core`, `harness`, `cli` in Scala 3, with `cli` depending on
-`frontend-soot` at runtime only (§5.5). A `build.sh` for `domains/interval`
-running `javac` against a fixed classpath. CI runs both.
-*Done when:* both build, a placeholder test passes in each, and `build.sh`
-succeeds with networking disabled.
+`frontend-soot` at runtime only (§5.5). There is no CI: this is a one-person
+project, and `sbt test` run locally before each review is the gate
+(`CLAUDE.md`). *Decided — Shawn, 2026-09-26.*
+*Done when:* every module builds, a placeholder test passes in each, and an sbt
+check fails if Soot is on the compile classpath of any module but
+`frontend-soot`.
 
 ### Phase 1 — the contract
 Write `engine/api` as §5. Get it reviewed before building on it.
@@ -1309,8 +1311,12 @@ fixture loads under `enforce = false` — **and** under `lift = false` the same
 golden fixture prints `BigInteger` calls with its location numbering unchanged
 — **and** no module but `frontend-soot` can compile against `soot.*`.
 
-Delivered as eight changes of about 200 lines each, reviewed one at a time
-(`CLAUDE.md`):
+Preceded by four changes for Phases 0 and 1: (1) the multi-project build;
+(2) `probe-lib`'s `Rand` and `Reach` — trust base, so on its own; (3) the `api`
+IR types; (4) the `Domain` interface and the `jdeps` check. Phase 2a itself was
+planned as the eight changes below; the trust-base rows (3–7) are held to about
+100 lines each under `CLAUDE.md`, so expect them to split further, each split
+proposed before it is written:
 
 | # | change | tested by |
 | --- | --- | --- |
@@ -1326,8 +1332,8 @@ Delivered as eight changes of about 200 lines each, reviewed one at a time
 ### Phase 2b — the Stage 1 executor
 The Stage 1 interpreter (§9), `pag run`, and query resolution for `--reach`.
 *Done when:* `pag run --inputs …` on a fixture reproduces a visited-location
-sequence recorded in a fixture file — **and** the **stage cross-check** runs in
-CI: for every fixture, written with a `reach` call after nearly every
+sequence recorded in a fixture file — **and** the **stage cross-check** is part
+of `sbt test`: for every fixture, written with a `reach` call after nearly every
 statement, run it under Stage 1 and under Stage 2 with the same inputs, and
 require the `reach` ids Stage 1 passes to equal the `REACHED` ids Stage 2
 prints, in order. This one test checks trust-base claims A and B (`misc.md` §1)
@@ -1335,7 +1341,9 @@ at once.
 
 ### Phase 3 — the reference interval domain
 Written by hand, in Java, as a fixture. Also the worked example shown to the
-generator, so write it the way generated code should look.
+generator, so write it the way generated code should look. Includes the
+`build.sh` for `domains/interval`, running `javac` against `api.jar` alone,
+which must succeed with networking disabled.
 *Done when:* the six transfer cases in `README.md` pass as unit tests.
 
 ### Phase 4 — the analysis engine
@@ -1388,7 +1396,7 @@ Deliberately unsound domains: a transfer that narrows too hard, an `entails` tha
 is too permissive, an `isBottom` that fires on a satisfiable state, a `widen`
 that drops a case. Measure what fraction any given adversary breaks, and at what
 budget.
-*Done when:* kill rate is reported per mutant and runs in CI. This is the number
+*Done when:* the campaign driver reports kill rate per mutant on demand. This is the number
 that makes "the adversary found nothing" mean anything, so it gates trusting any
 later result.
 
