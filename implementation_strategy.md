@@ -346,14 +346,22 @@ Three rules need more than a list membership test:
   ways to make a value are `valueOf`, the four constants, arithmetic, and
   `randInt`.
 
-**`enforce = false`** skips the pass entirely, for inspecting what the front end
-produced from a program outside the subset (`pag ir` on an arbitrary class).
-What happens downstream is then unspecified: lowering still turns the `args`
-binding into a no-op (§5.3), so a program that reads `args` hands the domain a
-local that was never assigned, and a disabled construct may reach a domain that
-was never asked to handle it. The profile check is what makes the analysis of a
-program meaningful; turning it off is for looking, not for verdicts. **[decide]**
-whether `analyze` and `check` should refuse to run with `enforce = false`.
+**The lists are how the language grows.** A new construct is added by extending
+the relevant list — a callee, an operator, a command — together with the
+lifting, lowering and domain support it needs, with the check still on. Every
+other construct stays rejected, so features arrive one at a time and each is
+tested on its own. *Decided — Shawn, 2026-09-26.*
+
+**`enforce = false` is for inspection only.** It skips the pass entirely, so
+`pag ir` can show what the front end makes of a construct *before* it is added
+— how `divide` looks in Jimple, say, and therefore how it should lift. Only
+`pag ir` accepts it; `analyze` and `check` exit 1 when it is set, because a
+verdict about a program outside the subset means nothing, and a `check` could
+reject a correct domain over a construct it was never promised (a program that
+reads `args` reaches a location the domain soundly refuted "for any input").
+Starting strict is also the cheap direction: relaxing the refusal later is one
+condition, while tightening it later would mean finding and discarding results
+already stored. *Decided — Shawn, 2026-09-26.*
 
 Domains are checked against the profile too: the load-time smoke test (Phase 6)
 exercises every enabled command and operator, so enabling a construct that an
@@ -629,7 +637,9 @@ location the analysis reasoned about.
 
 Lifting relies on the profile check having passed: it assumes every compare
 temp has exactly the one use the check enforces, and fails loudly — a bug, not
-a violation — if it finds otherwise.
+a violation — if it finds otherwise. Under `enforce = false` (inspection only,
+§5.2) there is no such guarantee, so lifting rewrites only the shapes it
+recognises and leaves everything else untouched.
 
 **`lift = false`** skips the pass. Lowering then turns every `BigInteger` call
 into a `Step.Call` with the receiver as first argument, static-field reads reach

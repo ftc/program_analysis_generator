@@ -92,8 +92,9 @@ may read `args`. v1's is `bigint-main-v1`.
 **Profile check** — the pass in `core`, between loading and lowering, that
 enforces the language profile. Reports every **profile violation** with the
 construct, its line, and the setting that would allow it — never a silent skip.
-`language.enforce = false` turns the pass off, for inspecting programs outside
-the subset; results from such a run are not verdicts.
+The language grows by extending the profile's lists with the check on.
+`language.enforce = false` turns the pass off for inspection only: `pag ir`
+accepts it, `analyze` and `check` refuse it.
 
 **Untranslatable** — bytecode the source IR cannot represent at all (switch,
 monitors, exception handlers). Distinct from a profile violation: one is a limit

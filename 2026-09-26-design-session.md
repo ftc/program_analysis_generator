@@ -53,13 +53,16 @@ That became Phase 2a (§14), later cut into eight ~200-line changes.
     `Rand` is outside it — a bug breaks replay, never a verdict. Shawn's rule:
     exhaustively unit tested and reviewed before merge, with an all-locations
     Stage 1/Stage 2 cross-check in CI (Phase 2b).
-14. **Working agreement** in `CLAUDE.md`: ~200-line self-contained changes,
+14. **`enforce` stays on; the profile's lists are how the language grows.**
+    `enforce = false` is inspection only — `pag ir` accepts it, `analyze` and
+    `check` refuse it — and lifting is lenient under it. *Why:* Shawn wants
+    features added one at a time; a blanket bypass is the opposite, and
+    starting strict is the cheap direction to change later.
+15. **Working agreement** in `CLAUDE.md`: ~200-line self-contained changes,
     tests included, review between each, Shawn commits.
 
 ## Still open
 
-- §5.2 **[decide]**: should `analyze` and `check` refuse to run with
-  `enforce = false`?
 - §5.1: `Cmd` records carry `Loc loc` and `Goto` a `Loc trueLoc`, but `Loc` is
   now a sealed interface whose command positions are `AppLoc(m, i, isPre)`. A
   command's own position is an index, and a jump target is a `pre` location.
