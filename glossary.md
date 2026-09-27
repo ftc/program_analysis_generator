@@ -246,7 +246,9 @@ policy (§7).
 known-good baseline to develop against and to seed mutants from, not something
 the system requires.
 
-**Mutant** — a deliberately unsound domain, used to calibrate the adversary.
+**Mutant** — a domain known to be unsound, used to calibrate the adversary:
+either hand-written with a planted bug, or a generated domain the adversary
+rejected.
 
 **Smoke test** — checks at domain load that every construct the active profile
 enables is handled, so failures surface at load rather than mid-run.
@@ -306,8 +308,11 @@ Four distinct collections, easy to confuse:
 | --- | --- | --- |
 | **probe corpus** | programs the adversary wrote | attacking a domain |
 | **scoring corpus** | programs with many targets, some infeasible by construction | proof count |
-| **mutant corpus** | deliberately unsound domains | calibrating the adversary |
-| **reaching runs** | probes that actually broke a domain | rejection records, generator feedback |
+| **mutant corpus** | domains known to be unsound: hand-written mutants and every rejected domain, listed in `corpora/mutants.txt` | calibrating the adversary |
+| **reaching runs** | probes that actually broke a domain, under `domains/<id>/rejections/` | rejection records, generator feedback |
+
+**`domain.json`**, **`run.json`** — the metadata kept beside each domain and each
+rejection in `domains/` (plan §3). Plain files in git for now.
 
 ---
 
@@ -356,8 +361,9 @@ classpath. `cli` sees it at runtime only, through `ServiceLoader`.
 
 **`engine/core`** — profile check, lowering, worklist, invariant map, certifier.
 
-**`engine/harness`** — executor, probe runner, verdict, scoring, mutation corpus,
-agent drivers.
+**`engine/harness`** — executor, probe runner, verdicts, scoring. Nothing that
+talks to a model: agent drivers and the mutant corpus belong to `campaign/` and
+`domains/`.
 
 **Trust base** — the human-written code a verdict rests on unchecked: the
 front end (loading through lowering), `reach` and its lowering, the executor, and the

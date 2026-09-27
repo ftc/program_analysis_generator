@@ -507,16 +507,24 @@ Scala 3 (LTS 3.3.6) project built with sbt 1.11.7.
 
 ## Layout
 
-Nothing described above is built yet. This is the current skeleton; the target
-layout — `engine/{api,probe-lib,frontend-soot,core,harness,results,cli}` plus
-`domains/` — is in `implementation_strategy.md` §3.
+The module skeleton exists; nothing described above is implemented yet. The
+full target layout, including `engine/results` and `domains/`, is in
+`implementation_strategy.md` §3.
 
 ```
-build.sbt                     build definition
-project/build.properties      sbt version
-src/main/scala/pag/Main.scala entry point (pag.Main)
-src/test/scala/pag/           MUnit test suites
+build.sbt                 build definition, including the module-boundary checks
+project/build.properties  sbt version
+engine/api/               pure Java: the contract and the IR
+engine/probe-lib/         pure Java: the library probes call
+engine/frontend-soot/     Scala 3: the only module that compiles against Soot
+engine/core/              Scala 3: analysis engine
+engine/harness/           Scala 3: executor and runner
+engine/cli/               Scala 3: the `pag` entry point (pag.cli.Main)
 ```
+
+`sbt test` also checks two boundaries before running each module's tests: only
+`frontend-soot` may have Soot on its compile classpath, and `api` and
+`probe-lib` may not have the Scala library on theirs.
 
 ## Setup on a new machine
 
@@ -569,19 +577,20 @@ cd program_analysis_generator
 sbt test
 ```
 
-The first run downloads sbt, the Scala 3.3.6 compiler, and MUnit into
-`~/.cache/coursier` (`~/Library/Caches/Coursier` on macOS) and takes a few
-minutes. Later builds start in seconds. A successful setup ends with:
+The first run downloads sbt, the Scala 3.3.6 compiler, MUnit, JUnit and Soot
+into `~/.cache/coursier` (`~/Library/Caches/Coursier` on macOS) and takes a few
+minutes. One of Soot's dependencies comes from Google's Maven repository
+(`maven.google.com`) rather than Maven Central. Later builds start in seconds.
+A successful setup ends with:
 
 ```
-[info] Passed: Total 3, Failed 0, Errors 0, Passed 3
 [success] Total time: ...
 ```
 
 Then confirm the entry point runs:
 
 ```sh
-sbt "run Scala"   # prints: Hello, Scala!
+sbt cli/run   # prints the usage line and exits with code 1: no commands yet
 ```
 
 ### 4. Editor setup (optional)
@@ -596,7 +605,7 @@ sbt "run Scala"   # prints: Hello, Scala!
 
 ### Offline / air-gapped machines
 
-Dependencies resolve from Maven Central over HTTPS. Behind a proxy, set
+Dependencies resolve from Maven Central and Google's Maven repository over HTTPS. Behind a proxy, set
 `JAVA_OPTS="-Dhttps.proxyHost=... -Dhttps.proxyPort=..."`, or copy a warm
 Coursier cache from a machine that has already built the project.
 
@@ -604,10 +613,11 @@ Coursier cache from a machine that has already built the project.
 
 ```sh
 sbt compile          # compile
-sbt test             # run the unit tests
-sbt run              # run Main with no arguments
-sbt "run Scala"      # run Main with arguments
-sbt console          # Scala REPL with the project on the classpath
+sbt test             # run every module's tests, after the boundary checks
+sbt core/test        # run one module's tests
+sbt cli/run          # run pag with no arguments
+sbt "cli/run ir …"   # run pag with arguments, once subcommands exist
+sbt core/console     # Scala REPL with a module on the classpath
 sbt ~test            # re-run tests on every file change
 sbt clean            # delete build output under target/
 ```

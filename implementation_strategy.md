@@ -96,31 +96,72 @@ this table: it can break replay, but not a verdict (`misc.md` §1).
 ```
 engine/                    sbt multi-project, human-only
   api/                     contract + IR. Pure Java, no Scala dependency.
-  probe-lib/               Pure Java, no dependencies. pag.probe.Rand (§5.6),
-                           the only library a probe may call
+  probe-lib/               Pure Java, no dependencies. pag.probe.Rand (§5.6)
+                           and pag.probe.Reach (§5.8), the only library a
+                           probe may call
   frontend-soot/           Scala 3. the ONLY module allowed to import soot.*
-  core/                    Scala 3. profile check, lowering, worklist,
-                           invariant map, certifier
-  harness/                 Scala 3. executor, probe runner, verdict, scoring,
-                           mutation corpus, agent drivers
+  core/                    Scala 3. profile check, lifting, lowering,
+                           worklist, invariant map, certifier
+  harness/                 Scala 3. executor, probe runner, verdicts, scoring
   results/                 Scala 3. result ADTs + codecs, shared with campaign/ (§13)
   cli/                     Scala 3. config, domain loading, entry point
-domains/
+domains/                   every domain worth keeping, one directory each
   interval/                Java. the reference fixture, and later a target
     src/ ... build.sh      javac against api.jar. No sbt, no network.
-  <generated domains>/
+    domain.json            metadata (below)
+  mut-<name>/              a hand-written mutant; domain.json names its bug
+  gen-<nnnn>/              a generated domain
+    rejections/<r>/        one per reaching run that rejected it
+      Probe.java           the program
+      run.json             everything needed to replay it (below)
 campaign/                  the outer loop. Separate codebase, drives pag by
                            subprocess; never linked against the engine (§12)
 probes/
-  <campaign>/              adversary output: programs, inputs, verdicts
+  <campaign>/              the adversary's working directory; not committed.
+                           A probe that rejects a domain is copied to
+                           domains/<id>/rejections/
 corpora/
   scoring/                 programs used to measure proof count
-  mutants/                 deliberately unsound domains, for calibration
+  mutants.txt              the mutant corpus: a list of domain ids (below)
 results/
   <campaign>/              durable per-attempt records, so a campaign resumes
 config/                    run configurations
 docker/                    compose files and mount definitions
 ```
+
+### Domains and their records
+
+A domain's source, its metadata and the counterexamples that rejected it live
+together under `domains/<id>/`, checked into git as plain files. *Decided —
+Shawn, 2026-09-26:* files in git for the first pass.
+
+**`domain.json`** — the domain's identity and history, in the §13 envelope:
+
+| field | contents |
+| --- | --- |
+| `id`, `status` | `reference`, `mutant`, `generated`, `surviving` or `rejected` |
+| `origin` | hand-written, or the generator's model, config, campaign id and prompt hash |
+| `api`, `profile` | the versions it was built and judged against |
+| `plantedBug` | mutants only: what was broken, and where |
+| `rejections` | ids under `rejections/` |
+| `calibration` | each fresh-adversary attempt: adversary config, budget, rediscovered or not, cost |
+| `proofCount` | once the scoring corpus exists (Phase 7) |
+
+**`run.json`** — one rejection, replayable with a single `pag check`: the
+`reach` id, the inputs, the analysis verdict, the markers printed, and the
+engine, api and profile versions and adversary config that produced it.
+
+**The mutant corpus is a list, not a copy.** `corpora/mutants.txt` names every
+domain whose status is `mutant` or `rejected`. Hand-written mutants seed it;
+every domain the adversary rejects joins it, carrying a realistic bug rather
+than a planted one (Phase 8).
+
+**What is committed and what is not.** Reference, mutant, surviving and
+rejected domains are committed, since they are few and worth reviewing like
+code. Domains that fail to compile or load, and full attempt logs, stay in
+`results/<campaign>/` and are not committed: a campaign produces hundreds.
+Moving to SQLite later changes the storage, not the schema, because both files
+use the `engine/results` codecs (§13).
 
 `engine/api` and `engine/probe-lib` are sbt subprojects with
 `crossPaths := false` and `autoScalaLibrary := false`, so the published jars are
@@ -1150,8 +1191,13 @@ changing any of those inputs makes results incomparable.
 
 Generate a domain → build it → `pag analyze` over the scoring corpus → hand it
 to the adversary → `pag check` each candidate → collect reaching runs → feed
-failures back → repeat. Plus `mutants`: score an adversary against the seeded
-mutant corpus, which needs the adversary and therefore lives here too.
+failures back → repeat. Plus `mutants`: score an adversary against the mutant
+corpus, which needs the adversary and therefore lives here too.
+
+It is the only writer of `domains/` (§3): it creates `domains/<id>/` for each
+generated domain worth keeping, records each rejection under
+`rejections/<r>/` with its `run.json`, updates `domain.json`'s status, and adds
+rejected domains to `corpora/mutants.txt`.
 
 ### What it has to survive
 
@@ -1396,7 +1442,17 @@ Deliberately unsound domains: a transfer that narrows too hard, an `entails` tha
 is too permissive, an `isBottom` that fires on a satisfiable state, a `widen`
 that drops a case. Measure what fraction any given adversary breaks, and at what
 budget.
-*Done when:* the campaign driver reports kill rate per mutant on demand. This is the number
+
+**Calibrate on rejected domains too.** Hand-written mutants are small edits
+that an adversary reading the source may spot by pattern, so they can overstate
+its strength against real bugs. Every domain the adversary rejects is a
+known-unsound domain with a realistic bug; it joins the mutant corpus (§3), and
+a *fresh* adversary session — shown the domain, never the earlier
+counterexample — tries to rediscover a reaching run. Each attempt is recorded
+in the domain's `calibration` history. The adversary never sees the reference
+domain's source, so it cannot find a mutant by comparison.
+*Done when:* the campaign driver reports kill rate per mutant on demand, with
+hand-written and rejected mutants reported separately. This is the number
 that makes "the adversary found nothing" mean anything, so it gates trusting any
 later result.
 
