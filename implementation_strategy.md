@@ -626,6 +626,15 @@ that wants randomness asks its shell for a number and puts it in the list.
 *Decided — Shawn, 2026-09-26:* adversary-chosen values only; a seeded
 generator was considered and dropped as unneeded.
 
+**Format.** A comma-separated list of integers of any size, each with at most
+one leading sign; whitespace around a value is ignored, and an empty or missing
+property means no inputs. An empty value (`1,,2`, `1,2,`) or a non-integer is
+rejected with the offending token named. Running out throws
+`IllegalStateException` naming how many values there were. The parser is
+`pag.probe.Inputs`, and the Stage 1 interpreter uses the same class, so the
+two stages cannot disagree about what a list means. *Decided — Shawn,
+2026-09-26.*
+
 **Why our own class.** The analysis matches the call by signature, so the
 signature should be one we own and never changes, and `probe-lib` has no
 dependencies so the Phase 9 containers stay JDK-only. The name avoids
@@ -712,6 +721,15 @@ So the class file analysed and the class file executed are **the same file**,
 not a copy with a `println` inserted. That removes a bytecode-rewriting pass
 from the trust base, and with it the problem of mapping each `Loc` back to a
 bytecode offset.
+
+**Why no explicit flush.** `reach` is a single `System.out.println`, and that
+line has reached the OS before `reach` returns: JDK 21 creates `System.out`
+with `autoFlush` on (`System.newPrintStream`), and `println` flushes when it is
+(`PrintStream.implWriteln`). So a marker survives an uncaught exception or a
+`SIGKILL` immediately after it — both routine, since running out of inputs
+throws and the runner kills probes that loop. `probe-lib`'s `ProbeRunTest`
+checks both in a real JVM, and fails against a `reach` that writes through its
+own buffered stream. Keep `reach` a single `System.out.println`.
 
 Profile rules: `pag.probe.Reach.reach` is always an admitted callee; its
 argument must be an `int` literal; each id appears at most once in a program.
@@ -1008,7 +1026,13 @@ is a bug in it.
 **Stage 2 — run the class file.** `java -Dpag.inputs=<values> -cp
 <classes>:probe-lib.jar Probe`, and grep stdout for `REACHED-<id>`. The
 executor is the JVM and the program is unmodified, so the evidence depends on
-nothing this project wrote beyond `reach`'s one `println` and `Rand`. This is the verdict of record; Stage 1 exists for speed and
+nothing this project wrote beyond `reach`'s one `println` and `Rand`.
+
+**The runner must never read stdout after killing a probe.** JDK 21's
+`ProcessImpl.destroy` closes the parent's end of the child's stdout as soon as
+it signals the child, so output not yet read is lost — possibly the marker,
+which would silently lose a counterexample. Redirect stdout to a file (as
+`ProbeRunTest` does) or drain it concurrently. This is the verdict of record; Stage 1 exists for speed and
 inspection, not for adjudication.
 
 The two stages agree by construction: Stage 1 computes in `BigInt`, and the

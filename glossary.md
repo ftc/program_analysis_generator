@@ -107,7 +107,8 @@ Without it every program has one execution and the abstraction is trivial
 (§5.6). Despite the name, nothing is random: the adversary chooses every value.
 
 **Inputs** — the list of values `randInt` returns in one run, in order,
-supplied as `-Dpag.inputs=…` (JVM) or `--inputs` (`pag run`). Chosen by the
+supplied as `-Dpag.inputs=…` (JVM) or `--inputs` (`pag run`), and parsed by
+`pag.probe.Inputs` in both stages. Chosen by the
 adversary; a run that asks for more than the list holds stops. What makes a run
 replayable.
 

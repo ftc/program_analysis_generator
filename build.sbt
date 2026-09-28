@@ -70,7 +70,13 @@ lazy val api = (project in file("engine/api"))
 
 /** Rand and Reach, the only library a probe may call (§5.6, §5.8). */
 lazy val probeLib = (project in file("engine/probe-lib"))
-  .settings(pureJava, name := "pag-probe-lib")
+  .settings(
+    pureJava,
+    name := "pag-probe-lib",
+    // ProbeRunTest starts real JVMs on the test JVM's own classpath, which is
+    // sbt's launcher classpath unless the tests are forked.
+    Test / fork := true
+  )
 
 /** The only module with Soot on its compile classpath (§5.5). */
 lazy val frontendSoot = (project in file("engine/frontend-soot"))
