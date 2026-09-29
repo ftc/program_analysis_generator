@@ -60,8 +60,13 @@ Measured by **proof count**.
 ## 2. The language and the IR
 
 **Source IR** — `Cmd` / `RVal` / `LVal` / `BinOp` (§5.1), Historia's shapes,
-Soot/Jimple-flavoured. What `IrProvider` produces. Represents more than any
+Soot/Jimple-flavoured, written in Scala in `engine/ir`. What `IrProvider` produces. Represents more than any
 profile accepts.
+
+**`MethodId`** — a method's fully qualified identity: declaring class, name,
+parameter types, return type. Printed as `Probe.main(java.lang.String[])`. Used
+in every location, `Method`, `Invoke` and `Call`. The profile's `callees` list
+matches its `qualifiedName` (`java.math.BigInteger.add`).
 
 **`Invoke`**, **`InvokeKind`** — a call in the source IR, with its dispatch kind
 (`Static`, `Virtual`, `Special`, `Interface`). The kind exists only in the
@@ -74,11 +79,19 @@ What the analysis and the domain see.
 `assume`-guarded transitions so a domain never sees branching, and an `Invoke`
 into a `Call` so a domain never sees dispatch. Table in §5.3.
 
+**Domain vocabulary** — the Java projection of `Step` in `pag.api` that
+`transfer` receives: exactly what lowering can emit, with the Scala IR's names
+and shapes (§5.4). Grows when a profile setting emits something new.
+
+**Converter** — the one place the Scala `Step` becomes the domain vocabulary,
+just before each `transfer`. Trust base. The seam where an out-of-process
+(e.g. Python) domain would plug in.
+
 **`Step`** — `Assign`, `Assume`, `Call` or `Skip`. A domain handles the first
 three; the engine handles `Skip` as the identity.
 
-**`Call`** — the `Step` form of an invocation: an optional target local, a
-qualified callee name, and arguments. No dispatch kind, no receiver. Each callee
+**`Call`** — the `Step` form of an invocation: an optional target local, the
+callee's `MethodId`, and arguments. No dispatch kind, no receiver. Each callee
 a profile admits has a documented meaning the domain implements; in v1 the only
 one is `randInt`.
 
@@ -351,7 +364,10 @@ on every record. The actual compatibility need, independent of format.
 
 ## 11. Modules and artifacts
 
-**`engine/api`** — the contract and the IR. Pure Java, no Scala dependency. The
+**`engine/ir`** — the IR in Scala: source IR, `Step`, `Cfg`, `IrProvider`.
+Shared by `frontend-soot`, `core` and `harness`; never seen by a domain.
+
+**`engine/api`** — the domain contract and the domain vocabulary. Pure Java, no Scala dependency. The
 only engine code an agent sees.
 
 **`engine/probe-lib`** — pure Java, no dependencies, holds `pag.probe.Rand`.
@@ -367,8 +383,8 @@ talks to a model: agent drivers and the mutant corpus belong to `campaign/` and
 `domains/`.
 
 **Trust base** — the human-written code a verdict rests on unchecked: the
-front end (loading through lowering), `reach` and its lowering, the executor, and the
-certifier (§2). Exhaustively unit tested and reviewed before merge, as a
+front end (loading through lowering), `reach` and its lowering, the executor, the
+certifier, and the domain-vocabulary converter (§2). Exhaustively unit tested and reviewed before merge, as a
 standing rule. `Rand` is outside it: a bug there breaks replay, not verdicts.
 
 **Stage cross-check** — the standing test in `sbt test` that runs each fixture, written
@@ -376,7 +392,7 @@ with a `reach` call after nearly every statement, under Stage 1 and Stage 2 and
 requires the same `reach` ids in the same order (Phase 2b).
 
 **`IrProvider`** — the one interface through which programs enter: `load`,
-`sourceOf`, `isLoopHead`.
+`isLoopHead`. Source lines are not a service: they live on `Method` (§5.1).
 
 ---
 

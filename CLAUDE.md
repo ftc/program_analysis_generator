@@ -36,7 +36,8 @@ changing code.
    change to compile or pass.
 9. **Stop after each change** and write a summary with these parts, in order:
     - **Trust base:** yes or no. If yes, name the parts touched: loading, the
-      profile check, lifting, lowering, `reach`, the executor, the certifier.
+      profile check, lifting, lowering, `reach`, the executor, the certifier,
+      the domain-vocabulary converter.
     - **What it does,** in one or two sentences.
     - **Invariant:** the property the change preserves or establishes, and
       which test checks it.
@@ -71,6 +72,7 @@ changing code.
 
 ## Build
 
-Scala 3 (sbt) for the engine; pure Java 21 for `engine/api`, `engine/probe-lib`
-and domains. `sbt test` runs everything. Only `engine/frontend-soot` may compile
+Scala 3 (sbt) for the engine, including the IR in `engine/ir`; pure Java 21 for
+`engine/api` (the domain contract and vocabulary), `engine/probe-lib` and
+domains. `sbt test` runs everything. Only `engine/frontend-soot` may compile
 against `soot.*`.

@@ -36,18 +36,29 @@ each side is written in what its author handles best.
 
 | | who writes it | language | where | model access |
 | --- | --- | --- | --- | --- |
+| IR: source IR, `Step`, `Cfg` | human | Scala 3 | `engine/ir` | none |
 | Analysis engine, certifier | human | Scala 3 | `engine/core` | none |
 | Executor, probe runner, scoring | human | Scala 3 | `engine/harness` | none |
-| Domain contract + IR | human | **Java 21** | `engine/api` | compiled jar |
+| Domain contract + domain vocabulary | human | **Java 21** | `engine/api` | compiled jar |
 | **Abstract domains** | **generator agent** | **Java 21** | `domains/<d>/` | read-write |
 | **Probe programs / reaching runs** | **adversary agent** | **Java 21** | `probes/<campaign>/` | read-write |
 | Campaign driver | human | Scala 3 | `campaign/` — separate codebase | none |
 
-Everything at or below the contract is Java; everything above it is Scala 3. The
+Everything a domain compiles against is Java; everything else is Scala 3. The
 engine is Scala because that is what a human maintains. The contract and domains
 are Java because that is what a small model writes reliably — large training
 corpus, regular syntax, actionable `javac` errors for the repair loop, and fast
 compiles in a loop that runs thousands of times.
+
+The line is drawn at what a domain *sees*, not at the IR as a whole. The IR is
+Scala, in `engine/ir`, because the engine's trust-base code — the profile
+check, lifting, lowering, the interpreter, the certifier — pattern-matches on
+it constantly, and Scala 3.3 neither destructures Java records in patterns nor
+checks a match over a Java sealed interface for missing cases (tried
+2026-09-29: a match omitting `Step.Skip` compiled silently). A domain sees only
+the *domain vocabulary* — `Step` and the values inside it — as Java types in
+`engine/api`, produced from the Scala IR by one converter just before
+`transfer` is called (§5.4). *Decided — Shawn, 2026-09-29.*
 
 Nothing in a domain is human-written, so unlike the previous draft there is no
 spec/transfer split and no per-domain human artifact at all. A reference domain
@@ -60,7 +71,8 @@ Python behind a JSON protocol costs a round trip on `entails`, which is the hot
 path during merging, and complicates ownership of the worklist's memory.
 In-process Java keeps `S` a plain JVM object passed by reference. If a Python
 domain is ever wanted it becomes one bridge implementation, not a cost the whole
-contract pays.
+contract pays — concretely, a second converter at the §5.4 seam, producing a
+serialized domain vocabulary instead of Java objects.
 
 ### The trust base
 
@@ -73,6 +85,7 @@ the loop checks for it (`misc.md` §1 has the argument):
 | `reach` and its lowering | `probe-lib`, `core` | a marker prints exactly when the location of its `reach` call is reached |
 | Stage 1 interpreter, run and marker check | `harness` | the executor implements the intended semantics |
 | certifier | `core` | only a certified map yields `Refuted` |
+| domain-vocabulary converter | `core` | the Java `Step` a domain receives means what the Scala `Step` means |
 
 A defect here does not show up as a bad domain; it shows up as a good domain
 rejected or a bad one accepted, long after the defect was written, and it is
@@ -95,7 +108,9 @@ this table: it can break replay, but not a verdict (`misc.md` §1).
 
 ```
 engine/                    sbt multi-project, human-only
-  api/                     contract + IR. Pure Java, no Scala dependency.
+  api/                     contract + domain vocabulary. Pure Java, no Scala
+                           dependency. The only engine code an agent sees.
+  ir/                      Scala 3. the IR: source IR, Step, Cfg, IrProvider
   probe-lib/               Pure Java, no dependencies. pag.probe.Rand (§5.6)
                            and pag.probe.Reach (§5.8), the only library a
                            probe may call
@@ -186,7 +201,7 @@ parked in `dashboard.md`. The CLI is the interface for now.
 | `TransferFunctions.cmdTransfer(cmd, state): Set[State]` | `Domain<S>.transfer(Step, S): S`, one state, domain-typed |
 | `StateSolver.canSubsume` driving merge | `Domain<S>.entails`, no solver in the engine |
 | `InitialQuery.Reachable(sig, line)` | the *only* query form here |
-| `CmdWrapper` / `RVal` / `LVal` / `BinaryOperator` | **reused** as `api.ir`, cleaned, with a config profile gating what loads (§5.2) |
+| `CmdWrapper` / `RVal` / `LVal` / `BinaryOperator` | **reused** as the Scala IR in `engine/ir`, cleaned, with a config profile gating what loads (§5.2) |
 | `IRWrapper` abstracting the IR source | **reused and tightened** into `IrProvider` (§5.5); Soot confined behind it |
 | `SootWrapper` (~2150 lines) | one implementation of `IrProvider`, replaceable |
 | `IPathNode` / `MemoryPathNode` / `DBPathNode` | **redesigned** as the derivation graph (§8), not ported |
@@ -246,60 +261,96 @@ lowering cannot.
 
 Mirrors `ir/IRWrapper.scala`, trimmed of what we will not model for a long time
 (no `SwitchCmd`, no `CaughtException`, no `ClassConst`). Everything here is
-representable; §5.2 decides what is *loadable*.
+representable; §5.2 decides what is *loadable*. It is Scala, in `engine/ir`
+(§2); a domain never sees it, only the Java projection of `Step` (§5.4).
+Constructors reject contradictory data — a jump past the last command, a
+`Static` invoke with a receiver, `body` and `lines` of different lengths.
 
-```java
-package pag.api.ir;
+```scala
+package pag.ir
 
 /** Where a state lives. Mirrors Historia's Loc; the Internal prefix leaves room
-    for Callback*/Callin* locations when framework modelling returns. */
-public sealed interface Loc {
-    record InternalMethodEntry(String method)                implements Loc {}  // Historia: InternalMethodInvoke
-    record AppLoc(String method, int index, boolean isPre)   implements Loc {}  // before/after command `index`
-    record InternalMethodExit(String method)                 implements Loc {}  // Historia: InternalMethodReturn
-}
+    for Callback/Callin locations when framework modelling returns. */
+enum Loc:
+  case InternalMethodEntry(method: MethodId)                 // Historia: InternalMethodInvoke
+  case AppLoc(method: MethodId, index: Int, isPre: Boolean)  // before/after command `index`
+  case InternalMethodExit(method: MethodId)                  // Historia: InternalMethodReturn
 
-public sealed interface Cmd {
-    record Assign(LVal target, RVal source, Loc loc)  implements Cmd {}
-    record Goto(RVal cond, Loc trueLoc, Loc loc)      implements Cmd {}  // conditional
-    record Nop(Loc loc)                               implements Cmd {}
-    record Return(Optional<RVal> value, Loc loc)      implements Cmd {}
-    record InvokeStmt(Invoke call, Loc loc)           implements Cmd {}  // result discarded
-    record Throw(Loc loc)                             implements Cmd {}  // disabled in v1
-}
+/** A method's fully qualified identity; printed as Probe.main(java.lang.String[]). */
+final case class MethodId(declaringClass: String, name: String,
+                          paramTypes: List[String], returnType: String):
+  def qualifiedName: String   // java.math.BigInteger.add — class and name, ignoring overloads
 
-public sealed interface RVal {
-    record IntConst(BigInteger v)                     implements RVal {}  // int, long and lifted constants
-    record BoolConst(boolean v)                       implements RVal {}
-    record Binop(RVal l, BinOp op, RVal r)            implements RVal {}
-    record Invoke(InvokeKind kind, String declaringClass, String name,
-                  Optional<RVal> receiver, List<RVal> args) implements RVal {}  // v1: listed callees only
-    record Cast(String type, RVal v)                  implements RVal {}  // disabled in v1
-    record NewObject(String className)                implements RVal {}  // disabled in v1
-    record StringConst(String v)                      implements RVal {}  // disabled in v1
-    record InstanceOf(String clazz, Local target)     implements RVal {}  // disabled in v1
-    record ArrayLength(Local l)                       implements RVal {}  // disabled in v1
-}
+enum Cmd:
+  case Assign(target: LVal, source: RVal)
+  case Goto(cond: RVal, target: Int)          // target: a body index
+  case Nop()
+  case Return(value: Option[RVal])
+  case InvokeStmt(call: RVal.Invoke)          // result discarded
+  case Throw()                                // disabled in v1
 
-public enum InvokeKind { Static, Virtual, Special, Interface }
+sealed trait RVal
+object RVal:
+  case class IntConst(v: BigInt)                                  extends RVal  // int, long and lifted constants
+  case class BoolConst(v: Boolean)                                extends RVal
+  case class Binop(l: RVal, op: BinOp, r: RVal)                   extends RVal
+  case class Invoke(kind: InvokeKind, callee: MethodId,
+                    receiver: Option[RVal], args: List[RVal])     extends RVal  // v1: listed callees only
+  case class Cast(tpe: String, v: RVal)                           extends RVal  // disabled in v1
+  case class NewObject(className: String)                         extends RVal  // disabled in v1
+  case class StringConst(v: String)                               extends RVal  // disabled in v1
+  case class InstanceOf(clazz: String, target: LVal.Local)        extends RVal  // disabled in v1
+  case class ArrayLength(l: LVal.Local)                           extends RVal  // disabled in v1
 
-public sealed interface LVal extends RVal {
-    record Local(String name, String type)                           implements LVal {}
-    record Param(int index, String type)                             implements LVal {}  // v1: main's args binding only
-    record This(String className)                                    implements LVal {}  // disabled in v1
-    record Field(Local base, String declType, String name)           implements LVal {}  // disabled in v1
-    record StaticField(String declaringClass, String name)           implements LVal {}  // v1: BigInteger constants only
-    record ArrayRef(RVal base, RVal index)                           implements LVal {}  // disabled in v1
-}
+sealed trait LVal extends RVal
+object LVal:
+  case class Local(name: String, tpe: String)                     extends LVal
+  case class Param(index: Int, tpe: String)                       extends LVal  // v1: main's args binding only
+  case class This(className: String)                              extends LVal  // disabled in v1
+  case class Field(base: Local, declType: String, name: String)   extends LVal  // disabled in v1
+  case class StaticField(declaringClass: String, name: String)    extends LVal  // v1: BigInteger constants only
+  case class ArrayRef(base: RVal, index: RVal)                    extends LVal  // disabled in v1
 
-public enum BinOp { Mult, Add, Sub, Lt, Le, Gt, Ge, Eq, Ne }
+enum InvokeKind:
+  case Static, Virtual, Special, Interface
 
-public record Method(String name, List<Cmd> body) {}
-public record Program(List<Method> methods, Loc entry) {}
+enum BinOp:
+  case Mult, Add, Sub, Lt, Le, Gt, Ge, Eq, Ne
+
+/** lines(i) is the source line of body(i), or -1 if unknown. */
+final case class Method(id: MethodId, body: Vector[Cmd], lines: Vector[Int]):
+  def lineOf(index: Int): Option[Int]
+  /** The pre (isPre) or post locations of every command on a line, in body order. */
+  def locationsOn(line: Int, isPre: Boolean): List[Loc.AppLoc]
+
+final case class Program(sourceFile: String, methods: List[Method], entryMethod: MethodId)
 ```
 
-`Goto` carries its own branch target, as in Historia. Fall-through is the next
-index in the method body. An unconditional jump is `Goto(BoolConst(true), …)`.
+**Methods are identified by `MethodId`**, the fully qualified signature, as
+Historia does with `Signature`: declaring class, name, parameter types and
+return type, so overloads and same-named methods in different classes are
+distinct. It is a record rather than Soot's signature string
+(`<Probe: void main(java.lang.String[])>`), so no front end's naming format
+crosses the §5.5 boundary, and the profile check can ask for a method's class
+and name without parsing. *Decided — Shawn, 2026-09-29.*
+
+**A command does not know its own location.** Its position is its index in
+`Method.body`, and its locations are derived from that: `pre(i)` is
+`AppLoc(m, i, true)`. Storing the position on the command as well, as
+Historia's `CmdWrapper` does, would record it twice, and the two copies could
+disagree — especially across lifting, which rewrites commands in place. So
+`Goto` names its target by index, and fall-through is the next index. An
+unconditional jump is `Goto(BoolConst(true), t)`. *Decided — Shawn,
+2026-09-27.*
+
+**Source lines live on `Method`**, one per command, recorded by the front end
+at load. Lifting never adds or removes a command (§5.7), so the list stays
+correct through it. A line maps to a *list* of locations, never one: a line can
+hold several statements with no order between them (`if (a) x(); else y();`),
+`javac` can emit one line's code in two places (a `for` header's initializer
+and its condition), and Jimple splits one expression into several units that
+share a line. Callers treat the list as a disjunction (§6). In v1, lines serve
+error messages and `pag ir`; queries still name `reach` calls (§5.8).
 
 `BinOp` has all six comparisons so that negating a branch condition during
 lowering (§5.3) is an operator flip — `¬(a ≤ b)` is `a > b` — rather than an
@@ -416,26 +467,29 @@ The engine lowers the source IR to a transition relation before analysis, which
 is how both the dissertation and Historia's analysis treat control flow: the
 formal language in Ch. 5 §5.2 has `assume`, while the Soot-facing IR has `Goto`.
 
-A `Goto(cond, trueLoc)` at `ℓ` with fall-through `ℓ_next` lowers to
+A `Goto(cond, t)` at index `i` lowers, in outline, to
 
 ```
-  ℓ —assume(cond)→ trueLoc        ℓ —assume(!cond)→ ℓ_next
+  post(i) —assume(cond)→ pre(t)        post(i) —assume(¬cond)→ pre(i+1)
 ```
 
 so branching never becomes a domain's problem. A domain sees three command
 forms; a fourth, `Skip`, is handled by the engine alone:
 
-```java
-public sealed interface Step {
-    record Assign(LVal target, RVal source)                       implements Step {}
-    record Assume(RVal cond)                                      implements Step {}
-    record Call(Optional<Local> target, String callee, List<RVal> args) implements Step {}
-    record Skip()                                                 implements Step {}  // engine-only identity
-}
+```scala
+package pag.ir
 
-public record Transition(Loc from, Step step, Loc to) {}
-public record Cfg(List<Transition> transitions, Loc init, Loc exit) {}
+enum Step:
+  case Assign(target: LVal, source: RVal)
+  case Assume(cond: RVal)
+  case Call(target: Option[LVal.Local], callee: MethodId, args: List[RVal])
+  case Skip()                                  // engine-only identity
+
+final case class Transition(from: Loc, step: Step, to: Loc)
+final case class Cfg(transitions: List[Transition], init: Loc, exit: Loc)
 ```
+
+A domain receives the Java projection of `Step`, not this type (§5.4).
 
 Lowering runs after lifting (§5.7), so with lifting on it never sees a
 `BigInteger` call — only arithmetic, comparisons, and `randInt`.
@@ -451,9 +505,9 @@ is `InternalMethodExit(main)`.
 | --- | --- |
 | *(method entry)* | `InternalMethodEntry(m) —skip→ pre(0)` |
 | `Assign(x, e)`, `e` not an `Invoke` | `pre(i) —x := e→ post(i) —skip→ pre(i+1)` |
-| `Assign(x, Invoke(_, C, n, recv, args))` | `pre(i) —call(x, "C.n", recv ++ args)→ post(i) —skip→ pre(i+1)` |
-| `InvokeStmt(Invoke(_, C, n, recv, args))` | `pre(i) —call(—, "C.n", recv ++ args)→ post(i) —skip→ pre(i+1)` |
-| `InvokeStmt(Invoke(Static, "pag.probe.Reach", "reach", —, [id]))` | `pre(i) —skip→ post(i) —skip→ pre(i+1)`; `pre(i)` is the target of `Reachable(id)` (§5.8) |
+| `Assign(x, Invoke(_, f, recv, args))` | `pre(i) —call(x, f, recv ++ args)→ post(i) —skip→ pre(i+1)` |
+| `InvokeStmt(Invoke(_, f, recv, args))` | `pre(i) —call(—, f, recv ++ args)→ post(i) —skip→ pre(i+1)` |
+| `InvokeStmt(Invoke(Static, pag.probe.Reach.reach(int), —, [id]))` | `pre(i) —skip→ post(i) —skip→ pre(i+1)`; `pre(i)` is the target of `Reachable(id)` (§5.8) |
 | `Assign(r0, Param(0, _))` in `main` | `pre(i) —skip→ post(i) —skip→ pre(i+1)` |
 | `Nop` | `pre(i) —skip→ post(i) —skip→ pre(i+1)` |
 | `Goto(true, t)` | `pre(i) —skip→ post(i) —skip→ pre(t)` |
@@ -477,8 +531,8 @@ Shawn, 2026-09-24.*
 that call's `pre` location. `post` locations and the method entry/exit are
 addressable by the engine but not by a query in v1.
 
-`Step.Call` is where the invoke kind disappears: the callee is a plain qualified
-name with no dispatch kind, and a receiver, if any, becomes the first argument. Every callee a profile admits comes
+`Step.Call` is where the invoke kind disappears: the callee is its `MethodId`
+with no dispatch kind, and a receiver, if any, becomes the first argument. Every callee a profile admits comes
 with a stated meaning in the contract's documentation, and the domain implements
 that meaning in `transfer`. With lifting on, v1 has one callee left by the time lowering runs,
 `pag.probe.Rand.randInt`,
@@ -531,27 +585,60 @@ public interface Domain<S> {
 - Version the api jar and record its version, and the language profile, in every
   result.
 
-### 5.5 The front end, and the Soot boundary
-
-Programs enter through one narrow interface. Nothing above it may import
-`soot.*`.
+**The domain vocabulary.** `transfer`'s `Step` is `pag.api.Step`, a Java type,
+not the Scala IR's. It carries exactly what lowering can emit under the profile
+settings that exist, and nothing more, so the generator never reads a type it
+can never receive:
 
 ```java
-package pag.api.ir;
+package pag.api;
+
+public sealed interface Step {
+    record Assign(LVal.Local target, RVal source)                    implements Step {}
+    record Assume(RVal cond)                                         implements Step {}
+    record Call(Optional<LVal.Local> target, MethodId callee, List<RVal> args) implements Step {}
+}
+public sealed interface RVal  { IntConst(BigInteger v); Binop(RVal l, BinOp op, RVal r); LVal }
+public sealed interface LVal extends RVal { Local(String name, String type);
+                                            StaticField(String declaringClass, String name) }  // lift = false only
+public enum BinOp { Mult, Add, Sub, Lt, Le, Gt, Ge, Eq, Ne }
+public record MethodId(String declaringClass, String name, List<String> paramTypes, String returnType) {}
+```
+
+It keeps the Scala IR's names and shapes, so the conversion is one-to-one.
+`Skip` is absent (the engine handles it), as are `Invoke` (lowered to `Call`),
+`Param` (lowered to `skip`), `BoolConst` (only `Goto(true, …)`, which lowers
+to `skip`), and every construct v1 disables. It grows when a profile setting
+starts emitting something new. *Decided — Shawn, 2026-09-29.*
+
+**The converter** is the one place the Scala IR becomes the domain vocabulary:
+a match over the Scala `Step` and `RVal`, so the compiler checks it covers every
+case, producing the Java records. It sits in `core` beside the worklist, runs
+immediately before each `transfer`, and is trust-base code (§2): a
+mistranslated `Sub` makes a correct domain wrong. Handing the converter a Scala
+value the vocabulary cannot express — `Skip`, `Invoke`, a disabled construct —
+is an engine bug and throws. It is also the seam where an out-of-process
+domain would plug in (§2): a second converter producing a serialized
+vocabulary instead of Java objects. Built as the first change of Phase 4, with
+its first caller.
+
+### 5.5 The front end, and the Soot boundary
+
+Every program the system analyzes is loaded through one interface,
+`IrProvider`, which turns class files into the IR. No module downstream of it
+may import `soot.*`.
+
+```scala
+package pag.ir
 
 /** The only way a program enters the system. */
-public interface IrProvider {
-    /**
-     * Methods found in the given compilation unit, already in api.ir form.
-     * Translates everything api.ir can represent; the profile check (§5.2)
-     * decides what is accepted. Throws only for bytecode api.ir cannot
-     * represent at all (switch, monitors, exception handlers).
-     */
-    List<Method> load(Path classesOrJar) throws Untranslatable;
-
-    /** Source file and line for a Loc, for error messages and tooling. */
-    Optional<SourceRef> sourceOf(Loc loc);
-}
+trait IrProvider:
+  /** The program in the given compilation unit, as IR, with a source line for
+    * each command. Translates everything the IR can represent; the profile
+    * check (§5.2) decides what is accepted. Throws Untranslatable only for
+    * bytecode the IR cannot represent at all (switch, monitors, handlers).
+    */
+  def load(classesOrJar: Path): Program
 ```
 
 `SootIrProvider` is the v1 implementation and lives alone in
@@ -586,9 +673,9 @@ disagreement, and removes the JSON program codec the previous draft needed.
 `IrProvider` also owns one location service the engine needs, because it is a
 question about bytecode:
 
-```java
+```scala
 /** Is this a loop head? Decides where the engine widens. */
-boolean isLoopHead(Loc loc);
+def isLoopHead(loc: Loc): Boolean
 ```
 
 Historia's `findLineInMethod` (line → locations) and a bytecode-rewriting
@@ -640,7 +727,7 @@ signature should be one we own and never changes, and `probe-lib` has no
 dependencies so the Phase 9 containers stay JDK-only. The name avoids
 `Instrumentation`, which collides with `java.lang.instrument.Instrumentation`.
 
-**The meaning a domain implements.** `call(x, "pag.probe.Rand.randInt", [])`
+**The meaning a domain implements.** `call(x, pag.probe.Rand.randInt(), [])`
 assigns `x` an arbitrary integer, so backward it frees `x` and leaves every
 other variable's constraint untouched — `README.md`'s `x := randInt()`.
 
@@ -676,8 +763,8 @@ as their use are substituted; anything else is left alone. *Decided — Shawn,
 
 **Lifting never adds or removes a command.** A fused compare leaves a `Nop` where
 the temp was assigned, so every `Loc` still names the same bytecode unit it did
-after loading. `sourceOf`, `isLoopHead` and query resolution all key on `Loc`,
-and error messages and the invariant map print through it.
+after loading. `Method.lines`, `isLoopHead` and query resolution all key on
+command indices, and error messages and the invariant map print through them.
 
 Lifting relies on the profile check having passed: it assumes every compare
 temp has exactly the one use the check enforces, and fails loudly — a bug, not
@@ -1359,14 +1446,15 @@ check fails if Soot is on the compile classpath of any module but
 `frontend-soot`.
 
 ### Phase 1 — the contract
-Write `engine/api` as §5. Get it reviewed before building on it.
+Write the IR in `engine/ir` (§5.1, §5.3) and the domain contract and
+vocabulary in `engine/api` (§5.4). Get them reviewed before building on them.
 *Done when:* a stub domain compiles against `api.jar` alone with `javac`, and
 `jdeps` reports no dependency outside `java.*` and `pag.api.*`.
 
 ### Phase 2a — load, check, lift, lower, print
 The first milestone: load a simple Java program and inspect its CFG from the
-command line. A cleaned `api.ir` extracted from Historia's `IRWrapper` (§5.1);
-`SootIrProvider` with `load` and `sourceOf` only (§5.5); the profile check
+command line. A cleaned IR in `engine/ir` extracted from Historia's `IRWrapper` (§5.1);
+`SootIrProvider` with `load` only (§5.5); the profile check
 (§5.2); lowering (§5.3); `pag ir`. Most of the work is separating IR translation
 from the APK, callback and class-hierarchy machinery `SootWrapper` currently
 mixes into it. `isLoopHead` waits for Phase 4, which uses it.
@@ -1382,8 +1470,9 @@ golden fixture prints `BigInteger` calls with its location numbering unchanged
 — **and** no module but `frontend-soot` can compile against `soot.*`.
 
 Preceded by four changes for Phases 0 and 1: (1) the multi-project build;
-(2) `probe-lib`'s `Rand` and `Reach` — trust base, so on its own; (3) the `api`
-IR types; (4) the `Domain` interface and the `jdeps` check. Phase 2a itself was
+(2) `probe-lib`'s `Rand` and `Reach` — trust base, so on its own; (3) the
+Scala IR in `engine/ir`, then the Java domain vocabulary in `api`; (4) the
+`Domain` interface and the `jdeps` check. Phase 2a itself was
 planned as the eight changes below; the trust-base rows (3–7) are held to about
 100 lines each under `CLAUDE.md`, so expect them to split further, each split
 proposed before it is written:
@@ -1391,7 +1480,7 @@ proposed before it is written:
 | # | change | tested by |
 | --- | --- | --- |
 | 1 | multi-project build, empty modules, `Greeter` removed; `probe-lib`'s `Rand` and `Reach` | `sbt test` green in every module; `Rand` and `Reach` unit tests |
-| 2 | `api` IR types: `Loc`, `Cmd`, `RVal`, `Step`, `Cfg` | compiles; a `javac` stub compiles against the jar |
+| 2 | IR types in `engine/ir`; domain vocabulary in `api` | constructor-check tests; a `javac` stub compiles against `api.jar` |
 | 3 | `SootIrProvider`: straight-line code and `Return`; in-test fixture compilation | fixture → expected `Cmd` list |
 | 4 | translation of branches, calls, parameter binding; `Untranslatable` | one fixture per construct |
 | 5 | profile check | a passing and a failing fixture per rule |
@@ -1417,8 +1506,9 @@ which must succeed with networking disabled.
 *Done when:* the six transfer cases in `README.md` pass as unit tests.
 
 ### Phase 4 — the analysis engine
-Worklist, invariant map, widening, iteration limit, and the certifier as a separate
-pass. The recorder interface (§8) with `NullRecorder` only — the graph comes
+First, on its own, the domain-vocabulary converter (§5.4), with one test per
+case. Then the worklist, invariant map, widening, iteration limit, and the
+certifier as a separate pass. The recorder interface (§8) with `NullRecorder` only — the graph comes
 next, but the call sites go in now so they are never retrofitted.
 *Done when:* `pag analyze` prints the map in §11's format; a program whose
 target is unreachable gets `Refuted` and one whose target is reachable gets
@@ -1587,3 +1677,7 @@ framework, library, or the OS.
     comparison with a literal. Lifting could substitute a temp that is assigned
     a constant and used once, leaving its assignment in place so locations are
     unchanged. *Decided:* yes, in lifting (§5.7).
+15. ~~**Method identity.**~~ *Decided:* methods are identified by `MethodId`,
+    the fully qualified signature (§5.1). The profile's `callees` list still
+    matches by class and name (`MethodId.qualifiedName`), which is exact while
+    no admitted callee is overloaded; it moves to full signatures when one is.
