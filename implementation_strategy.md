@@ -687,6 +687,29 @@ read, the second deletes statements with no path to them — and a statement wit
 no path to it is exactly what a reachability query may ask about. Either would
 mean the IR analysed is not the code executed, which §9 depends on.
 
+Two more settings are for the humans reading `pag ir` and invariant maps, not
+for correctness. **Probes and fixtures are compiled with `javac -g`**, and Soot
+runs with `jb use-original-names:true` and `keep-line-number`: without the
+debug information `-g` adds, locals come out as `l1` and `$stack7` instead of
+`x` and `i`. The adversary's build uses `-g` too. *Decided — Shawn,
+2026-09-29.*
+
+**Soot may reuse a variable's name for an unrelated value.** In a probe whose
+loop counter `i` is dead after the loop, Soot 4.7.1 produced
+`i = valueOf(5L)` and `i = <BigInteger: TEN>` for two later comparison
+constants. The Jimple is correct — `i` is dead, and the local now holds the
+constant — but an invariant map showing `i ↦ [5,5]` after the loop is about a
+different value than the loop counter. `javac` does not do this (the constant
+stays on the operand stack), and it happens before names are applied (without
+`-g`, the counter and the constant were both `$stack7`). Turning off
+`jb.ulp`, `jb.lp`, `jb.cp` and `jb.a`, separately and together, did not change
+it; the cause is probably in Soot's bytecode front end or local splitter and
+was not investigated further. Accepted as a known readability caveat, not a
+correctness issue: nothing in the analysis depends on names, and constant
+substitution (§5.7) follows definitions to uses rather than trusting names.
+*Decided — Shawn, 2026-09-29:* document and move on; revisit if it confuses a
+real debugging session, or when Soot is replaced.
+
 The cleanup that matters here is not cosmetic. Historia's `SootWrapper` is ~2150
 lines because it carries APK loading, callback resolution, class-hierarchy
 queries and framework modelling alongside the actual IR translation. For a
@@ -775,9 +798,12 @@ source IR to source IR.
 | `r := a.add(b)` / `subtract` / `multiply` | `r := a + b` / `a - b` / `a * b` |
 | `r := a.negate()` | `r := 0 - a` |
 | `$i := a.compareTo(b)` then `if $i OP 0 goto t` | `nop` then `if a OP b goto t` |
-| `$z := a.equals(b)` then `if $z == 0 goto t` | `nop` then `if a ≠ b goto t` |
-| `$z := a.equals(b)` then `if $z != 0 goto t` | `nop` then `if a = b goto t` |
+| `$z := a.equals(b)` then `if $z == false goto t` | `nop` then `if a ≠ b goto t` |
+| `$z := a.equals(b)` then `if $z != false goto t` | `nop` then `if a = b goto t` |
 | `r := Rand.randInt()` | unchanged; lowering makes it a `Call` |
+
+(Soot prints the `equals` test against the boolean constant `false`, not `0`:
+observed on Soot 4.7.1, 2026-09-29.)
 
 **Constant substitution.** After the rewrites above, a temp assigned a constant
 and used exactly once has the constant substituted at its use:
@@ -787,7 +813,10 @@ backward: without it a domain meets `x <= $r` before `$r := 0`, and a
 non-relational domain can use neither. Jimple forces the temp — call arguments
 must be locals or literals — so every `BigInteger` comparison with a literal
 would otherwise be lost. Only single-use temps assigned in the same basic block
-as their use are substituted; anything else is left alone. *Decided — Shawn,
+as their use are substituted; anything else is left alone. "Temp" means a
+*definition*, not a name: the rule follows each assignment to its one use, since
+Soot can reuse a user variable's name for a constant (§5.5) and reuses `$stack`
+names across unrelated values. *Decided — Shawn,
 2026-09-26.*
 
 **Lifting never adds or removes a command.** A fused compare leaves a `Nop` where
@@ -1712,3 +1741,14 @@ framework, library, or the OS.
     the fully qualified signature (§5.1). The profile's `callees` list still
     matches by class and name (`MethodId.qualifiedName`), which is exact while
     no admitted callee is overloaded; it moves to full signatures when one is.
+16. **Domains that use libraries.** A domain may use a solver internally (§4),
+    and the Phase 6 loader is child-first so domains can carry their own
+    dependencies — but the Phase 9 container is JDK-only with no network, and
+    the domain build is `javac -cp api.jar`, so an agent cannot actually obtain
+    one. Allowing, say, Z3 means a curated read-only library set in the
+    container, a build classpath and packaging that include it, and, for native
+    libraries, accepting that a native crash takes down the `pag` JVM (the
+    §12 process boundary still contains it). Running each domain in its own
+    container is one way to give it such dependencies. Deferred: nothing before
+    Phase 9 depends on it, and crude Phase 10 will show whether a small model
+    reaches for a solver at all.
