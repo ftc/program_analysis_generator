@@ -76,3 +76,7 @@ Scala 3 (sbt) for the engine, including the IR in `engine/ir`; pure Java 21 for
 `engine/api` (the domain contract and vocabulary), `engine/probe-lib` and
 domains. `sbt test` runs everything. Only `engine/frontend-soot` may compile
 against `soot.*`.
+
+## Inform the user if their terminology is inconsistent
+
+The file `glossary.md` contains the current meanings of all non-standard vocabulary used in this project. If the user uses some of this vocabulary in a way that does not appear to be consistent, ask for clarification.

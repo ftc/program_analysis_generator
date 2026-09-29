@@ -55,7 +55,9 @@ Scala, in `engine/ir`, because the engine's trust-base code — the profile
 check, lifting, lowering, the interpreter, the certifier — pattern-matches on
 it constantly, and Scala 3.3 neither destructures Java records in patterns nor
 checks a match over a Java sealed interface for missing cases (tried
-2026-09-29: a match omitting `Step.Skip` compiled silently). A domain sees only
+2026-09-29: a match omitting `Step.Skip` compiled silently). Over Scala sealed
+types it does, and the build turns that check from a warning into an error
+(`-Wconf:id=E029:e`), so a match missing a case fails to compile. A domain sees only
 the *domain vocabulary* — `Step` and the values inside it — as Java types in
 `engine/api`, produced from the Scala IR by one converter just before
 `transfer` is called (§5.4). *Decided — Shawn, 2026-09-29.*
@@ -265,29 +267,43 @@ representable; §5.2 decides what is *loadable*. It is Scala, in `engine/ir`
 (§2); a domain never sees it, only the Java projection of `Step` (§5.4).
 Constructors reject contradictory data — a jump past the last command, a
 `Static` invoke with a receiver, `body` and `lines` of different lengths.
+Types whose constructors check something are sealed traits with case classes,
+since a Scala 3 enum case cannot have a body; the rest are enums.
 
 ```scala
 package pag.ir
 
 /** Where a state lives. Mirrors Historia's Loc; the Internal prefix leaves room
     for Callback/Callin locations when framework modelling returns. */
-enum Loc:
-  case InternalMethodEntry(method: MethodId)                 // Historia: InternalMethodInvoke
-  case AppLoc(method: MethodId, index: Int, isPre: Boolean)  // before/after command `index`
-  case InternalMethodExit(method: MethodId)                  // Historia: InternalMethodReturn
+sealed trait Loc
+object Loc:
+  case class InternalMethodEntry(method: MethodId)                 extends Loc  // Historia: InternalMethodInvoke
+  case class AppLoc(method: MethodId, index: Int, isPre: Boolean)  extends Loc  // before/after command `index`
+  case class InternalMethodExit(method: MethodId)                  extends Loc  // Historia: InternalMethodReturn
 
 /** A method's fully qualified identity; printed as Probe.main(java.lang.String[]). */
 final case class MethodId(declaringClass: String, name: String,
-                          paramTypes: List[String], returnType: String):
+                          paramTypes: List[JType], returnType: JType):
   def qualifiedName: String   // java.math.BigInteger.add — class and name, ignoring overloads
 
-enum Cmd:
-  case Assign(target: LVal, source: RVal)
-  case Goto(cond: RVal, target: Int)          // target: a body index
-  case Nop()
-  case Return(value: Option[RVal])
-  case InvokeStmt(call: RVal.Invoke)          // result discarded
-  case Throw()                                // disabled in v1
+/** A Java type. toString is its one printed form: int, java.math.BigInteger, java.lang.String[]. */
+enum JType:
+  case Void                    // return types only
+  case Prim(kind: PrimKind)
+  case Ref(className: String)
+  case ArrayOf(elem: JType)
+
+enum PrimKind:
+  case Boolean, Byte, Char, Short, Int, Long, Float, Double
+
+sealed trait Cmd
+object Cmd:
+  case class Assign(target: LVal, source: RVal)  extends Cmd
+  case class Goto(cond: RVal, target: Int)       extends Cmd  // target: a body index
+  case object Nop                                extends Cmd
+  case class Return(value: Option[RVal])         extends Cmd
+  case class InvokeStmt(call: RVal.Invoke)       extends Cmd  // result discarded
+  case object Throw                              extends Cmd  // disabled in v1
 
 sealed trait RVal
 object RVal:
@@ -296,7 +312,7 @@ object RVal:
   case class Binop(l: RVal, op: BinOp, r: RVal)                   extends RVal
   case class Invoke(kind: InvokeKind, callee: MethodId,
                     receiver: Option[RVal], args: List[RVal])     extends RVal  // v1: listed callees only
-  case class Cast(tpe: String, v: RVal)                           extends RVal  // disabled in v1
+  case class Cast(tpe: JType, v: RVal)                            extends RVal  // disabled in v1
   case class NewObject(className: String)                         extends RVal  // disabled in v1
   case class StringConst(v: String)                               extends RVal  // disabled in v1
   case class InstanceOf(clazz: String, target: LVal.Local)        extends RVal  // disabled in v1
@@ -304,8 +320,8 @@ object RVal:
 
 sealed trait LVal extends RVal
 object LVal:
-  case class Local(name: String, tpe: String)                     extends LVal
-  case class Param(index: Int, tpe: String)                       extends LVal  // v1: main's args binding only
+  case class Local(name: String, tpe: JType)                      extends LVal
+  case class Param(index: Int, tpe: JType)                        extends LVal  // v1: main's args binding only
   case class This(className: String)                              extends LVal  // disabled in v1
   case class Field(base: Local, declType: String, name: String)   extends LVal  // disabled in v1
   case class StaticField(declaringClass: String, name: String)    extends LVal  // v1: BigInteger constants only
@@ -333,6 +349,15 @@ distinct. It is a record rather than Soot's signature string
 (`<Probe: void main(java.lang.String[])>`), so no front end's naming format
 crosses the §5.5 boundary, and the profile check can ask for a method's class
 and name without parsing. *Decided — Shawn, 2026-09-29.*
+
+**Types are structured, not strings.** A type written as a string has more than
+one spelling — `java.lang.String[]`, `[Ljava/lang/String;`, `String[]` — and
+every comparison of `MethodId`s, and the profile's `types` rule, would silently
+depend on everyone using the same one. `JType` has exactly one form of each
+type; only the front end builds them, from its own type objects, and
+`JType.toString` is the one printed form. `Void` is accepted only as a return
+type. Class *names* (`declaringClass`, `StaticField`, …) stay strings: they name
+classes, not types. *Decided — Shawn, 2026-09-29.*
 
 **A command does not know its own location.** Its position is its index in
 `Method.body`, and its locations are derived from that: `pre(i)` is
@@ -483,7 +508,7 @@ enum Step:
   case Assign(target: LVal, source: RVal)
   case Assume(cond: RVal)
   case Call(target: Option[LVal.Local], callee: MethodId, args: List[RVal])
-  case Skip()                                  // engine-only identity
+  case Skip                                    // engine-only identity
 
 final case class Transition(from: Loc, step: Step, to: Loc)
 final case class Cfg(transitions: List[Transition], init: Loc, exit: Loc)
@@ -605,7 +630,11 @@ public enum BinOp { Mult, Add, Sub, Lt, Le, Gt, Ge, Eq, Ne }
 public record MethodId(String declaringClass, String name, List<String> paramTypes, String returnType) {}
 ```
 
-It keeps the Scala IR's names and shapes, so the conversion is one-to-one.
+It keeps the Scala IR's names and shapes, so the conversion is one-to-one,
+with one exception: types (`Local.type`, `MethodId`'s parameter and return
+types) are strings in Java, produced only by `JType.toString`, so a domain
+never sees two spellings of one type. A Java mirror of `JType` can come later,
+the first time a domain needs to branch on a type rather than compare one.
 `Skip` is absent (the engine handles it), as are `Invoke` (lowered to `Call`),
 `Param` (lowered to `skip`), `BoolConst` (only `Goto(true, …)`, which lowers
 to `skip`), and every construct v1 disables. It grows when a profile setting

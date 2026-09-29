@@ -63,6 +63,11 @@ Measured by **proof count**.
 Soot/Jimple-flavoured, written in Scala in `engine/ir`. What `IrProvider` produces. Represents more than any
 profile accepts.
 
+**`JType`** — a Java type in the Scala IR: `Void`, `Prim`, `Ref`, `ArrayOf`
+(§5.1). Structured so each type has one form; `toString` is its one printed
+form (`java.lang.String[]`), and the only source of the type strings a domain
+sees. `Void` only as a return type.
+
 **`MethodId`** — a method's fully qualified identity: declaring class, name,
 parameter types, return type. Printed as `Probe.main(java.lang.String[])`. Used
 in every location, `Method`, `Invoke` and `Call`. The profile's `callees` list

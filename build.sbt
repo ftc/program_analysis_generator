@@ -37,6 +37,8 @@ lazy val pureJava = sootBoundary ++ Seq(
   autoScalaLibrary := false,
   javacOptions ++= Seq("-source", "21", "-target", "21"),
   libraryDependencies += "com.github.sbt" % "junit-interface" % "0.13.3" % Test,
+  // Name each JUnit test in `sbt test` output, as MUnit does for the Scala modules.
+  Test / testOptions += Tests.Argument(TestFrameworks.JUnit, "-v"),
   checkPureJava := {
     val found = jarsNamed((Compile / dependencyClasspath).value, "scala")
     if (found.nonEmpty)
@@ -52,19 +54,22 @@ lazy val scalaModule = Seq(
     "-feature",
     "-unchecked",
     "-source:3.3",
-    "-Wunused:all"
+    "-Wunused:all",
+    // A match missing a case of a sealed type fails the build instead of warning:
+    // the engine's trust-base code relies on it (implementation_strategy.md §2).
+    "-Wconf:id=E029:e"
   ),
   Test / fork := true
 )
 
 lazy val root = (project in file("."))
-  .aggregate(api, probeLib, frontendSoot, core, harness, cli)
+  .aggregate(api, probeLib, ir, frontendSoot, core, harness, cli)
   .settings(
     name           := "program-analysis-generator",
     publish / skip := true
   )
 
-/** The contract and the IR. What generated domains compile against. */
+/** The domain contract and vocabulary (§5.4). What generated domains compile against. */
 lazy val api = (project in file("engine/api"))
   .settings(pureJava, name := "pag-api")
 
@@ -78,9 +83,13 @@ lazy val probeLib = (project in file("engine/probe-lib"))
     Test / fork := true
   )
 
+/** The IR in Scala: source IR, Step, Cfg (§5.1, §5.3). Never seen by a domain. */
+lazy val ir = (project in file("engine/ir"))
+  .settings(scalaModule, sootBoundary, name := "pag-ir")
+
 /** The only module with Soot on its compile classpath (§5.5). */
 lazy val frontendSoot = (project in file("engine/frontend-soot"))
-  .dependsOn(api)
+  .dependsOn(ir)
   .settings(
     scalaModule,
     name := "pag-frontend-soot",
@@ -89,7 +98,7 @@ lazy val frontendSoot = (project in file("engine/frontend-soot"))
 
 /** Profile check, lifting, lowering, worklist, certifier. */
 lazy val core = (project in file("engine/core"))
-  .dependsOn(api)
+  .dependsOn(api, ir)
   .settings(scalaModule, sootBoundary, name := "pag-core")
 
 /** Executor, probe runner, verdicts, scoring. */
