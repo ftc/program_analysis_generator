@@ -1477,8 +1477,10 @@ check fails if Soot is on the compile classpath of any module but
 ### Phase 1 — the contract
 Write the IR in `engine/ir` (§5.1, §5.3) and the domain contract and
 vocabulary in `engine/api` (§5.4). Get them reviewed before building on them.
-*Done when:* a stub domain compiles against `api.jar` alone with `javac`, and
-`jdeps` reports no dependency outside `java.*` and `pag.api.*`.
+*Done when:* the api compiles separately (glossary): a stub domain compiles with
+`javac` against `pag.api` alone, a control that uses anything else does not,
+and `jdeps` reports no dependency outside `java.*` and `pag.api.*`. Checked by
+`SeparateCompilationTest`.
 
 ### Phase 2a — load, check, lift, lower, print
 The first milestone: load a simple Java program and inspect its CFG from the

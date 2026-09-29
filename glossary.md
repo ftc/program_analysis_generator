@@ -369,6 +369,14 @@ on every record. The actual compatibility need, independent of format.
 
 ## 11. Modules and artifacts
 
+**The api compiles separately** — a domain needs nothing but the JDK and
+`pag.api` to compile, and `pag.api` refers to nothing outside `java.*` and
+itself. What makes the Phase 9 domain build `javac -cp api.jar`. Named after
+Ali and Lhoták's *separate compilation assumption* (Application-only Call Graph
+Construction, ECOOP 2012), under which a library is compiled without the
+application; here `api` is the library, and we check the property rather than
+assume it (`SeparateCompilationTest`).
+
 **`engine/ir`** — the IR in Scala: source IR, `Step`, `Cfg`, `IrProvider`.
 Shared by `frontend-soot`, `core` and `harness`; never seen by a domain.
 
