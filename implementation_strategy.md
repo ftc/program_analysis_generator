@@ -550,6 +550,13 @@ is `InternalMethodExit(main)`.
 | `Goto(true, t)` | `pre(i) —skip→ post(i) —skip→ pre(t)` |
 | `Goto(c, t)` | `pre(i) —skip→ post(i)`, then `post(i) —assume(c)→ pre(t)` and `post(i) —assume(¬c)→ pre(i+1)`, `¬` flipping the operator |
 | `Return` | `pre(i) —skip→ post(i) —skip→ InternalMethodExit(m)` |
+| `Throw` (outside v1's profile) | `pre(i) —skip→ post(i)`, and no edge out of `post(i)`: execution ends |
+
+Lowering produces the `Cfg` of the entry method and, alongside it, the `pre`
+location of each `reach(id)` call, since lowering is where those calls
+disappear (`Lowered.reachSites`). A branch whose condition is not a
+comparison, a call assigned to anything but a local, and a command that falls
+through past the last one are engine bugs under the profile, and fail loudly.
 
 `skip` is `Step.Skip`, a fourth `Step` case that the engine handles itself as
 the identity: it never calls `transfer` on it, so domains still implement three
