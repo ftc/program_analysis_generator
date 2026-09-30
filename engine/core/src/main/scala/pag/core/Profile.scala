@@ -8,6 +8,9 @@ import pag.ir.{BinOp, InvokeKind}
   */
 final case class Profile(
     name: String,
+    methods: Set[String],      // user method names; the generated constructor is not counted
+    types: Set[String],        // local types, as JType.toString; args and compare temps excepted
+    mainArgs: MainArgs,
     commands: Set[String],
     lvals: Set[String],
     rvals: Set[String],
@@ -17,6 +20,10 @@ final case class Profile(
     staticFields: Set[String]  // declaringClass.name
 )
 
+/** Whether main may read its String[] parameter (§5.2). */
+enum MainArgs:
+  case Unread
+
 object Profile:
 
   /** v1: single-method, BigInteger-locals Java with one source of input (§5.2).
@@ -24,6 +31,9 @@ object Profile:
     */
   val BigintMainV1: Profile = Profile(
     name = "bigint-main-v1",
+    methods = Set("main"),
+    types = Set("java.math.BigInteger"),
+    mainArgs = MainArgs.Unread,
     commands = Set("Assign", "Goto", "Nop", "Return", "InvokeStmt"),
     lvals = Set("Local"),
     rvals = Set("Local", "IntConst", "BoolConst", "Binop", "Invoke", "StaticField"),
