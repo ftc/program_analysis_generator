@@ -1235,6 +1235,9 @@ it runs.
 executor is the JVM and the program is unmodified, so the evidence depends on
 nothing this project wrote beyond `reach`'s one `println` and `Rand`.
 
+`harness`'s `JvmRun` implements it: a fresh JVM per run, killed after a timeout
+(10 s by default), and only lines of exactly the form `REACHED-<id>` count.
+
 **The runner must never read stdout after killing a probe.** JDK 21's
 `ProcessImpl.destroy` closes the parent's end of the child's stdout as soon as
 it signals the child, so output not yet read is lost — possibly the marker,
