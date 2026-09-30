@@ -48,7 +48,9 @@ final class SootIrProvider extends IrProvider:
 
   private def translate(m: soot.SootMethod): Method =
     val units = m.retrieveActiveBody().getUnits.asScala.toVector
-    val at = Where(idOf(m.makeRef), units)
+    // Units compare by identity (AbstractUnit keeps Object's equals), so this
+    // maps each unit to its own position even when two units print alike.
+    val at = Where(idOf(m.makeRef), units.zipWithIndex.toMap)
     Method(at.method, units.map(u => cmd(u)(using at)), units.map(line))
 
   private def line(u: soot.Unit): Int =
@@ -59,6 +61,8 @@ final class SootIrProvider extends IrProvider:
     case s: IdentityStmt   => Cmd.Assign(local(s.getLeftOp, u), identity(s.getRightOp, u))
     case s: AssignStmt     => Cmd.Assign(local(s.getLeftOp, u), rval(s.getRightOp, u))
     case s: InvokeStmt     => Cmd.InvokeStmt(invoke(s.getInvokeExpr, u))
+    case s: IfStmt         => Cmd.Goto(condition(s.getCondition, u), at.indexOf(s.getTarget))
+    case s: GotoStmt       => Cmd.Goto(RVal.BoolConst(true), at.indexOf(s.getTarget))
     case _: ReturnVoidStmt => Cmd.Return(None)
     case s: ReturnStmt     => Cmd.Return(Some(rval(s.getOp, u)))
     case _                 => at.fail(u, "statement")
@@ -68,12 +72,39 @@ final class SootIrProvider extends IrProvider:
     case t: ThisRef      => LVal.This(t.getType.toString)
     case _               => at.fail(u, s"identity value $v")
 
+  /** A branch condition: one of the six comparisons, operator as Jimple has it. */
+  private def condition(v: soot.Value, u: soot.Unit)(using at: Where): RVal = v match
+    case c: ConditionExpr =>
+      val op = c match
+        case _: EqExpr => BinOp.Eq
+        case _: NeExpr => BinOp.Ne
+        case _: LtExpr => BinOp.Lt
+        case _: LeExpr => BinOp.Le
+        case _: GtExpr => BinOp.Gt
+        case _: GeExpr => BinOp.Ge
+        case _         => at.fail(u, s"condition $v")
+      val (l, r) = (rval(c.getOp1, u), rval(c.getOp2, u))
+      RVal.Binop(typedLike(r, l), op, typedLike(l, r))
+    case _ => at.fail(u, s"condition $v")
+
+  /** A constant compared with a local takes the local's type. Soot writes
+    * javac's `ifeq` on an int as `$i == false` (observed, Soot 4.7.1), so a
+    * BooleanConstant alone does not mean boolean; the local's declared type does.
+    */
+  private def typedLike(other: RVal, v: RVal): RVal = (other, v) match
+    case (LVal.Local(_, JType.Prim(PrimKind.Boolean)), RVal.IntConst(n)) => RVal.BoolConst(n != 0)
+    case (LVal.Local(_, t), RVal.BoolConst(b)) if t != JType.Prim(PrimKind.Boolean) =>
+      RVal.IntConst(if b then 1 else 0)
+    case _ => v
+
   private def local(v: soot.Value, u: soot.Unit)(using at: Where): LVal.Local = v match
     case l: soot.Local => LVal.Local(l.getName, jtype(l.getType, u))
     case _             => at.fail(u, s"assignment target $v")
 
   private def rval(v: soot.Value, u: soot.Unit)(using at: Where): RVal = v match
     case l: soot.Local      => local(l, u)
+    // BooleanConstant extends IntConstant, so it must be matched first: `== false`
+    case c: soot.BooleanConstant => RVal.BoolConst(c.value != 0)
     case c: IntConstant     => RVal.IntConst(c.value)
     case c: LongConstant    => RVal.IntConst(c.value)
     case f: StaticFieldRef  => LVal.StaticField(f.getFieldRef.declaringClass.getName, f.getFieldRef.name)
@@ -111,7 +142,10 @@ final class SootIrProvider extends IrProvider:
     case _                   => throw Untranslatable(s"type $t in $where")
 
   /** The method being translated, for error messages that name the line. */
-  private final case class Where(method: MethodId, units: Vector[soot.Unit]):
+  private final case class Where(method: MethodId, index: Map[soot.Unit, Int]):
+    def indexOf(target: soot.Unit): Int =
+      index.getOrElse(target, throw Untranslatable(s"$method: jump to a unit outside the body: $target"))
+
     def fail(u: soot.Unit, what: String): Nothing =
       val lineText = line(u) match
         case Method.UnknownLine => "unknown line"

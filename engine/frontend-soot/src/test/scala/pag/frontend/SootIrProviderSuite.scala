@@ -70,9 +70,9 @@ class SootIrProviderSuite extends munit.FunSuite:
     ))
 
   test("bytecode not yet translated is Untranslatable, naming method and line"):
-    val e = intercept[Untranslatable](load("WithBranch"))
-    assert(e.getMessage.contains("WithBranch.main(java.lang.String[])"), e.getMessage)
-    assert(e.getMessage.contains("line 8"), e.getMessage)
+    val e = intercept[Untranslatable](load("Unsupported"))
+    assert(e.getMessage.contains("Unsupported.main(java.lang.String[])"), e.getMessage)
+    assert(e.getMessage.contains("line 5"), e.getMessage)
 
   test("a directory with more than one class is rejected"):
     intercept[IllegalArgumentException](load("TwoClasses"))
@@ -85,5 +85,50 @@ class SootIrProviderSuite extends munit.FunSuite:
   /** Soot's Scene is global; G.reset must make each load independent of the last. */
   test("loading the same class again, after another, gives the same program"):
     val first = load("StraightLine")
-    intercept[Untranslatable](load("WithBranch"))
+    intercept[Untranslatable](load("Unsupported"))
     assertEquals(load("StraightLine"), first)
+
+  // --- Branches (2a.2). Indices are worked out by hand from how javac compiles
+  // each fixture: every `if` jumps past its body when the source condition is
+  // false, so javac emits the negated comparison.
+
+  def mainOf(fixture: String): Method = load(fixture).methods.find(_.id.name == "main").get
+
+  def gotos(m: Method): List[(Int, Cmd.Goto)] =
+    m.body.zipWithIndex.collect { case (g: Cmd.Goto, i) => (i, g) }.toList
+
+  /** The operator and target of a branch on a compare temp against a constant. */
+  def branch(g: Cmd.Goto): (BinOp, RVal, Int) = g.cond match
+    case RVal.Binop(LVal.Local(_, _), op, rhs) => (op, rhs, g.target)
+    case other                                 => fail(s"expected temp OP constant, got $other")
+
+  test("each comparison translates with javac's negated operator and the right target"):
+    // Body: 0 args, 1 x = randInt(); then per `if` k = 0..5 four units:
+    // ZERO at 2+4k, compareTo at 3+4k, the if at 4+4k, reach at 5+4k. Each if
+    // skips its reach, to 6+4k; the last lands on return at 26.
+    val found = gotos(mainOf("Comparisons")).map((i, g) => (i, branch(g)))
+    val zero = RVal.IntConst(0)
+    assertEquals(found, List(
+      (4,  (BinOp.Ge, zero, 6)),   // source <
+      (8,  (BinOp.Gt, zero, 10)),  // source <=
+      (12, (BinOp.Le, zero, 14)),  // source >
+      (16, (BinOp.Lt, zero, 18)),  // source >=
+      (20, (BinOp.Ne, zero, 22)),  // source ==
+      (24, (BinOp.Eq, zero, 26))   // source !=
+    ))
+
+  test("a while loop: the exit branch jumps forward, the back edge jumps to the test"):
+    // 0 args, 1 i = ZERO, 2 TEN, 3 compareTo, 4 if >= 0 goto 8, 5 ONE, 6 i = add,
+    // 7 goto 2, 8 reach(1), 9 return
+    val m = mainOf("Loop")
+    assertEquals(gotos(m).map(_._1), List(4, 7))
+    assertEquals(branch(m.body(4).asInstanceOf[Cmd.Goto]), (BinOp.Ge, RVal.IntConst(0), 8))
+    assertEquals(m.body(7), Cmd.Goto(RVal.BoolConst(true), 2))
+
+  test("an equals test compares its boolean temp against false"):
+    // 0 args, 1 x = randInt(), 2 TEN, 3 equals, 4 if $z == false goto 6, 5 reach(1), 6 return
+    val m = mainOf("Equals")
+    m.body(4) match
+      case Cmd.Goto(RVal.Binop(LVal.Local(_, t), BinOp.Eq, RVal.BoolConst(false)), 6) =>
+        assertEquals(t, JType.Prim(PrimKind.Boolean))
+      case other => fail(s"expected `if $$z == false goto 6`, got $other")

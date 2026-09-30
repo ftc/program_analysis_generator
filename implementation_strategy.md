@@ -819,8 +819,12 @@ source IR to source IR.
 | `$z := a.equals(b)` then `if $z != false goto t` | `nop` then `if a = b goto t` |
 | `r := Rand.randInt()` | unchanged; lowering makes it a `Call` |
 
-(Soot prints the `equals` test against the boolean constant `false`, not `0`:
-observed on Soot 4.7.1, 2026-09-29.)
+(Soot writes the `equals` test against the boolean constant `false`, not `0`.
+It also writes `javac`'s `ifeq` on an *`int`* as `$i == false`, so a Soot
+`BooleanConstant` does not by itself mean a boolean: the front end gives a
+constant in a comparison the type of the local it is compared with, so these
+reach lifting as `$z == false` for an `equals` temp and `$i == 0` for a
+`compareTo` temp. Observed on Soot 4.7.1, 2026-09-29/30.)
 
 **Constant substitution.** After the rewrites above, a temp assigned a constant
 and used exactly once has the constant substituted at its use:
