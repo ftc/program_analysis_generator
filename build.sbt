@@ -89,7 +89,8 @@ lazy val ir = (project in file("engine/ir"))
 
 /** The only module with Soot on its compile classpath (§5.5). */
 lazy val frontendSoot = (project in file("engine/frontend-soot"))
-  .dependsOn(ir)
+  // probe-lib for tests only: fixtures are compiled against Rand and Reach.
+  .dependsOn(ir, probeLib % "test->compile")
   .settings(
     scalaModule,
     name := "pag-frontend-soot",

@@ -680,12 +680,29 @@ enforced by the compiler rather than by a lint, and replacing Soot later means
 writing a second `IrProvider` rather than auditing the analysis for leaks.
 
 Two Soot settings are load-bearing, not tuning. `G.reset()` before every load,
-because Soot's `Scene` is a process-wide singleton. And the `jb` phases
-`jb.dae` (dead-assignment elimination) and `jb.uce` (unreachable-code
-elimination) are **off**: the first deletes assignments to locals that are never
-read, the second deletes statements with no path to them — and a statement with
-no path to it is exactly what a reachability query may ask about. Either would
-mean the IR analysed is not the code executed, which §9 depends on.
+because Soot's `Scene` is a process-wide singleton. And the `jb` phase
+`jb.uce` (unreachable-code elimination) is **off**: it deletes statements with
+no path to them, and a statement with no path to it is exactly what a
+reachability query may ask about.
+
+`jb.dae` (dead-assignment elimination) is off too, conservatively. It was
+first listed here as load-bearing on the belief that it deletes any
+never-read assignment; reading its source (2026-09-29) showed that in the
+`jb` pack it runs with `only-stack-locals` true, so it only removes never-read
+stores to Soot's `$stack` temporaries whose right-hand side has no side
+effects. That cannot remove a `reach` call, any call, or a store to a
+programmer's variable, so it could not change a v1 query. It stays off because
+off is never less faithful.
+
+`setPhaseOption` returns false and logs only at debug level when a setting does
+not take effect, so `SootIrProvider` treats a false return as an error: a
+silently ignored setting would mean analysing different code without anyone
+noticing.
+
+What Soot 4.7.1 does to a never-read store, observed: `z = BigInteger.TEN`
+is kept as written; `y = x.add(ONE)` becomes the call alone, with the store
+to `y` dropped. Nothing a query depends on changes — the command and its line
+remain, and `y` is never read. `SootIrProviderSuite` pins both.
 
 Two more settings are for the humans reading `pag ir` and invariant maps, not
 for correctness. **Probes and fixtures are compiled with `javac -g`**, and Soot
@@ -1752,3 +1769,13 @@ framework, library, or the OS.
     container is one way to give it such dependencies. Deferred: nothing before
     Phase 9 depends on it, and crude Phase 10 will show whether a small model
     reaches for a solver at all.
+17. **Programs without a `main` of their own.** `IrProvider.load` accepts a
+    directory holding exactly one class with `public static void main(String[])`
+    (§5.5), and rejects anything else. Code written for a framework — Android,
+    Temporal — never declares its own `main`, and spreads over many classes:
+    the framework owns the entry point and calls into client code. Analysing
+    it means relaxing both rules and supplying an entry, which is the
+    framework-modelling problem `README.md`'s Future ideas raises and Historia
+    addressed with callback and callin locations (the `Internal` prefix on
+    `InternalMethodEntry` leaves room for them). Marked by a TODO in
+    `SootIrProviderSuite`. Out of scope for v1.
