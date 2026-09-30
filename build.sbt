@@ -124,6 +124,7 @@ lazy val cli = (project in file("engine/cli"))
     scalaModule,
     sootBoundary,
     name                := "pag-cli",
+    libraryDependencies += "com.github.scopt" %% "scopt" % "4.1.0",
     Compile / mainClass := Some("pag.cli.Main"),
     run / fork          := true
   )
