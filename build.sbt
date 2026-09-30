@@ -109,7 +109,8 @@ lazy val core = (project in file("engine/core"))
 
 /** Executor, probe runner, verdicts, scoring. */
 lazy val harness = (project in file("engine/harness"))
-  .dependsOn(core)
+  // probe-lib: Stage 1 answers randInt with the same Inputs parser Rand uses (§5.6)
+  .dependsOn(core, probeLib)
   .settings(scalaModule, sootBoundary, name := "pag-harness")
 
 /** The `pag` entry point. Sees frontend-soot at runtime only, through

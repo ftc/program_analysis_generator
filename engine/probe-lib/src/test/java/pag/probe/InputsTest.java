@@ -8,7 +8,7 @@ import java.math.BigInteger;
 import java.util.List;
 import org.junit.Test;
 
-/** The input-list parser shared by Rand and Stage 1 (implementation_strategy.md §5.6). */
+/** The input-list parser shared by Rand and the IR interpreter (implementation_strategy.md §5.6). */
 public class InputsTest {
 
     private static List<BigInteger> ints(String... values) {

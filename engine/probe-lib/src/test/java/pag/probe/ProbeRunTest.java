@@ -18,7 +18,7 @@ import org.junit.rules.TemporaryFolder;
 import pag.probe.fixtures.Fixtures;
 
 /**
- * Rand and Reach in a real JVM, the way Stage 2 runs a probe (§5.6, §5.8, §9).
+ * Rand and Reach in a real JVM, the way a JVM run runs a probe (§5.6, §5.8, §9).
  *
  * <p>Output goes to files, never a pipe read after the fact: Process.destroyForcibly
  * closes the parent's end of the child's stdout, so anything unread is lost.

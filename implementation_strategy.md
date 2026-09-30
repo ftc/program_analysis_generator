@@ -85,7 +85,7 @@ the loop checks for it (`misc.md` §1 has the argument):
 | --- | --- | --- |
 | loading, profile check, lifting, lowering | `frontend-soot`, `core` | the `Cfg` a domain analyses means what the bytecode does |
 | `reach` and its lowering | `probe-lib`, `core` | a marker prints exactly when the location of its `reach` call is reached |
-| Stage 1 interpreter, run and marker check | `harness` | the executor implements the intended semantics |
+| IR interpreter, JVM run and marker check | `harness` | the executors implement the intended semantics |
 | certifier | `core` | only a certified map yields `Refuted` |
 | domain-vocabulary converter | `core` | the Java `Step` a domain receives means what the Scala `Step` means |
 
@@ -99,7 +99,7 @@ a higher bar than the rest, as a standing rule:
   and a failing fixture (§5.2) — has its own test, written with the code.
 - **Reviewed by Shawn before it merges.** Changes to these modules are called
   out as trust-base changes, not folded into larger diffs.
-- **Cross-checked end to end.** Stage 1 and Stage 2 agreeing on a corpus of
+- **Cross-checked end to end.** The IR interpreter and the JVM run agreeing on a corpus of
   fixtures dense with `reach` calls (Phase 2b) is a standing test in
   `sbt test`.
 
@@ -819,8 +819,8 @@ one leading sign; whitespace around a value is ignored, and an empty or missing
 property means no inputs. An empty value (`1,,2`, `1,2,`) or a non-integer is
 rejected with the offending token named. Running out throws
 `IllegalStateException` naming how many values there were. The parser is
-`pag.probe.Inputs`, and the Stage 1 interpreter uses the same class, so the
-two stages cannot disagree about what a list means. *Decided — Shawn,
+`pag.probe.Inputs`, and the IR interpreter uses the same class, so it and the
+JVM run cannot disagree about what a list means. *Decided — Shawn,
 2026-09-26.*
 
 **Why our own class.** The analysis matches the call by signature, so the
@@ -1216,14 +1216,21 @@ Because §5.5 reads the IR from a class file and the marker is the program's own
 same class file, byte for byte. There is no translation and no rewriting
 between them.
 
-**Stage 1 — reference interpreter.** `engine/harness` interprets the `Cfg` and
-records visited locations and the `reach` ids it passes, answering each
-`randInt` call from the same input list and stopping when it runs out, as
-`Rand` does. Fast, deterministic, no process launch, and useful
-for debugging. The executor here is our own code, so a disagreement with Stage 2
-is a bug in it.
+A probe can be executed two ways, on the same inputs. They are not steps in
+sequence; they run different forms of the program, and comparing them is what
+checks the translation between those forms. (Earlier drafts called them
+Stage 1 and Stage 2; renamed 2026-09-30, *Decided — Shawn*, since "stage"
+suggested an order.)
 
-**Stage 2 — run the class file.** `java -Dpag.inputs=<values> -cp
+**The IR interpreter.** `engine/harness` interprets the lowered `Cfg` — the
+form a domain analyses, which the JVM never sees — and records visited
+locations and the `reach` ids it passes, answering each `randInt` call from
+the same input list and stopping when it runs out, as `Rand` does. Fast,
+deterministic, no process launch, and useful for debugging. It is our own
+code, so a disagreement with the JVM run is a bug in it or in the translation
+it runs.
+
+**The JVM run — run the class file.** `java -Dpag.inputs=<values> -cp
 <classes>:probe-lib.jar Probe`, and grep stdout for `REACHED-<id>`. The
 executor is the JVM and the program is unmodified, so the evidence depends on
 nothing this project wrote beyond `reach`'s one `println` and `Rand`.
@@ -1232,16 +1239,17 @@ nothing this project wrote beyond `reach`'s one `println` and `Rand`.
 `ProcessImpl.destroy` closes the parent's end of the child's stdout as soon as
 it signals the child, so output not yet read is lost — possibly the marker,
 which would silently lose a counterexample. Redirect stdout to a file (as
-`ProbeRunTest` does) or drain it concurrently. This is the verdict of record; Stage 1 exists for speed and
-inspection, not for adjudication.
+`ProbeRunTest` does) or drain it concurrently. The JVM run is the verdict of
+record; the IR interpreter exists for checking the translation, for speed and
+for inspection, not for adjudication.
 
-The two stages agree by construction: Stage 1 computes in `BigInt`, and the
-program computes in `BigInteger`, so neither wraps.
+The two agree by construction: the IR interpreter computes in `BigInt`, and
+the program computes in `BigInteger`, so neither wraps.
 
-Stage 2 is what makes the README's claim ("does not depend on any component of
-this project being correct") literally true, so it should not be deferred
-indefinitely. A cross-check that both stages agree on a corpus is a cheap
-standing test.
+The JVM run is what makes the README's claim ("does not depend on any component
+of this project being correct") literally true. The **IR–JVM cross-check** —
+both run on a corpus of fixtures, their `reach` sequences required to be equal —
+is a cheap standing test of the translation (Phase 2b).
 
 ## 10. The two agents
 
@@ -1604,13 +1612,13 @@ proposed before it is written:
 | 7 | lowering to `Cfg` with `pre`/`post`/entry/exit | one test per table row |
 | 8 | `pag ir --cfg` | golden file |
 
-### Phase 2b — the Stage 1 executor
-The Stage 1 interpreter (§9), `pag run`, and query resolution for `--reach`.
+### Phase 2b — the IR interpreter
+The IR interpreter (§9), a minimal JVM run, `pag run`, and query resolution for `--reach`.
 *Done when:* `pag run --inputs …` on a fixture reproduces a visited-location
-sequence recorded in a fixture file — **and** the **stage cross-check** is part
+sequence recorded in a fixture file — **and** the **IR–JVM cross-check** is part
 of `sbt test`: for every fixture, written with a `reach` call after nearly every
-statement, run it under Stage 1 and under Stage 2 with the same inputs, and
-require the `reach` ids Stage 1 passes to equal the `REACHED` ids Stage 2
+statement, run it under the IR interpreter and as a JVM run with the same
+inputs, and require the `reach` ids the IR interpreter passes to equal the `REACHED` ids the JVM run
 prints, in order. This one test checks trust-base claims A and B (`misc.md` §1)
 at once.
 
@@ -1719,7 +1727,7 @@ domains.
 least one genuine reaching run against a generated domain.
 
 ### Later
-Real-language backends beyond the Stage 2 Java emitter; a domain exercising
+Real-language backends beyond Java; a domain exercising
 disjunction; the forward flow-insensitive phase; and the Future-ideas triggers in
 `README.md` — cost, and behavior that cannot be driven because it runs through a
 framework, library, or the OS.

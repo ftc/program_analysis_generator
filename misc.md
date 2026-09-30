@@ -44,7 +44,7 @@ Under the reachability check now in `README.md`, this collapses to two rows:
 
 | # | Claim | How established |
 | --- | --- | --- |
-| 1 | The executor implements the intended semantics | Stage 1: our interpreter. Stage 2: `javac` + the JVM, i.e. the intended semantics *is* what Java does |
+| 1 | The executor implements the intended semantics | The IR interpreter: ours. The JVM run: `javac` + the JVM, i.e. the intended semantics *is* what Java does |
 | 2 | The adversary is strong enough that its silence means something | mutant kill rate (plan Phase 8) |
 
 Everything else is covered end to end. A broken certifier emits a refutation
@@ -54,7 +54,7 @@ also caught. `contains`, the checkers and the api's obligation statements are
 gone from the trusted base because they are gone from the system.
 
 The old row 1 was the interpreter's fidelity to real execution; it survives, but
-Stage 2 discharges it with a code generator and a print statement instead of JDI,
+the JVM run discharges it with a code generator and a print statement instead of JDI,
 which is a much smaller thing to get right.
 
 ### Update 2026-09-26 — what the BigInteger front end adds
@@ -64,8 +64,8 @@ Loading, lifting and lowering sit between the class file that runs and the
 
 | # | Claim | If wrong | How established |
 | --- | --- | --- | --- |
-| A | Loading, profile check, lifting and lowering preserve meaning | a correct domain rejected, or an unsound one hidden (e.g. `subtract` lifted as `+`) | Stage 1 interprets the lowered `Cfg`, Stage 2 runs the JVM; agreement over a corpus |
-| B | each `reach(id)` call lowers to the location the query targets | the same two failures | the stage cross-check (plan Phase 2b) |
+| A | Loading, profile check, lifting and lowering preserve meaning | a correct domain rejected, or an unsound one hidden (e.g. `subtract` lifted as `+`) | the IR interpreter runs the lowered `Cfg`, the JVM run runs the class file; agreement over a corpus |
+| B | each `reach(id)` call lowers to the location the query targets | the same two failures | the IR–JVM cross-check (plan Phase 2b) |
 
 Both are loud rather than silent *provided the cross-check exists*, which is why
 it is a standing test in `sbt test` rather than a one-off.

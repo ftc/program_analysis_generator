@@ -7,8 +7,8 @@ import java.util.List;
 /**
  * The input list behind {@link Rand#randInt()} (implementation_strategy.md §5.6).
  *
- * <p>Public so the Stage 1 interpreter reads inputs with this same parser: the
- * two stages must answer every {@code randInt} call identically. Probes cannot
+ * <p>Public so the IR interpreter reads inputs with this same parser: the
+ * interpreter and the JVM run must answer every {@code randInt} call identically. Probes cannot
  * call it; the language profile admits only {@code randInt} and {@code reach}.
  */
 public final class Inputs {

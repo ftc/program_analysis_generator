@@ -126,7 +126,7 @@ Without it every program has one execution and the abstraction is trivial
 
 **Inputs** — the list of values `randInt` returns in one run, in order,
 supplied as `-Dpag.inputs=…` (JVM) or `--inputs` (`pag run`), and parsed by
-`pag.probe.Inputs` in both stages. Chosen by the
+`pag.probe.Inputs` by both the IR interpreter and the JVM run. Chosen by the
 adversary; a run that asks for more than the list holds stops. What makes a run
 replayable.
 
@@ -290,7 +290,9 @@ that proves anything.** Formerly called a witness.
 **Marker** — the `REACHED-<id>` string `reach(id)` prints. Presence on stdout is
 the verdict.
 
-**Executor** — what runs a program. Stage 1 is our interpreter; Stage 2 is
+**Executor** — what runs a program: the **IR interpreter** (ours, running the
+lowered `Cfg` a domain analyses) or the **JVM run** (the class file itself; formerly
+Stage 1 and Stage 2). The JVM run is
 `javac` plus the JVM, and is the verdict of record. Both take the same inputs.
 
 ---
@@ -400,8 +402,8 @@ front end (loading through lowering), `reach` and its lowering, the executor, th
 certifier, and the domain-vocabulary converter (§2). Exhaustively unit tested and reviewed before merge, as a
 standing rule. `Rand` is outside it: a bug there breaks replay, not verdicts.
 
-**Stage cross-check** — the standing test in `sbt test` that runs each fixture, written
-with a `reach` call after nearly every statement, under Stage 1 and Stage 2 and
+**IR–JVM cross-check** — the standing test in `sbt test` that runs each fixture, written
+with a `reach` call after nearly every statement, under the IR interpreter and as a JVM run and
 requires the same `reach` ids in the same order (Phase 2b).
 
 **`IrProvider`** — the one interface through which programs enter: `load`,
