@@ -1,0 +1,35 @@
+Loop.main(java.lang.String[])   Loop.java · profile bigint-main-v1 · lifted
+    0           args := @parameter0
+    1  line 6   i := 0
+    2  line 7   $stack2 := 10
+    3  line 7   nop
+    4  line 7   if i >= $stack2 goto 8
+    5  line 8   $stack2 := 1
+    6  line 8   i := i + $stack2
+    7  line 8   goto 2
+    8  line 10  Reach.reach(1)
+    9  line 11  return
+
+cfg  init entry  exit exit
+  entry     —skip→  pre(0)
+  pre(0)    —skip→  post(0)
+  post(0)   —skip→  pre(1)
+  pre(1)    —i := 0→  post(1)
+  post(1)   —skip→  pre(2)
+  pre(2)    —$stack2 := 10→  post(2)
+  post(2)   —skip→  pre(3)
+  pre(3)    —skip→  post(3)
+  post(3)   —skip→  pre(4)
+  pre(4)    —skip→  post(4)
+  post(4)   —assume(i >= $stack2)→  pre(8)
+  post(4)   —assume(i < $stack2)→  pre(5)
+  pre(5)    —$stack2 := 1→  post(5)
+  post(5)   —skip→  pre(6)
+  pre(6)    —i := i + $stack2→  post(6)
+  post(6)   —skip→  pre(7)
+  pre(7)    —skip→  post(7)
+  post(7)   —skip→  pre(2)
+  pre(8)    —skip→  post(8)
+  post(8)   —skip→  pre(9)
+  pre(9)    —skip→  post(9)
+  post(9)   —skip→  exit

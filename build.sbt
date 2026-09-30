@@ -94,7 +94,12 @@ lazy val frontendSoot = (project in file("engine/frontend-soot"))
   .settings(
     scalaModule,
     name := "pag-frontend-soot",
-    libraryDependencies += "org.soot-oss" % "soot" % "4.7.1"
+    libraryDependencies ++= Seq(
+      "org.soot-oss" % "soot" % "4.7.1",
+      // Soot logs through SLF4J 2.0.17; without a backend every run prints three
+      // "No SLF4J providers" warnings. The no-op backend silences Soot's logging.
+      "org.slf4j" % "slf4j-nop" % "2.0.17" % Runtime
+    )
   )
 
 /** Profile check, lifting, lowering, worklist, certifier. */
@@ -112,7 +117,9 @@ lazy val harness = (project in file("engine/harness"))
   * compile time (§5.5).
   */
 lazy val cli = (project in file("engine/cli"))
-  .dependsOn(api, core, harness, frontendSoot % "runtime->runtime")
+  // test->test: cli's tests reuse frontend-soot's fixtures and their compiler.
+  // That puts Soot on cli's *test* classpath; its main code still cannot see it.
+  .dependsOn(api, core, harness, frontendSoot % "runtime->runtime;test->test")
   .settings(
     scalaModule,
     sootBoundary,

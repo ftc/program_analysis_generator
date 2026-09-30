@@ -1288,7 +1288,7 @@ dashboard is built, so it has to carry what the dashboard would have shown —
 `dashboard.md` lists that correspondence.
 
 ```
-pag ir      <classes> [--method M] [--cfg]            what the front end produced
+pag ir      <classes> [--cfg] [--no-lift] [--no-enforce]  what the front end produced
 pag run     <classes> [--inputs 3,-7,...]               execute, report locations visited
 pag analyze --domain <jar> --classes <dir> --reach ID   verdict and invariant map
 pag check   --domain <jar> --classes <dir> --reach ID   analyze, then try to falsify
