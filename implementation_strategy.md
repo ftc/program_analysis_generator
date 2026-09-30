@@ -748,8 +748,7 @@ stays on the operand stack), and it happens before names are applied (without
 `jb.ulp`, `jb.lp`, `jb.cp` and `jb.a`, separately and together, did not change
 it; the cause is probably in Soot's bytecode front end or local splitter and
 was not investigated further. Accepted as a known readability caveat, not a
-correctness issue: nothing in the analysis depends on names, and constant
-substitution (§5.7) follows definitions to uses rather than trusting names.
+correctness issue: nothing in the analysis depends on names.
 *Decided — Shawn, 2026-09-29:* document and move on; revisit if it confuses a
 real debugging session, or when Soot is replaced.
 
@@ -852,19 +851,21 @@ constant in a comparison the type of the local it is compared with, so these
 reach lifting as `$z == false` for an `equals` temp and `$i == 0` for a
 `compareTo` temp. Observed on Soot 4.7.1, 2026-09-29/30.)
 
-**Constant substitution.** After the rewrites above, a temp assigned a constant
-and used exactly once has the constant substituted at its use:
-`$r := 0; … if x <= $r` becomes `$r := 0; … if x <= 0`. The assignment stays in
-place, dead, so locations are unchanged. This matters because the analysis runs
-backward: without it a domain meets `x <= $r` before `$r := 0`, and a
-non-relational domain can use neither. Jimple forces the temp — call arguments
-must be locals or literals — so every `BigInteger` comparison with a literal
-would otherwise be lost. Only single-use temps assigned in the same basic block
-as their use are substituted; anything else is left alone. "Temp" means a
-*definition*, not a name: the rule follows each assignment to its one use, since
-Soot can reuse a user variable's name for a constant (§5.5) and reuses `$stack`
-names across unrelated values. *Decided — Shawn,
-2026-09-26.*
+**No constant substitution, for now.** Constants reach comparisons through
+temps — Jimple call arguments must be locals or literals, so
+`x.compareTo(BigInteger.ZERO) > 0` lifts to `$r := 0; … if x > $r`, not
+`if x > 0`. Substituting the constant into its use was decided on 2026-09-26
+(§16 Q14) and then reversed. *Decided — Shawn, 2026-09-30:* the domain should
+handle it, and complexity before the first experiment should stay low. The
+consequence is on the domain: running backward, a domain meets `x > $r` before
+`$r := 0`, so a *non-relational* domain such as plain intervals can use
+neither and proves nothing about comparisons with literals. A domain that
+relates variables — carrying `x - $r > 0` back to `$r := 0` — handles it
+naturally. The Phase 3 reference domain, and the worked example the generator
+sees, must be such a domain, or they will prove little. If substitution is
+wanted later, the sound form is propagation within a basic block: replace a use
+of `r` with `c` when the nearest earlier assignment to `r` in the same block is
+`r := c`, leaving that assignment in place.
 
 **Lifting never adds or removes a command.** A fused compare leaves a `Nop` where
 the temp was assigned, so every `Loc` still names the same bytecode unit it did
@@ -1337,8 +1338,9 @@ entry       I(entry) = ⊥
 REFUTED
 ```
 
-The constants in each comparison reach the domain as constants because lifting
-substitutes them (§5.7).
+Illustrative: lifting does not substitute constants (§5.7), so the real IR has
+`if x <= $r` with `$r := 0` a few commands earlier, and refuting this target
+needs a domain that relates `x` to `$r`; temps are elided above.
 
 `--record full` additionally writes the derivation graph (§8) and, on an
 `Alarm`, renders a `CandidateTrace` from the entry to the query. On an
@@ -1591,7 +1593,7 @@ proposed before it is written:
 | 3 | `SootIrProvider`: straight-line code and `Return`; in-test fixture compilation | fixture → expected `Cmd` list |
 | 4 | translation of branches, calls, parameter binding; `Untranslatable` | one fixture per construct |
 | 5 | profile check | a passing and a failing fixture per rule |
-| 6 | lifting, including constant substitution | one test per table row |
+| 6 | lifting (constant substitution dropped, §5.7) | one test per table row |
 | 7 | lowering to `Cfg` with `pre`/`post`/entry/exit | one test per table row |
 | 8 | `pag ir --cfg` | golden file |
 
@@ -1783,7 +1785,9 @@ framework, library, or the OS.
     use the constant — the interval domain would prove nothing about any
     comparison with a literal. Lifting could substitute a temp that is assigned
     a constant and used once, leaving its assignment in place so locations are
-    unchanged. *Decided:* yes, in lifting (§5.7).
+    unchanged. *Decided 2026-09-26:* yes. *Reversed 2026-09-30:* no — the
+    domain handles it; the reference domain must therefore relate variables
+    (§5.7).
 15. ~~**Method identity.**~~ *Decided:* methods are identified by `MethodId`,
     the fully qualified signature (§5.1). The profile's `callees` list still
     matches by class and name (`MethodId.qualifiedName`), which is exact while
