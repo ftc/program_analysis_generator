@@ -699,10 +699,24 @@ not take effect, so `SootIrProvider` treats a false return as an error: a
 silently ignored setting would mean analysing different code without anyone
 noticing.
 
-What Soot 4.7.1 does to a never-read store, observed: `z = BigInteger.TEN`
-is kept as written; `y = x.add(ONE)` becomes the call alone, with the store
-to `y` dropped. Nothing a query depends on changes — the command and its line
-remain, and `y` is never read. `SootIrProviderSuite` pins both.
+What Soot 4.7.1 does to a never-read store, observed even with `jb.dae` off
+(2026-09-29/30), depends on whether it thinks the right-hand side has a side
+effect:
+
+| never-read store | what reaches the IR |
+| --- | --- |
+| a call, `y = x.add(ONE)` | the call alone; the store to `y` is dropped |
+| a static-field read, `z = BigInteger.TEN` | kept as written (class initialisation counts as a side effect) |
+| side-effect-free, `q = n / 2` or `o = null` | **deleted outright**, along with its line's command |
+
+Which phase does the deleting was not investigated. Nothing reachability
+depends on changes: only stores nobody reads, with no side effects, go, so no
+`reach` call and no value a later statement reads is lost. What does change is
+the line mapping — a line can end up with no command at all — which matters
+once queries name lines (§6), not while they name `reach` calls. A
+consequence for fixtures: a construct under test must be *used*, or Soot may
+delete it before translation sees it. `SootIrProviderSuite` pins the first two
+rows.
 
 Two more settings are for the humans reading `pag ir` and invariant maps, not
 for correctness. **Probes and fixtures are compiled with `javac -g`**, and Soot

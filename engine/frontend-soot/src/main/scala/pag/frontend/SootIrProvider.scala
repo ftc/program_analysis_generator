@@ -47,7 +47,10 @@ final class SootIrProvider extends IrProvider:
     phase("jb.uce", "enabled:false") // would delete statements with no path to them
 
   private def translate(m: soot.SootMethod): Method =
-    val units = m.retrieveActiveBody().getUnits.asScala.toVector
+    val body = m.retrieveActiveBody()
+    if !body.getTraps.isEmpty then
+      throw Untranslatable(s"${idOf(m.makeRef)}: cannot represent exception handlers (try/catch, synchronized)")
+    val units = body.getUnits.asScala.toVector
     // Units compare by identity (AbstractUnit keeps Object's equals), so this
     // maps each unit to its own position even when two units print alike.
     val at = Where(idOf(m.makeRef), units.zipWithIndex.toMap)
@@ -59,10 +62,11 @@ final class SootIrProvider extends IrProvider:
 
   private def cmd(u: soot.Unit)(using at: Where): Cmd = u match
     case s: IdentityStmt   => Cmd.Assign(local(s.getLeftOp, u), identity(s.getRightOp, u))
-    case s: AssignStmt     => Cmd.Assign(local(s.getLeftOp, u), rval(s.getRightOp, u))
+    case s: AssignStmt     => Cmd.Assign(lval(s.getLeftOp, u), rval(s.getRightOp, u))
     case s: InvokeStmt     => Cmd.InvokeStmt(invoke(s.getInvokeExpr, u))
     case s: IfStmt         => Cmd.Goto(condition(s.getCondition, u), at.indexOf(s.getTarget))
     case s: GotoStmt       => Cmd.Goto(RVal.BoolConst(true), at.indexOf(s.getTarget))
+    case _: ThrowStmt      => Cmd.Throw
     case _: ReturnVoidStmt => Cmd.Return(None)
     case s: ReturnStmt     => Cmd.Return(Some(rval(s.getOp, u)))
     case _                 => at.fail(u, "statement")
@@ -97,6 +101,15 @@ final class SootIrProvider extends IrProvider:
       RVal.IntConst(if b then 1 else 0)
     case _ => v
 
+  /** Anything assignable: a local, a static or instance field, an array element. */
+  private def lval(v: soot.Value, u: soot.Unit)(using at: Where): LVal = v match
+    case l: soot.Local        => local(l, u)
+    case f: StaticFieldRef    => LVal.StaticField(f.getFieldRef.declaringClass.getName, f.getFieldRef.name)
+    case f: InstanceFieldRef  =>
+      LVal.Field(local(f.getBase, u), f.getFieldRef.declaringClass.getName, f.getFieldRef.name)
+    case a: soot.jimple.ArrayRef => LVal.ArrayRef(rval(a.getBase, u), rval(a.getIndex, u))
+    case _                    => at.fail(u, s"assignment target $v")
+
   private def local(v: soot.Value, u: soot.Unit)(using at: Where): LVal.Local = v match
     case l: soot.Local => LVal.Local(l.getName, jtype(l.getType, u))
     case _             => at.fail(u, s"assignment target $v")
@@ -107,8 +120,18 @@ final class SootIrProvider extends IrProvider:
     case c: soot.BooleanConstant => RVal.BoolConst(c.value != 0)
     case c: IntConstant     => RVal.IntConst(c.value)
     case c: LongConstant    => RVal.IntConst(c.value)
-    case f: StaticFieldRef  => LVal.StaticField(f.getFieldRef.declaringClass.getName, f.getFieldRef.name)
+    case c: StringConstant  => RVal.StringConst(c.value)
     case e: InvokeExpr      => invoke(e, u)
+    case e: AddExpr         => RVal.Binop(rval(e.getOp1, u), BinOp.Add, rval(e.getOp2, u))
+    case e: SubExpr         => RVal.Binop(rval(e.getOp1, u), BinOp.Sub, rval(e.getOp2, u))
+    case e: MulExpr         => RVal.Binop(rval(e.getOp1, u), BinOp.Mult, rval(e.getOp2, u))
+    case e: CastExpr        => RVal.Cast(jtype(e.getCastType, u), rval(e.getOp, u))
+    case e: NewExpr         => RVal.NewObject(e.getBaseType.getClassName)
+    case e: InstanceOfExpr  => RVal.InstanceOf(jtype(e.getCheckType, u).toString, local(e.getOp, u))
+    case e: LengthExpr      => RVal.ArrayLength(local(e.getOp, u))
+    // Fields and array elements read as values; anything else, such as null,
+    // other arithmetic, or new arrays, is outside the IR.
+    case _: FieldRef | _: soot.jimple.ArrayRef => lval(v, u)
     case _                  => at.fail(u, s"value $v")
 
   private def invoke(e: InvokeExpr, u: soot.Unit)(using at: Where): RVal.Invoke =

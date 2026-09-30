@@ -2,7 +2,7 @@ import static pag.probe.Reach.reach;
 
 public class Unsupported {
     public static void main(String[] args) {
-        Object o = new Object();                   // line 5: `new`, not yet translated
-        reach(1);
+        int q = args.length / 2;                   // line 5: division, outside the IR
+        if (q > 0) reach(1);                       // q is read, so Soot keeps the division
     }
 }

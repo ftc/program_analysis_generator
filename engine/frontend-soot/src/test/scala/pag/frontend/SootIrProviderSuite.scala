@@ -132,3 +132,46 @@ class SootIrProviderSuite extends munit.FunSuite:
       case Cmd.Goto(RVal.Binop(LVal.Local(_, t), BinOp.Eq, RVal.BoolConst(false)), 6) =>
         assertEquals(t, JType.Prim(PrimKind.Boolean))
       case other => fail(s"expected `if $$z == false goto 6`, got $other")
+
+  // --- The remaining constructs (2a.4). Soot names temporaries, so these match
+  // on patterns derived from the fixture's source, one per construct.
+
+  test("every construct the IR can represent is translated"):
+    val m = mainOf("Constructs")
+    val obj = JType.Ref("java.lang.Object")
+    val str = JType.Ref("java.lang.String")
+    val args = local("args", StringArray)
+    val int = JType.Prim(PrimKind.Int)
+    def has(what: String)(pf: PartialFunction[Cmd, Unit]): Unit =
+      assert(m.body.exists(pf.isDefinedAt), s"no $what in ${m.body.mkString("\n")}")
+    has("new")        { case Cmd.Assign(_, RVal.NewObject("java.lang.Object")) => }
+    // Soot folds s = "hi" into its use, so the constant is the source of the array write
+    has("string")     { case Cmd.Assign(_, RVal.StringConst("hi")) => }
+    has("cast")       { case Cmd.Assign(_, RVal.Cast(`str`, LVal.Local("o", `obj`))) => }
+    has("instanceof") { case Cmd.Assign(_, RVal.InstanceOf("java.lang.String", LVal.Local("o", `obj`))) => }
+    has("length")     { case Cmd.Assign(LVal.Local("n", `int`), RVal.ArrayLength(`args`)) => }
+    has("array read") { case Cmd.Assign(_, LVal.ArrayRef(`args`, RVal.IntConst(0))) => }
+    has("array write"){ case Cmd.Assign(LVal.ArrayRef(`args`, RVal.IntConst(0)), _) => }
+    has("static write"){ case Cmd.Assign(LVal.StaticField("Constructs", "count"), _) => }
+    has("static read"){ case Cmd.Assign(_, LVal.StaticField("Constructs", "count")) => }
+    has("field write"){ case Cmd.Assign(LVal.Field(LVal.Local("c", _), "Constructs", "value"), _) => }
+    has("field read") { case Cmd.Assign(_, LVal.Field(LVal.Local("c", _), "Constructs", "value")) => }
+    has("+")          { case Cmd.Assign(_, RVal.Binop(_, BinOp.Add, RVal.IntConst(1))) => }
+    has("-")          { case Cmd.Assign(_, RVal.Binop(_, BinOp.Sub, _)) => }
+    has("*")          { case Cmd.Assign(_, RVal.Binop(_, BinOp.Mult, RVal.IntConst(2))) => }
+    has("throw")      { case Cmd.Throw => }
+
+  /** Each fixture holds one construct the IR cannot represent. */
+  val untranslatable = List(
+    "Unsupported"  -> "line 5",                 // division
+    "Switch"       -> "line 5",                 // a switch statement
+    "NullValue"    -> "line 5",                 // null
+    "NewArray"     -> "line 3",                 // array creation
+    "TryCatch"     -> "exception handlers",
+    "Synchronized" -> "exception handlers"      // javac guards the monitor with a handler
+  )
+  for (fixture, detail) <- untranslatable do
+    test(s"$fixture is Untranslatable, and the message says where"):
+      val e = intercept[Untranslatable](load(fixture))
+      assert(e.getMessage.contains(s"$fixture.main(java.lang.String[])"), e.getMessage)
+      assert(e.getMessage.contains(detail), e.getMessage)
