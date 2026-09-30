@@ -413,7 +413,7 @@ language {
   types     = ["java.math.BigInteger"]                  # plus compare temps (below)
   commands  = ["Assign", "Goto", "Nop", "Return", "InvokeStmt"]
   lvals     = ["Local"]
-  rvals     = ["Local", "IntConst", "Binop", "Invoke", "StaticField"]
+  rvals     = ["Local", "IntConst", "BoolConst", "Binop", "Invoke", "StaticField"]
   operators = ["Lt", "Le", "Gt", "Ge", "Eq", "Ne"]      # only on compare temps (below)
   invokes   = ["Static", "Virtual"]
   callees   = ["java.math.BigInteger.valueOf",
@@ -449,21 +449,32 @@ Three rules need more than a list membership test:
   `<init>` for every class; the check ignores it when it is the generated
   `super()` call and nothing else, and counts it otherwise.
 - **`mainArgs = "unread"`** permits exactly one use of `main`'s parameter: the
-  identity binding `r0 := @parameter0` that Jimple always emits. Any other
-  occurrence of `r0` — `args.length`, `args[0]`, passing it on — is a
-  violation. Programs get their inputs from `Rand` (§5.6), never from `args`.
+  identity binding `args := @parameter0` that Jimple always emits. Any other
+  occurrence of the local it binds — `args.length`, `args[0]`, passing it on —
+  is a violation. The local is identified by that binding, not by its name
+  (without `javac -g` it is `l0`). Programs get their inputs from `Rand`
+  (§5.6), never from `args`.
 - **`types`** applies to every local except that one `args` local and the
   *compare temps*: an `int` local assigned the result of `compareTo`, or a
   `boolean` local assigned the result of `equals`. Each compare temp must be
   used exactly once, by the `if` that immediately follows it, compared against
-  `0`. Any other use — `int c = a.compareTo(b); if (c < 0 && d)` — is a
+  `0` (a `compareTo` temp) or `false` (an `equals` temp). Any other use — `int c = a.compareTo(b); if (c < 0 && d)` — is a
   violation rather than something lifting tries to handle. This is the shape
   `javac` emits for `if (a.compareTo(b) < 0)`, and lifting (§5.7) depends on it.
 - **`staticFields`** is read-only: a `StaticField` may appear only as the source
   of an `Assign`, and only for the listed constants.
 - **`null`** is never accepted, and neither is `new BigInteger(...)`; the only
   ways to make a value are `valueOf`, the four constants, arithmetic, and
-  `randInt`.
+  `randInt`. Neither needs a rule of its own: the front end already refuses
+  `null` as untranslatable (§5.5), and `new` fails the `rvals` list (no
+  `NewObject`) and `invokes` (no `Special`).
+- **`BoolConst`** is in `rvals` because every unconditional jump is
+  `Goto(BoolConst(true), …)` and every `equals` test compares against `false`.
+  *Decided — Shawn, 2026-09-30.*
+
+**For now the v1 profile is a hard-coded Scala value** (`Profile.BigintMainV1`
+in `core`); reading the `language` block from HOCON arrives with config
+parsing in Phase 6. *Decided — Shawn, 2026-09-30.*
 
 **The lists are how the language grows.** A new construct is added by extending
 the relevant list — a callee, an operator, a command — together with the
