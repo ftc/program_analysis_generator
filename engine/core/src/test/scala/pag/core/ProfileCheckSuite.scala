@@ -71,8 +71,9 @@ class ProfileCheckSuite extends munit.FunSuite:
     assertEquals(violations(Cmd.Assign(x, out)), List(("static field java.lang.System.out", "staticFields")))
 
   test("violations inside a value are found: a call's arguments"):
-    val badArg = call(InvokeKind.Static, Reach, None, RVal.StringConst("one"))
-    assertEquals(violations(Cmd.InvokeStmt(badArg)), List(("value StringConst", "rvals")))
+    // Not reach: a non-literal reach id is also a violation of its own (2a.5c)
+    val badArg = call(InvokeKind.Virtual, bigint("add", BigInteger), Some(x), RVal.StringConst("one"))
+    assertEquals(violations(Cmd.Assign(x, badArg)), List(("value StringConst", "rvals")))
 
   test("every violation is reported, not just the first"):
     val divide = call(InvokeKind.Virtual, bigint("divide", BigInteger), Some(x), x)
@@ -155,3 +156,19 @@ class ProfileCheckSuite extends munit.FunSuite:
   test("compare temps: Soot reusing one temp for two compares is fine, each with its own if"):
     assertEquals(violations(compareTo(cmp), branchOn(cmp, RVal.IntConst(0)),
       compareTo(cmp), branchOn(cmp, RVal.IntConst(0), BinOp.Lt)), Nil)
+
+  // --- reach ids (2a.5c, §5.8)
+
+  def reach(id: RVal): Cmd = Cmd.InvokeStmt(call(InvokeKind.Static, Reach, None, id))
+
+  test("reach: distinct literal ids are fine"):
+    assertEquals(violations(reach(RVal.IntConst(1)), reach(RVal.IntConst(2))), Nil)
+
+  test("reach: an id that is not an int literal is a violation"):
+    val id = LVal.Local("n", JType.Prim(PrimKind.Int))
+    assert(violations(reach(id)).contains(("reach with an id that is not an int literal", "reach")))
+
+  test("reach: a repeated id is a violation at each repeat, not at the first"):
+    val found = ProfileCheck.check(program(reach(RVal.IntConst(1)), Cmd.Nop, reach(RVal.IntConst(1))),
+      Profile.BigintMainV1)
+    assertEquals(found.map(v => (v.index, v.construct, v.setting)), List((2, "reach(1) appears more than once", "reach")))

@@ -22,7 +22,32 @@ final case class ProfileViolation(
 object ProfileCheck:
 
   def check(program: Program, profile: Profile): List[ProfileViolation] =
-    program.methods.filterNot(isGeneratedConstructor).flatMap { m =>
+    val userMethods = program.methods.filterNot(isGeneratedConstructor)
+    perMethod(program, userMethods, profile) ++ reachRule(userMethods)
+
+  private val ReachCallee = "pag.probe.Reach.reach"
+
+  /** §5.8: each reach id is an int literal, and no id appears twice in the program. */
+  private def reachRule(methods: List[Method]): List[ProfileViolation] =
+    val calls = for
+      m <- methods
+      case (Cmd.InvokeStmt(RVal.Invoke(_, callee, _, args)), i) <- m.body.zipWithIndex.toList
+      if callee.qualifiedName == ReachCallee
+    yield (m, i, args)
+    def at(m: Method, i: Int, construct: String) =
+      ProfileViolation(m.id, i, m.lineOf(i), construct, "reach")
+    val computed = calls.collect {
+      case (m, i, args) if !(args match { case List(RVal.IntConst(_)) => true; case _ => false }) =>
+        at(m, i, "reach with an id that is not an int literal")
+    }
+    val repeated = calls
+      .collect { case (m, i, List(RVal.IntConst(id))) => (id, m, i) }
+      .groupBy(_._1).values.toList
+      .flatMap(_.drop(1).map((id, m, i) => at(m, i, s"reach($id) appears more than once")))
+    computed ++ repeated
+
+  private def perMethod(program: Program, methods: List[Method], profile: Profile): List[ProfileViolation] =
+    methods.flatMap { m =>
       def at(i: Int)(found: List[(String, String)]) =
         found.map((c, s) => ProfileViolation(m.id, i, m.lineOf(i), c, s))
       val args = if m.id == program.entryMethod then argsBinding(m) else None

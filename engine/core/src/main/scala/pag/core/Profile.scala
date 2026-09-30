@@ -11,6 +11,7 @@ final case class Profile(
     methods: Set[String],      // user method names; the generated constructor is not counted
     types: Set[String],        // local types, as JType.toString; args and compare temps excepted
     mainArgs: MainArgs,
+    reach: ReachIds,
     commands: Set[String],
     lvals: Set[String],
     rvals: Set[String],
@@ -24,6 +25,11 @@ final case class Profile(
 enum MainArgs:
   case Unread
 
+/** How a probe's reach calls must name their ids (§5.8). */
+enum ReachIds:
+  /** Each reach id is an int literal, and no id appears twice in a program. */
+  case LiteralUnique
+
 object Profile:
 
   /** v1: single-method, BigInteger-locals Java with one source of input (§5.2).
@@ -34,6 +40,7 @@ object Profile:
     methods = Set("main"),
     types = Set("java.math.BigInteger"),
     mainArgs = MainArgs.Unread,
+    reach = ReachIds.LiteralUnique,
     commands = Set("Assign", "Goto", "Nop", "Return", "InvokeStmt"),
     lvals = Set("Local"),
     rvals = Set("Local", "IntConst", "BoolConst", "Binop", "Invoke", "StaticField"),

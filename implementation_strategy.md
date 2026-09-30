@@ -425,6 +425,7 @@ language {
   staticFields = ["java.math.BigInteger.ZERO", "java.math.BigInteger.ONE",
                   "java.math.BigInteger.TWO", "java.math.BigInteger.TEN"]
   mainArgs  = "unread"                                  # any read of main's args is a violation
+  reach     = "literal-unique"                          # §5.8: literal ids, none repeated
 }
 ```
 
