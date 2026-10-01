@@ -197,7 +197,8 @@ exactly one can fire. There is no "we pruned" case; see *abandoning*.
 unexplored count, elapsed time, where it widened. Always collected, so a
 campaign keeps these even at recording level `Off`.
 
-**`DomainFailure`** — generated code threw or returned null. A hang is not one:
+**`DomainFailure`** — generated code threw (any `Throwable`, out-of-memory and
+stack overflow included) or returned null. A hang is not one:
 `pag` cannot stop it, so the campaign driver kills the process instead (§7). Every call
 into a domain is wrapped; one exception must not end a campaign.
 
@@ -405,7 +406,8 @@ The only library a probe may call.
 **`engine/frontend-soot`** — the only module with Soot (4.7.1) on its compile
 classpath. `cli` sees it at runtime only, through `ServiceLoader`.
 
-**`engine/core`** — profile check, lowering, worklist, invariant map, certifier.
+**`engine/core`** — profile check, lifting, lowering, `ControlFlowResolver`,
+worklist, invariant map, certifier.
 
 **`engine/harness`** — executor, probe runner, verdicts, scoring. Nothing that
 talks to a model: agent drivers and the mutant corpus belong to `campaign/` and
@@ -420,8 +422,13 @@ standing rule. `Rand` is outside it: a bug there breaks replay, not verdicts.
 with a `reach` call after nearly every statement, under the IR interpreter and as a JVM run and
 requires the same `reach` ids in the same order (Phase 2b).
 
-**`IrProvider`** — the one interface through which programs enter: `load`,
-`isLoopHead`. Source lines are not a service: they live on `Method` (§5.1).
+**`IrProvider`** — the one interface through which programs enter: `load`
+only. Source lines are not a service: they live on `Method` (§5.1).
+
+**`ControlFlowResolver`** — the one class in `core` that answers "what comes
+before here": predecessors and loop heads from the `Cfg`, and later, call
+targets through an interface the front end implements (plan §7). Named after
+Historia's class with the same job; see §12.
 
 ---
 
@@ -431,6 +438,7 @@ requires the same `reach` ids in the same order (Phase 2b).
 | --- | --- | --- |
 | Lemma 1 | *hoare triple soundness*, Ch. 4 p. 89, with a framework-spec parameter | the per-step soundness condition, heap/spec parameter dropped |
 | `IRWrapper` | Soot-coupled IR facade, ~2150 lines with APK and callback handling | `IrProvider`, translation only |
+| `ControlFlowResolver` | every "what comes before here" query, including callbacks and call targets | same name and job, smaller: predecessors and loop heads from the `Cfg`; call targets through a front-end interface, once there are calls |
 | `canSubsume` | entailment via Z3, ~1800 lines | `entails`, a domain method, no solver |
 | `IPathNode` | path-node tree, mutable status, implicit `OutputMode` | derivation graph (plan §8), redesigned |
 | `WitnessExplanation` | the printed path for an alarm | `CandidateTrace` |

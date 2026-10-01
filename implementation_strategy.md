@@ -812,13 +812,9 @@ same class file is both translated by `IrProvider` and executed to check for a
 reaching run. Analyzing exactly the artifact that runs removes an entire class of
 disagreement, and removes the JSON program codec the previous draft needed.
 
-`IrProvider` also owns one location service the engine needs, because it is a
-question about bytecode:
-
-```scala
-/** Is this a loop head? Decides where the engine widens. */
-def isLoopHead(loc: Loc): Boolean
-```
+`IrProvider` owns `load` and nothing else. Loop heads, which an earlier draft
+put here as `isLoopHead`, are a property of the lowered `Cfg` and are computed
+in `core` by `ControlFlowResolver` (§7). *Decided — Shawn, 2026-10-01.*
 
 Historia's `findLineInMethod` (line → locations) and a bytecode-rewriting
 `instrumentReach` were both in earlier drafts. Neither is needed while targets
@@ -923,7 +919,7 @@ relational domains as a later rung.
 
 **Lifting never adds or removes a command.** A fused compare leaves a `Nop` where
 the temp was assigned, so every `Loc` still names the same bytecode unit it did
-after loading. `Method.lines`, `isLoopHead` and query resolution all key on
+after loading. `Method.lines` and query resolution both key on
 command indices, and error messages and the invariant map print through them.
 
 Lifting relies on the profile check having passed: it assumes every compare
@@ -1079,9 +1075,26 @@ the separation:
 **Compute.** Worklist. `I(ℓ) = d.top()` for every location `q` resolves to and
 `d.bottom()` everywhere else. Pop a transition `ℓ —step→ ℓ'`, compute
 `d.transfer(step, I(ℓ'))`, join it into `I(ℓ)` — or widen there, at a loop head
-per `IrProvider.isLoopHead` — and re-enqueue predecessors of `ℓ` if `I(ℓ)` grew.
-Stop on an empty worklist or the iteration limit. This stage may be arbitrarily
-heuristic.
+per `ControlFlowResolver` (below) — and re-enqueue predecessors of `ℓ` if `I(ℓ)` grew.
+Stop on an empty worklist, the iteration limit (default 10,000) or the deadline
+(default 60s). This stage may be arbitrarily heuristic.
+
+**`ControlFlowResolver` answers "what comes before here".** As in Historia, one
+class in `core` owns every such question the engine asks: the transitions into
+a location, and whether a location is a loop head. Two kinds of question go
+through it, and it keeps them apart:
+
+- *From the `Cfg` alone* — predecessors, and loop heads: the targets of back
+  edges in a depth-first search from the query's locations over the backward
+  graph. Every cycle contains a back edge of any depth-first search, so every
+  loop is widened somewhere. Placement affects precision and termination, never
+  soundness, since certification does not trust it.
+- *Needing the whole program* — which methods a call may reach. Answered
+  through an interface the front end implements, so `core` still never sees
+  Soot. v1 has one method and no calls to resolve, so the interface waits for
+  the profile setting that admits a second method.
+
+*Decided — Shawn, 2026-10-01.*
 
 **Certify.** Independently re-check, against the settled map:
 
@@ -1115,6 +1128,20 @@ stopped from outside. So a generated `transfer` stuck in `while (true) {}` is
 unkillable from inside `pag`; only the campaign driver killing the process
 stops it (§12). `DomainFailure` covers what the engine *can* observe: a throw,
 or a `null` return.
+
+**Every call into a domain catches any `Throwable`**, including
+`OutOfMemoryError` and `StackOverflowError`. An error thrown inside a domain
+call is that call's, and the stack unwinding out of the domain frees what it
+allocated, so the engine can usually still report `DomainFailure(op, error)`.
+That gives the generator useful feedback, such as "`transfer` ran out of memory"
+or "`widen` recursed without end". An error thrown *outside* any domain call is
+the engine's: `Main` catches it at the top level and exits 4 with a message,
+never 3. `pag` does not run with `-XX:+ExitOnOutOfMemoryError`. The first
+failure ends the search — the failing transition is not skipped, since that
+would abandon states — and this holds in both stages: a domain call that fails
+during certification also yields `Inconclusive(DomainFailure)`, not `Alarm`, so
+a failure means the same thing wherever it happens and never yields `Refuted`.
+*Decided — Shawn, 2026-10-01.*
 
 **Weakening is entirely the domain's.** The engine cannot look inside `S`, so
 any loss of precision happens in the domain's `join` and `widen`, however the
@@ -1348,11 +1375,20 @@ dashboard is built, so it has to carry what the dashboard would have shown —
 ```
 pag ir      <classes> [--cfg] [--no-lift] [--no-enforce]  what the front end produced
 pag run     <classes> [--inputs 3,-7] [--trace] [--step-limit N]   run on the IR interpreter
-pag analyze --domain <jar> --classes <dir> --reach ID   verdict and invariant map
+pag analyze --domain <jar> --classes <dir> --reach ID [--iteration-limit N] [--deadline 60s]
+                                                        verdict and invariant map
 pag check   --domain <jar> --classes <dir> --reach ID   analyze, then try to falsify
 ```
 
-`--reach 7` is the `Reachable(7)` query: the `reach(7)` call (§5.8). `--json` works on all of
+`--reach 7` is the `Reachable(7)` query: the `reach(7)` call (§5.8). The limits
+default to 10,000 iterations and 60s (§7).
+
+**`--domain <jar>` names a jar holding exactly one public class that implements
+`pag.api.Domain`, with a public constructor taking no arguments.** `pag`
+scans the jar for it; zero or several such classes is exit code 1. Nothing
+else in the jar names the class, so a generated domain has no extra file to
+forget. If domains later need configuration, only this rule changes.
+*Decided — Shawn, 2026-10-01.* `--json` works on all of
 them; human-readable text is the default. `--config <file>` supplies domains and
 limits in bulk instead of flags, for campaign use.
 
@@ -1437,8 +1473,8 @@ prose:
 | 1 | usage or I/O error |
 | 2 | did not load — untranslatable bytecode (§5.5) or a profile violation (§5.2) |
 | 3 | **unsound** — a reaching run contradicted a refutation |
-| 4 | inconclusive — `IterationLimit` or `Deadline` |
-| 5 | domain failure — generated code threw or returned null |
+| 4 | inconclusive — `IterationLimit` or `Deadline`, or the engine itself ran out of memory or stack (§7) |
+| 5 | domain failure — generated code threw (any `Throwable`, §7) or returned null |
 
 4 and 5 are separate because they call for opposite responses: 4 says raise the
 budget, 5 says the domain is broken and the generator needs a stack trace. A
@@ -1636,7 +1672,7 @@ command line. A cleaned IR in `engine/ir` extracted from Historia's `IRWrapper` 
 `SootIrProvider` with `load` only (§5.5); the profile check
 (§5.2); lowering (§5.3); `pag ir`. Most of the work is separating IR translation
 from the APK, callback and class-hierarchy machinery `SootWrapper` currently
-mixes into it. `isLoopHead` waits for Phase 4, which uses it.
+mixes into it.
 Lifting (§5.7) is in this phase too, since the CFG is unreadable without it.
 *Done when:* a fixture `.java` using `Rand.randInt`, `reach`, `BigInteger`
 arithmetic, a loop and a branch, compiled in the test with `javax.tools`, loads through
@@ -1693,8 +1729,10 @@ and run through the template with networking disabled.
 ### Phase 4 — the analysis engine
 First, on its own, the domain-vocabulary converter (§5.4), with one test per
 case, and resolution of `--reach` queries against `Lowered.reachSites` (§6,
-moved from Phase 2b). Then the worklist, invariant map, widening, iteration limit, and the
-certifier as a separate pass. The recorder interface (§8) with `NullRecorder` only — the graph comes
+moved from Phase 2b). Then `ControlFlowResolver` (§7), the worklist, invariant map,
+widening, limits, and the certifier as a separate pass. `pag analyze` loads the
+domain with a plain `URLClassLoader` and the discovery rule in §11; Phase 6
+adds the rest of loading. The recorder interface (§8) with `NullRecorder` only — the graph comes
 next, but the call sites go in now so they are never retrofitted.
 *Done when:* `pag analyze` prints the map in §11's format; a program whose
 target is unreachable gets `Refuted` and one whose target is reachable gets
@@ -1721,7 +1759,8 @@ point at which the whole idea is demonstrated, with a human standing in for the
 adversary.
 
 ### Phase 6 — dynamic loading
-Config parsing, `URLClassLoader` per domain, `ServiceLoader` discovery.
+Config parsing, and loading grown from Phase 4's plain `URLClassLoader` and
+discovery rule (§11).
 Delegation is **parent-first for `pag.api.*`** so engine and domain agree on the
 contract types, child-first otherwise so domains may carry conflicting
 dependencies. A smoke test runs immediately after loading, exercising every command form and
