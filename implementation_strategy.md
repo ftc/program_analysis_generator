@@ -858,21 +858,27 @@ constant in a comparison the type of the local it is compared with, so these
 reach lifting as `$z == false` for an `equals` temp and `$i == 0` for a
 `compareTo` temp. Observed on Soot 4.7.1, 2026-09-29/30.)
 
-**No constant substitution, for now.** Constants reach comparisons through
-temps — Jimple call arguments must be locals or literals, so
-`x.compareTo(BigInteger.ZERO) > 0` lifts to `$r := 0; … if x > $r`, not
-`if x > 0`. Substituting the constant into its use was decided on 2026-09-26
-(§16 Q14) and then reversed. *Decided — Shawn, 2026-09-30:* the domain should
-handle it, and complexity before the first experiment should stay low. The
-consequence is on the domain: running backward, a domain meets `x > $r` before
-`$r := 0`, so a *non-relational* domain such as plain intervals can use
-neither and proves nothing about comparisons with literals. A domain that
-relates variables — carrying `x - $r > 0` back to `$r := 0` — handles it
-naturally. The Phase 3 reference domain, and the worked example the generator
-sees, must be such a domain, or they will prove little. If substitution is
-wanted later, the sound form is propagation within a basic block: replace a use
-of `r` with `c` when the nearest earlier assignment to `r` in the same block is
-`r := c`, leaving that assignment in place.
+**Constant substitution.** Constants reach comparisons through temps —
+Jimple call arguments must be locals or literals, so
+`x.compareTo(BigInteger.ZERO) > 0` lifts to `$r := 0; … if x > $r`. Running
+backward, a domain meets `x > $r` before `$r := 0`, so a *non-relational*
+domain such as plain intervals can use neither and proves nothing about a
+comparison with a literal — which is nearly every target in a v1 probe. So the
+last step of lifting propagates constants **within a basic block**: a use of a
+local `r` is replaced by `c` when the nearest earlier assignment to `r` in the
+same block is `r := c`. Basic blocks start at jump targets and after jumps. The
+assignment stays in place, so locations are unchanged, and any other use of `r`
+still reads it; that is what makes the rule sound whatever else uses `r`, with
+no counting of uses. Only value positions are rewritten, never assignment
+targets.
+
+History: decided 2026-09-26 in a single-use form; reversed 2026-09-30 to keep
+complexity down, on the view that the domain should handle it; restored
+2026-09-30 in the block-propagation form, once it was clear the cost of *not*
+doing it falls on every domain — a generated one included — which would then
+have to relate variables to prove anything. *Decided — Shawn, 2026-09-30:* start
+the experiments with the simplest domains (`experiments.md`, E1) and add
+relational domains as a later rung.
 
 **Lifting never adds or removes a command.** A fused compare leaves a `Nop` where
 the temp was assigned, so every `Loc` still names the same bytecode unit it did
@@ -1356,9 +1362,8 @@ entry       I(entry) = ⊥
 REFUTED
 ```
 
-Illustrative: lifting does not substitute constants (§5.7), so the real IR has
-`if x <= $r` with `$r := 0` a few commands earlier, and refuting this target
-needs a domain that relates `x` to `$r`; temps are elided above.
+The constants in each comparison reach the domain as constants because lifting
+substitutes them within a basic block (§5.7); temps are elided above.
 
 `--record full` additionally writes the derivation graph (§8) and, on an
 `Alarm`, renders a `CandidateTrace` from the entry to the query. On an
@@ -1543,9 +1548,9 @@ non-trivial *backward* domain (Phase 10) and whether an adversary can break one
 build. So the order reaches a crude version of those first and returns for the
 rest:
 
-1. **Phases 0, 1, 2a, 2b, 3, 4, 5** — as written: a program loads, runs, is
-   analysed with the reference domain, and a human-written reaching run
-   rejects a broken domain.
+1. **Phases 0, 1, 2a, 2b, then constant substitution (§5.7), then 3, 4, 5** —
+   a program loads, runs, is analysed with the interval reference domain, and a
+   human-written reaching run rejects a broken domain.
 2. **Crude Phase 10** — a generator loop in `campaign/` with no containers:
    the generated jar goes on `pag`'s classpath by path, and "the corpus" is a
    handful of hand-written probes. *Done when* a generated domain compiles,
@@ -1554,6 +1559,12 @@ rest:
    four hand-written mutants and one generated domain. *Done when* a kill rate
    is reported, however rough.
 4. **Phases 4.5, 6, 7, 9**, then the full versions of **8, 10, 11**.
+
+What the crude and full Phases 8, 10 and 11 are *for* is set out in
+`experiments.md`: a complexity ladder measuring where one-shot domain
+generation breaks and how much feedback each rung needs (E1), the diminishing
+returns of counterexamples (E2), and the same across several open-weight models
+(E3). *Decided — Shawn, 2026-09-30.*
 
 *Decided — Shawn, 2026-09-26.* One cost to be aware of: until Phase 9,
 generated domain code runs unsandboxed on the development machine, with the
@@ -1611,7 +1622,7 @@ proposed before it is written:
 | 3 | `SootIrProvider`: straight-line code and `Return`; in-test fixture compilation | fixture → expected `Cmd` list |
 | 4 | translation of branches, calls, parameter binding; `Untranslatable` | one fixture per construct |
 | 5 | profile check | a passing and a failing fixture per rule |
-| 6 | lifting (constant substitution dropped, §5.7) | one test per table row |
+| 6 | lifting; constant substitution as a follow-up change (§5.7) | one test per table row |
 | 7 | lowering to `Cfg` with `pre`/`post`/entry/exit | one test per table row |
 | 8 | `pag ir --cfg` | golden file |
 
@@ -1678,7 +1689,8 @@ compile-time dependency on it, and Phase 4's tests pass through the loaded path.
 ### Phase 7 — the scoring corpus
 Programs with many targets, plus synthetic targets that are infeasible by
 construction (`assume x > 0; assume x < 0`) where the answer is known. Graded by
-the reasoning required, so the score measures capability rather than luck.
+the reasoning required, so the score measures capability rather than luck: the
+grades are the rungs R0–R6 of `experiments.md` E1.
 *Done when:* the reference domain produces a stable proof count, and the graded
 targets separate it from a deliberately weaker domain.
 
@@ -1724,6 +1736,9 @@ corpus → report. Bounded retries, durable per-attempt records, every attempt
 logged with api version, corpus hash and outcome.
 *Done when:* a small model produces a domain that compiles, loads, and refutes at
 least one target, working from the contract and the reference example alone.
+This is E1's first data point (`experiments.md`): rung R0–R1, one shot, one
+model; the attempt records must already carry what E1 needs (prompt version,
+sample, each feedback round's kind and outcome).
 
 ### Phase 11 — the adversary agent
 In `campaign/`: read domain → `pag analyze` for refuted targets → propose probes
@@ -1761,7 +1776,8 @@ framework, library, or the OS.
 
 1. **Adversary budget and stopping rule.** How long does an adversary search
    before a domain is provisionally accepted? Phase 8's calibration should set
-   this empirically rather than by guess.
+   this empirically rather than by guess — `experiments.md` E2 is that
+   measurement.
 2. ~~**Does the adversary see the domain source?**~~ *Decided:* yes (§10).
 3. **Reaching-run minimization.** A found run may be large. Shrinking it before
    it becomes generator feedback is probably worth it, and is standard
@@ -1807,9 +1823,9 @@ framework, library, or the OS.
     use the constant — the interval domain would prove nothing about any
     comparison with a literal. Lifting could substitute a temp that is assigned
     a constant and used once, leaving its assignment in place so locations are
-    unchanged. *Decided 2026-09-26:* yes. *Reversed 2026-09-30:* no — the
-    domain handles it; the reference domain must therefore relate variables
-    (§5.7).
+    unchanged. *Decided 2026-09-26:* yes. *Reversed 2026-09-30:* no.
+    *Restored 2026-09-30:* yes, as propagation within a basic block (§5.7), so
+    the first experiments can use interval domains.
 15. ~~**Method identity.**~~ *Decided:* methods are identified by `MethodId`,
     the fully qualified signature (§5.1). The profile's `callees` list still
     matches by class and name (`MethodId.qualifiedName`), which is exact while
@@ -1852,3 +1868,8 @@ framework, library, or the OS.
       Needs no domain; finds bugs in loading, lifting and lowering.
     *Decided — Shawn, 2026-09-30:* likely very useful, but none of it before
     the first experiment.
+19. **A relational reference domain.** The Phase 3 reference is an interval
+    domain, which suffices for rungs R0–R4 of `experiments.md` E1. R5 and R6
+    (inputs related to each other; nested loops) need a relational domain —
+    zones (difference-bound matrices, Miné 2001) are the smallest that relates
+    variables — and so will a reference for them. Write it when E1 reaches R5.

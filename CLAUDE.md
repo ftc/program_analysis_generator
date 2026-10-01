@@ -1,8 +1,8 @@
 # Working agreement
 
 How changes are made in this repository. Read `README.md` for the idea,
-`implementation_strategy.md` for the plan, and `glossary.md` for terms before
-changing code.
+`implementation_strategy.md` for the plan, `experiments.md` for what the plan is
+for, and `glossary.md` for terms before changing code.
 
 ## One change at a time
 

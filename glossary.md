@@ -1,7 +1,7 @@
 # Glossary
 
 Every term of art used in `README.md`, `implementation_strategy.md`,
-`dashboard.md` and `misc.md`, with the meaning it carries here. Terms inherited
+`experiments.md`, `dashboard.md` and `misc.md`, with the meaning it carries here. Terms inherited
 from Shawn's dissertation or from Historia are marked, because several mean
 something narrower here than there.
 
@@ -303,6 +303,15 @@ Stage 1 and Stage 2). The JVM run is
 
 **Adversary** — the agent that tries to break them. Scored on kill rate. Reads
 the domain source deliberately; must still produce an executable reaching run.
+
+**Complexity ladder**, **rung** — `experiments.md` E1: scoring-corpus slices
+R0–R6, each needing one more piece of reasoning than the last (constants,
+intervals, arithmetic, multiplication, loops, relations between inputs, nested
+loops). Used to find where a model stops generating an acceptable domain in one
+shot, and how much feedback each rung needs.
+
+**One-shot** — a domain generated with no feedback at all: the prompt in, a
+domain out, judged as is. The baseline E1 measures feedback against.
 
 **Kill rate** — fraction of seeded mutants an adversary breaks within a budget.
 The number that makes "the adversary found nothing" mean anything.
