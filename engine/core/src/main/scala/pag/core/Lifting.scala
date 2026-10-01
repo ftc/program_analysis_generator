@@ -22,7 +22,7 @@ object Lifting:
 
   private def liftBody(m: Method, mode: Mode): Vector[Cmd] =
     val fused = fuseCompares(m, mode)
-    val lifted = fused.map(liftCmd)
+    val lifted = substituteConstants(fused.map(liftCmd))
     assert(lifted.size == m.body.size, s"${m.id}: lifting changed the number of commands")
     lifted
 
@@ -52,6 +52,41 @@ object Lifting:
           case (None, Mode.Lenient) => ()
       case _ => ()
     body.toVector
+
+  /** Constant substitution (§5.7): within a basic block, a use of local r becomes
+    * c when the nearest earlier assignment to r in the block is `r := c`. The
+    * assignment stays, so any other use still reads it; only value positions are
+    * rewritten, never assignment targets. A block starts at 0, at every jump
+    * target, and after every jump, return or throw.
+    */
+  private def substituteConstants(body: Vector[Cmd]): Vector[Cmd] =
+    val targets = body.collect { case Cmd.Goto(_, t) => t }.toSet
+    def endsBlock(c: Cmd) = c match
+      case _: Cmd.Goto | _: Cmd.Return | Cmd.Throw => true
+      case _                                     => false
+    var known = Map.empty[LVal.Local, RVal.IntConst]
+    body.indices.toVector.map { i =>
+      if i == 0 || targets(i) || endsBlock(body(i - 1)) then known = Map.empty
+      val c = substituteIn(body(i), known)
+      c match
+        case Cmd.Assign(r: LVal.Local, k: RVal.IntConst) => known += r -> k
+        case Cmd.Assign(r: LVal.Local, _)                => known -= r
+        case _                                           => ()
+      c
+    }
+
+  private def substituteIn(c: Cmd, known: Map[LVal.Local, RVal.IntConst]): Cmd =
+    def value(v: RVal): RVal = v match
+      case l: LVal.Local                 => known.getOrElse(l, l)
+      case RVal.Binop(l, op, r)          => RVal.Binop(value(l), op, value(r))
+      case i @ RVal.Invoke(_, _, recv, args) => i.copy(receiver = recv.map(value), args = args.map(value))
+      case _                             => v
+    c match
+      case Cmd.Assign(t, s)     => Cmd.Assign(t, value(s))
+      case Cmd.Goto(cond, to)   => Cmd.Goto(value(cond), to)
+      case Cmd.Return(v)        => Cmd.Return(v.map(value))
+      case Cmd.InvokeStmt(call) => Cmd.InvokeStmt(call.copy(receiver = call.receiver.map(value), args = call.args.map(value)))
+      case Cmd.Nop | Cmd.Throw  => c
 
   private def liftCmd(c: Cmd): Cmd = c match
     case Cmd.Assign(t, s)     => Cmd.Assign(t, liftValue(s))

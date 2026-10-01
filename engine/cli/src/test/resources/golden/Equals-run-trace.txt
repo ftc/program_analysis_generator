@@ -8,7 +8,7 @@ Equals.main(java.lang.String[])   inputs [10] · IR interpreter
   post(2)
   pre(3)    nop
   post(3)
-  pre(4)    if x != $stack2 goto 6
+  pre(4)    if x != 10 goto 6
   post(4)
   pre(5)    Reach.reach(1)
   post(5)

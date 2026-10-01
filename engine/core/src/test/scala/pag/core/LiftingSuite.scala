@@ -80,13 +80,14 @@ class LiftingSuite extends munit.FunSuite:
       Cmd.Goto(RVal.Binop(c, BinOp.Le, int(0)), 7),
       Cmd.InvokeStmt(static(Reach, int(1))),
       Cmd.Return(None))
+    // Constant substitution (§5.7) puts 1 and 5 into their uses; the assignments stay.
     assertEquals(lift(source*), Vector(
       Cmd.Assign(x, static(RandInt)),
       Cmd.Assign(r, int(1)),
-      Cmd.Assign(y, RVal.Binop(x, BinOp.Add, r)),
+      Cmd.Assign(y, RVal.Binop(x, BinOp.Add, int(1))),
       Cmd.Assign(r, int(5)),
       Cmd.Nop,
-      Cmd.Goto(RVal.Binop(y, BinOp.Le, r), 7),
+      Cmd.Goto(RVal.Binop(y, BinOp.Le, int(5)), 7),
       Cmd.InvokeStmt(static(Reach, int(1))),
       Cmd.Return(None)))
 
@@ -104,3 +105,46 @@ class LiftingSuite extends munit.FunSuite:
 
   test("lenient: a compare temp not tested by the next if is left as it is"):
     assertEquals(lift(misshapen*)(using Lifting.Mode.Lenient), misshapen.toVector)
+
+  // --- Constant substitution (§5.7), within a basic block
+
+  val ret: Cmd = Cmd.Return(None)
+  def gt(l: RVal, r: RVal): RVal = RVal.Binop(l, BinOp.Gt, r)
+
+  test("a constant reaches its use in the same block; the assignment stays"):
+    assertEquals(lift(Cmd.Assign(r, int(10)), Cmd.Goto(gt(x, r), 2), ret),
+      Vector(Cmd.Assign(r, int(10)), Cmd.Goto(gt(x, int(10)), 2), ret))
+
+  test("it reaches through a fused compare's nop: if x OP literal, as javac wrote it"):
+    // $r = TEN; $c = x.compareTo($r); if $c <= 0 goto 4  →  $r := 10; nop; if x <= 10
+    val source = Seq(Cmd.Assign(r, LVal.StaticField("java.math.BigInteger", "TEN")),
+      Cmd.Assign(c, virtual(CompareTo, x, r)), Cmd.Goto(RVal.Binop(c, BinOp.Le, int(0)), 4), Cmd.Nop, ret)
+    assertEquals(lift(source*)(2), Cmd.Goto(RVal.Binop(x, BinOp.Le, int(10)), 4))
+
+  test("not across a jump target: another path may arrive with a different value"):
+    // 1 is the target of the goto at 2
+    val source = Seq(Cmd.Assign(r, int(1)), Cmd.Goto(gt(x, r), 3), Cmd.Goto(RVal.BoolConst(true), 1), ret)
+    assertEquals(lift(source*)(1), Cmd.Goto(gt(x, r), 3))
+
+  test("not after a jump: the next command starts a block"):
+    val source = Seq(Cmd.Assign(r, int(1)), Cmd.Goto(gt(x, int(0)), 2), Cmd.Goto(gt(x, r), 3), ret)
+    assertEquals(lift(source*)(2), Cmd.Goto(gt(x, r), 3))
+
+  test("not after the local is reassigned a non-constant"):
+    val source = Seq(Cmd.Assign(r, int(1)), Cmd.Assign(r, static(RandInt)), Cmd.Goto(gt(x, r), 3), ret)
+    assertEquals(lift(source*)(2), Cmd.Goto(gt(x, r), 3))
+
+  test("the nearest assignment wins"):
+    val source = Seq(Cmd.Assign(r, int(1)), Cmd.Assign(r, int(2)), Cmd.Goto(gt(x, r), 3), ret)
+    assertEquals(lift(source*)(2), Cmd.Goto(gt(x, int(2)), 3))
+
+  test("a user variable Soot reused for a constant is substituted too (§5.5)"):
+    // i = valueOf(5); $c = x.compareTo(i); if $c <= 0: Soot's own output for x > 5 after a loop
+    val i = LVal.Local("i", Big)
+    val source = Seq(Cmd.Assign(i, static(ValueOf, int(5))), Cmd.Assign(c, virtual(CompareTo, x, i)),
+      Cmd.Goto(RVal.Binop(c, BinOp.Le, int(0)), 4), Cmd.Nop, ret)
+    assertEquals(lift(source*)(2), Cmd.Goto(RVal.Binop(x, BinOp.Le, int(5)), 4))
+
+  test("assignment targets are never rewritten"):
+    assertEquals(lift(Cmd.Assign(r, int(1)), Cmd.Assign(r, RVal.Binop(r, BinOp.Add, int(1))), ret),
+      Vector(Cmd.Assign(r, int(1)), Cmd.Assign(r, RVal.Binop(int(1), BinOp.Add, int(1))), ret))
