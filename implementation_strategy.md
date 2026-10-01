@@ -1300,7 +1300,7 @@ dashboard is built, so it has to carry what the dashboard would have shown —
 
 ```
 pag ir      <classes> [--cfg] [--no-lift] [--no-enforce]  what the front end produced
-pag run     <classes> [--inputs 3,-7,...]               execute, report locations visited
+pag run     <classes> [--inputs 3,-7] [--trace] [--step-limit N]   run on the IR interpreter
 pag analyze --domain <jar> --classes <dir> --reach ID   verdict and invariant map
 pag check   --domain <jar> --classes <dir> --reach ID   analyze, then try to falsify
 ```
@@ -1616,7 +1616,10 @@ proposed before it is written:
 | 8 | `pag ir --cfg` | golden file |
 
 ### Phase 2b — the IR interpreter
-The IR interpreter (§9), a minimal JVM run, `pag run`, and query resolution for `--reach`.
+The IR interpreter (§9), a minimal JVM run, and `pag run`, which runs the IR
+interpreter only; a `--jvm` option can come later. Query resolution for
+`--reach` moves to Phase 4, where `pag analyze` is its first user. *Decided —
+Shawn, 2026-09-30.*
 *Done when:* `pag run --inputs …` on a fixture reproduces a visited-location
 sequence recorded in a fixture file — **and** the **IR–JVM cross-check** is part
 of `sbt test`: for every fixture, written with a `reach` call after nearly every
@@ -1634,7 +1637,8 @@ which must succeed with networking disabled.
 
 ### Phase 4 — the analysis engine
 First, on its own, the domain-vocabulary converter (§5.4), with one test per
-case. Then the worklist, invariant map, widening, iteration limit, and the
+case, and resolution of `--reach` queries against `Lowered.reachSites` (§6,
+moved from Phase 2b). Then the worklist, invariant map, widening, iteration limit, and the
 certifier as a separate pass. The recorder interface (§8) with `NullRecorder` only — the graph comes
 next, but the call sites go in now so they are never retrofitted.
 *Done when:* `pag analyze` prints the map in §11's format; a program whose
@@ -1831,3 +1835,20 @@ framework, library, or the OS.
     addressed with callback and callin locations (the `Internal` prefix on
     `InternalMethodEntry` leaves room for them). Marked by a TODO in
     `SootIrProviderSuite`. Out of scope for v1.
+18. **Using the IR interpreter adversarially.** The IR–JVM cross-check
+    (Phase 2b) is differential testing on a fixed, hand-written corpus. Three
+    extensions, in order of cost:
+    - **Triage every rejection.** When a JVM run reaches a location a domain
+      refuted, also run the IR interpreter on the same inputs. If it reaches
+      the location too, the domain is unsound; if it does not, the `Cfg` the
+      domain analysed does not behave like the program — a translation bug,
+      not the domain's fault — and the domain should not be rejected for it.
+      One cheap run per rejection (Phase 5, `pag check`).
+    - **Cross-check every adversary probe.** Each probe the adversary writes
+      (Phase 11) is a deliberately tricky program; running it through both
+      executors turns the adversary's whole output into translation tests.
+    - **A translation adversary.** Generate programs and inputs to find
+      disagreements between the two executors, as Csmith did for C compilers.
+      Needs no domain; finds bugs in loading, lifting and lowering.
+    *Decided — Shawn, 2026-09-30:* likely very useful, but none of it before
+    the first experiment.

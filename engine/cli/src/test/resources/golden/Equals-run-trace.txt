@@ -1,0 +1,19 @@
+Equals.main(java.lang.String[])   inputs [10] · IR interpreter
+  entry
+  pre(0)    args := @parameter0
+  post(0)
+  pre(1)    x := Rand.randInt()
+  post(1)
+  pre(2)    $stack2 := 10
+  post(2)
+  pre(3)    nop
+  post(3)
+  pre(4)    if x != $stack2 goto 6
+  post(4)
+  pre(5)    Reach.reach(1)
+  post(5)
+  pre(6)    return
+  post(6)
+  exit
+reached   1
+ended     exit

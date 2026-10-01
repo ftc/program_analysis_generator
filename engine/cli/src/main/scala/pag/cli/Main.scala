@@ -5,7 +5,8 @@ import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
 
 import pag.core.{Lifting, Lowering, Profile, ProfileCheck}
-import pag.ir.{IrProvider, Untranslatable}
+import pag.harness.{Ended, IrInterpreter}
+import pag.ir.{IrProvider, Loc, Untranslatable}
 import scopt.{OEffect, OParser}
 
 /** The `pag` entry point (implementation_strategy.md §11). Exit codes: 0 done,
@@ -19,7 +20,10 @@ object Main:
       classes: Option[Path] = None,
       cfg: Boolean = false,
       lift: Boolean = true,
-      enforce: Boolean = true
+      enforce: Boolean = true,
+      inputs: String = "",
+      trace: Boolean = false,
+      stepLimit: Int = IrInterpreter.DefaultStepLimit
   )
 
   private val parser: OParser[Unit, Config] =
@@ -36,6 +40,17 @@ object Main:
           opt[Unit]("no-lift").action((_, c) => c.copy(lift = false)).text("show the IR before lifting (§5.7)"),
           opt[Unit]("no-enforce").action((_, c) => c.copy(enforce = false))
             .text("skip the profile check, for inspection only (§5.2)")
+        ),
+      cmd("run")
+        .action((_, c) => c.copy(command = Some("run")))
+        .text("run a directory's one class on the IR interpreter, reporting the reach ids it passes")
+        .children(
+          arg[Path]("<classes-dir>").required().action((p, c) => c.copy(classes = Some(p))),
+          opt[String]("inputs").valueName("3,-7").action((s, c) => c.copy(inputs = s))
+            .text("the values randInt returns, in order (§5.6)"),
+          opt[Unit]("trace").action((_, c) => c.copy(trace = true)).text("also print every location visited"),
+          opt[Int]("step-limit").action((n, c) => c.copy(stepLimit = n))
+            .text(s"stop after this many transitions (default ${IrInterpreter.DefaultStepLimit})")
         ),
       checkConfig(c => if c.command.isEmpty then failure("no command given") else success)
     )
@@ -55,7 +70,8 @@ object Main:
       case OEffect.Terminate(_)       => ()
     }
     config match
-      case Some(c @ Config(Some("ir"), Some(_), _, _, _)) => ir(c, out, err)
+      case Some(c) if c.command.contains("ir") && c.classes.nonEmpty  => ir(c, out, err)
+      case Some(c) if c.command.contains("run") && c.classes.nonEmpty => runProbe(c, out, err)
       case _ => 1 // scopt's effects above already reported the error and the usage
 
   /** Load, check the profile, lift, and print the IR; with --cfg, lower and print the CFG too.
@@ -84,6 +100,45 @@ object Main:
       catch
         case e: Untranslatable           => err.println(s"pag: ${e.getMessage}"); 2
         case e: IllegalArgumentException => err.println(s"pag: ${e.getMessage}"); 1
+
+  /** Load, check the profile, lift, lower, and run on the IR interpreter (§9).
+    * Always checked and lifted: the interpreter covers v1's lifted form only.
+    */
+  private def runProbe(c: Config, out: PrintStream, err: PrintStream): Int =
+    val dir = c.classes.get
+    if !Files.isDirectory(dir) then
+      err.println(s"pag: not a directory: $dir"); 1
+    else
+      val profile = Profile.BigintMainV1
+      try
+        val inputs = pag.probe.Inputs.parse(c.inputs)
+        val program = frontEnd().load(dir)
+        val violations = ProfileCheck.check(program, profile)
+        if violations.nonEmpty then
+          violations.foreach(v => err.println(v.message(program.sourceFile, profile.name)))
+          2
+        else
+          val lifted = Lifting.lift(program, Lifting.Mode.Strict)
+          val run = IrInterpreter.run(Lowering.lower(lifted), inputs, c.stepLimit)
+          val main = lifted.methods.find(_.id == lifted.entryMethod).get
+          out.println(s"${main.id}   inputs [${inputs.values.asScala.mkString(", ")}] · IR interpreter")
+          if c.trace then
+            run.visited.foreach {
+              case l @ Loc.AppLoc(_, i, true) => out.println(f"  ${Show.loc(l)}%-9s ${Show.cmd(main.body(i))}")
+              case l                          => out.println(s"  ${Show.loc(l)}")
+            }
+          out.println(s"reached   ${if run.reached.isEmpty then "(none)" else run.reached.mkString(" ")}")
+          out.println(s"ended     ${ended(run.ended)}")
+          0
+      catch
+        case e: Untranslatable           => err.println(s"pag: ${e.getMessage}"); 2
+        case e: IllegalArgumentException => err.println(s"pag: ${e.getMessage}"); 1
+
+  private def ended(e: Ended): String = e match
+    case Ended.Exit               => "exit"
+    case Ended.InputsExhausted(l) => s"inputs exhausted at ${Show.loc(l)}"
+    case Ended.Stuck(l)           => s"stuck at ${Show.loc(l)}"
+    case Ended.StepLimit(n)       => s"step limit $n"
 
   /** The one front end on the classpath, found through ServiceLoader (§5.5). */
   private def frontEnd(): IrProvider =

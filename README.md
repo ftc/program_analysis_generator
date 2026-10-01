@@ -617,6 +617,7 @@ sbt test             # run every module's tests, after the boundary checks
 sbt core/test        # run one module's tests
 sbt cli/run          # run pag with no arguments
 sbt "cli/run ir <classes-dir> --cfg"   # print a compiled probe's IR and CFG
+sbt "cli/run run <classes-dir> --inputs 10 --trace"   # run it on the IR interpreter
 sbt core/console     # Scala REPL with a module on the classpath
 sbt ~test            # re-run tests on every file change
 sbt clean            # delete build output under target/
