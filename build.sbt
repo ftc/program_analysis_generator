@@ -129,5 +129,11 @@ lazy val cli = (project in file("engine/cli"))
     name                := "pag-cli",
     libraryDependencies += "com.github.scopt" %% "scopt" % "4.1.0",
     Compile / mainClass := Some("pag.cli.Main"),
-    run / fork          := true
+    run / fork          := true,
+    // DomainBuildSuite builds the reference domain with the Gradle template
+    // (§3) against the api jar this build just packaged.
+    Test / javaOptions ++= Seq(
+      s"-Dpag.apiJar=${(api / Compile / packageBin).value}",
+      s"-Dpag.repoRoot=${(ThisBuild / baseDirectory).value}"
+    )
   )

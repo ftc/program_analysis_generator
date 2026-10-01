@@ -12,3 +12,7 @@ project/project/
 
 .DS_Store
 *.log
+
+# Gradle: the template's own cache, and each domain's build output
+domains/build-template/.gradle/
+domains/*/build/

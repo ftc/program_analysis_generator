@@ -208,6 +208,18 @@ the domain's tests with JUnit. *Decided — Shawn, 2026-09-30.*
   Phase 10 — against plain `javac`, and with the Gradle daemon both warm and
   cold, since a fresh container may start cold every time. If it is too slow,
   re-engineer then. *Decided — Shawn, 2026-09-30.*
+  First numbers (2026-10-01, the skeleton reference domain, offline, this
+  machine): plain `javac` + `jar` 0.39 s; Gradle with a warm daemon, clean build
+  *and* tests, 0.7 s; with no daemon, 2.6 s. So a warm daemon costs little;
+  keep one build container alive rather than starting one per build.
+- **Pinned versions.** Gradle 9.8.0 through the wrapper in
+  `domains/build-template/` (`gradlew`); JUnit 6.1.3 (the Jupiter API) through
+  its BOM. The wrapper pins the distribution's SHA-256 from Gradle's published
+  checksums, so a tampered or corrupted download is refused (checked
+  2026-10-01 by forcing a download against a wrong checksum), and the committed
+  `gradle-wrapper.jar` matches Gradle's published checksum for 9.8.0's wrapper.
+  Regenerate the wrapper with `./gradlew wrapper`, never a system `gradle`,
+  which writes its own version's jar.
 
 `engine/api` and `engine/probe-lib` are sbt subprojects with
 `crossPaths := false` and `autoScalaLibrary := false`, so the published jars are
@@ -1672,9 +1684,9 @@ at once.
 Written by hand, in Java, as a fixture. Also the worked example shown to the
 generator, so write it the way generated code should look. Includes the Gradle
 build template (§3, *How domains are built*), which builds a domain against
-`api.jar` alone, offline. **[decide]** whether `sbt test` also runs the reference
-domain's `gradle test`, so that "`sbt test` passes" keeps meaning everything
-passes (recommended), or whether domains are tested separately.
+`api.jar` alone, offline. `sbt test` also builds the reference domain through
+the template and runs its tests (`cli`'s `DomainBuildSuite`), so "`sbt test`
+passes" keeps meaning everything passes. *Decided — Shawn, 2026-10-01.*
 *Done when:* the six transfer cases in `README.md` pass as unit tests, built
 and run through the template with networking disabled.
 
@@ -1907,3 +1919,11 @@ framework, library, or the OS.
     (inputs related to each other; nested loops) need a relational domain —
     zones (difference-bound matrices, Miné 2001) are the smallest that relates
     variables — and so will a reference for them. Write it when E1 reaches R5.
+20. **Dead constant stores.** After constant substitution, assignments such as
+    `$stack2 := 10` often have no remaining reader. They cost a domain
+    nothing — backward, nothing is ever known about a local nobody reads — and
+    they show in `pag ir` where a constant came from. If they ever clutter
+    output or confuse a generated domain: a local read nowhere in its method can
+    have each assignment *of a constant* to it replaced by `nop` (never deleted,
+    so locations stay; never a call, which has effects of its own). Sound with
+    no flow analysis. *Decided — Shawn, 2026-10-01:* postponed.
