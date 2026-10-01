@@ -123,8 +123,9 @@ engine/                    sbt multi-project, human-only
   results/                 Scala 3. result ADTs + codecs, shared with campaign/ (§13)
   cli/                     Scala 3. config, domain loading, entry point
 domains/                   every domain worth keeping, one directory each
+  build-template/          the one Gradle build every domain is built with (below)
   interval/                Java. the reference fixture, and later a target
-    src/ ... build.sh      javac against api.jar. No sbt, no network.
+    src/  test/            the domain and its unit tests; no build file of its own
     domain.json            metadata (below)
   mut-<name>/              a hand-written mutant; domain.json names its bug
   gen-<nnnn>/              a generated domain
@@ -179,6 +180,34 @@ code. Domains that fail to compile or load, and full attempt logs, stay in
 `results/<campaign>/` and are not committed: a campaign produces hundreds.
 Moving to SQLite later changes the storage, not the schema, because both files
 use the `engine/results` codecs (§13).
+
+### How domains are built
+
+**Gradle, from one fixed, human-written template.** A domain directory holds
+only `src/` and `test/`; the build file is never part of a domain. The engine
+builds every domain — reference, mutant or generated — with its own copy of the
+template in `domains/build-template/`, compiling against `api.jar` and running
+the domain's tests with JUnit. *Decided — Shawn, 2026-09-30.*
+
+- **Why Gradle.** A Java project with `build.gradle` and JUnit is the most
+  common shape in open-source Java, so a small model reads and writes it far
+  more reliably than sbt; domains can carry their own unit tests, whose results
+  are structured feedback (`experiments.md` E1); and dependency management is
+  what a domain that needs a library (§16 Q16) would otherwise have to
+  reinvent. A `build.sh` around `javac` would grow into a home-made build tool
+  the moment tests or libraries arrived.
+- **Why a fixed template.** A build file is code that runs at build time. If
+  the generator wrote it, it would execute arbitrary code while building, not
+  just when `pag` runs the domain; and builds would differ from domain to
+  domain. With one template, the generator writes Java and nothing else.
+- **Offline.** The Gradle version is pinned, and the distribution and the
+  dependency cache (JUnit, and any libraries approved later) are installed
+  ahead of time; builds run with `--offline` and need no network (Phase 9).
+- **Speed is unmeasured.** The loop builds domains thousands of times, and
+  Gradle starts in seconds where `javac` takes about one. Measure it in crude
+  Phase 10 — against plain `javac`, and with the Gradle daemon both warm and
+  cold, since a fresh container may start cold every time. If it is too slow,
+  re-engineer then. *Decided — Shawn, 2026-09-30.*
 
 `engine/api` and `engine/probe-lib` are sbt subprojects with
 `crossPaths := false` and `autoScalaLibrary := false`, so the published jars are
@@ -1641,10 +1670,13 @@ at once.
 
 ### Phase 3 — the reference interval domain
 Written by hand, in Java, as a fixture. Also the worked example shown to the
-generator, so write it the way generated code should look. Includes the
-`build.sh` for `domains/interval`, running `javac` against `api.jar` alone,
-which must succeed with networking disabled.
-*Done when:* the six transfer cases in `README.md` pass as unit tests.
+generator, so write it the way generated code should look. Includes the Gradle
+build template (§3, *How domains are built*), which builds a domain against
+`api.jar` alone, offline. **[decide]** whether `sbt test` also runs the reference
+domain's `gradle test`, so that "`sbt test` passes" keeps meaning everything
+passes (recommended), or whether domains are tested separately.
+*Done when:* the six transfer cases in `README.md` pass as unit tests, built
+and run through the template with networking disabled.
 
 ### Phase 4 — the analysis engine
 First, on its own, the domain-vocabulary converter (§5.4), with one test per
@@ -1721,11 +1753,13 @@ Compose file with services for the engine, the generator, and the adversary.
 | generator | `domains/<d>/` | `api.jar`, reference domain, reaching runs | everything else |
 | adversary | `probes/<campaign>/` | `api.jar`, domain under attack | everything else |
 
-Each holds a JDK and nothing else — no sbt, no coursier, no network. That is the
-dividend of the Java contract: the domain build is `javac` against one jar, so it
-is hermetic by construction rather than by sandboxing a dependency resolver. The
-engine runs outside and rebuilds any domain jar from the writable sources in a
-clean container before trusting it.
+Each holds a JDK, the pinned Gradle distribution and its offline dependency
+cache, and nothing else — no sbt, no network. The generator writes `src/` and
+`test/` only; the build is the human-written template (§3), run with
+`--offline`, so builds are hermetic because everything they may use is
+installed in advance. The engine runs outside and rebuilds any domain jar from
+the writable sources, with its own copy of the template, in a clean container
+before trusting it.
 *Done when:* a generator container can build a domain with networking off and
 cannot read `engine/core`; an adversary container can read a domain but not
 write it.
@@ -1832,10 +1866,10 @@ framework, library, or the OS.
     no admitted callee is overloaded; it moves to full signatures when one is.
 16. **Domains that use libraries.** A domain may use a solver internally (§4),
     and the Phase 6 loader is child-first so domains can carry their own
-    dependencies — but the Phase 9 container is JDK-only with no network, and
-    the domain build is `javac -cp api.jar`, so an agent cannot actually obtain
-    one. Allowing, say, Z3 means a curated read-only library set in the
-    container, a build classpath and packaging that include it, and, for native
+    dependencies — but the Phase 9 container has no network, and the domain
+    build is the fixed Gradle template (§3), so an agent cannot actually obtain
+    one. Allowing, say, Z3 means adding it to the template's offline
+    dependency cache and its packaging, and, for native
     libraries, accepting that a native crash takes down the `pag` JVM (the
     §12 process boundary still contains it). Running each domain in its own
     container is one way to give it such dependencies. Deferred: nothing before
