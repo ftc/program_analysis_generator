@@ -708,8 +708,7 @@ mistranslated `Sub` makes a correct domain wrong. Handing the converter a Scala
 value the vocabulary cannot express — `Skip`, `Invoke`, a disabled construct —
 is an engine bug and throws. It is also the seam where an out-of-process
 domain would plug in (§2): a second converter producing a serialized
-vocabulary instead of Java objects. Built as the first change of Phase 4, with
-its first caller.
+vocabulary instead of Java objects. Built on its own as the first change of Phase 4.
 
 ### 5.5 The front end, and the Soot boundary
 
