@@ -1479,11 +1479,10 @@ and `--reach` as flags rather than positionally. The option count will grow, and
 Historia's experience is that a config file (`--config`, above) ends up
 replacing most of them. *Decided — Shawn, 2026-10-05.*
 
-The example below is illustrative: it shows interval states in a readable
-notation, where the reference domain's records currently print as
-`Env[at={x=Interval[lo=NegInf[], hi=Fin[n=-2]]}]`. The output `pag analyze`
-actually produces for this probe is the golden file
-`engine/cli/src/test/resources/golden/AnalyzeRefute-analyze.txt`.
+The example below is illustrative; the output `pag analyze` actually produces
+for this probe is the golden file
+`engine/cli/src/test/resources/golden/AnalyzeRefute-analyze.txt`. The reference
+domain prints its states in the example's notation (`x ↦ (-∞,-2]`, `⊤`, `⊥`).
 
 For this probe (lines 10–15 of `Probe.java`):
 

@@ -66,6 +66,12 @@ public record Interval(Bound lo, Bound hi) {
 
     private boolean isZero() { return equals(of(BigInteger.ZERO)); }
 
+    /** [lo,hi], with a round bracket at an infinite end: (-∞,-2], [0,5], (-∞,+∞). */
+    @Override
+    public String toString() {
+        return (lo instanceof Bound.Fin ? "[" : "(") + lo + "," + hi + (hi instanceof Bound.Fin ? "]" : ")");
+    }
+
     /** The single value, if this interval holds exactly one. */
     public Optional<BigInteger> single() {
         return lo instanceof Bound.Fin a && lo.equals(hi) ? Optional.of(a.n()) : Optional.empty();

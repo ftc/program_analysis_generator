@@ -161,6 +161,17 @@ class IntervalDomainTest {
         assertEquals(env("x", i(0, 5)), d.widen(env("x", i(0, 5)), env("x", i(1, 4)))); // shrinking: stable
     }
 
+    // --- Printing (what pag analyze shows)
+
+    @Test void statesPrintReadably() {
+        assertEquals("⊥", d.bottom().toString());
+        assertEquals("⊤", d.top().toString());
+        assertEquals("x ↦ (-∞,-2]", env("x", new Interval(NEG, b(-2))).toString());
+        assertEquals("x ↦ [0,5], y ↦ [3,+∞)", env("y", new Interval(b(3), POS), "x", i(0, 5)).toString()); // sorted
+        assertEquals("(-∞,+∞)", Interval.TOP.toString());
+        assertEquals("[-7,-7]", i(-7, -7).toString());
+    }
+
     @Test void widenContainsTheJoin() {
         IntervalState a = env("x", i(0, 1), "y", i(3, 3)), n = env("x", i(-2, 4), "y", i(3, 3));
         assertTrue(d.entails(d.join(a, n), d.widen(a, n)));

@@ -11,7 +11,9 @@ import java.util.Optional;
  */
 public sealed interface IntervalState {
 
-    record Bottom() implements IntervalState {}
+    record Bottom() implements IntervalState {
+        @Override public String toString() { return "⊥"; }
+    }
 
     record Env(Map<String, Interval> at) implements IntervalState {
         /** Unconstrained locals are dropped, so equal meanings are equal values. */
@@ -22,6 +24,15 @@ public sealed interface IntervalState {
         }
 
         public Interval get(String local) { return at.getOrDefault(local, Interval.TOP); }
+
+        /** x ↦ (-∞,-2], y ↦ [0,5], locals sorted by name; ⊤ when nothing is constrained. */
+        @Override
+        public String toString() {
+            if (at.isEmpty()) return "⊤";
+            return at.entrySet().stream().sorted(Map.Entry.comparingByKey())
+                    .map(e -> e.getKey() + " ↦ " + e.getValue())
+                    .collect(java.util.stream.Collectors.joining(", "));
+        }
 
         public Env without(String local) {
             Map<String, Interval> m = new HashMap<>(at);

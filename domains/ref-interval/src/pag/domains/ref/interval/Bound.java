@@ -9,9 +9,15 @@ import java.math.BigInteger;
  */
 public sealed interface Bound {
 
-    record NegInf() implements Bound {}
-    record PosInf() implements Bound {}
-    record Fin(BigInteger n) implements Bound {}
+    record NegInf() implements Bound {
+        @Override public String toString() { return "-∞"; }
+    }
+    record PosInf() implements Bound {
+        @Override public String toString() { return "+∞"; }
+    }
+    record Fin(BigInteger n) implements Bound {
+        @Override public String toString() { return n.toString(); }
+    }
 
     Bound NEG_INF = new NegInf();
     Bound POS_INF = new PosInf();
