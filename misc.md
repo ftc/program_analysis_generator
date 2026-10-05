@@ -275,3 +275,63 @@ against later.
   Dropping that check lets unsound field-write transfers pass.
 - **Nothing is built.** The repo is still the sbt "Hello, Scala!" skeleton, 31
   lines, none of it relevant.
+
+## 8. What the certifier checks, and related work (2026-10-05)
+
+### Which domain operations are trusted
+
+`[edge-inductive]` calls the same `transfer` the worklist used, so the certifier
+is not independent of the domain. It is not circular either, because it checks
+a different thing. The precise claim:
+
+> If the domain's `transfer`, `entails`, `isBottom` and `top` are sound, a map
+> passing the three checks is a proof, however it was computed.
+
+So the certifier takes the *computation* out of the trust base, not the domain:
+
+- **Caught by the certifier:** the worklist, widening placement, worklist order
+  and `ControlFlowResolver` — missed edges, early stops, stale states — and any
+  corrupted map.
+- **Also caught, because the certifier never calls them:** `join` and `widen`.
+  A `join` that is not an upper bound, or a `widen` that loses states, leaves a
+  map that fails `[edge-inductive]`. Of the seven operations, four are trusted.
+- **Not caught:** an unsound `transfer`, `entails`, `isBottom` or `top`. An
+  `entails` that always answers true passes every edge, makes every update look
+  covered so `I(init)` stays ⊥, and refutes every target; an `isBottom` that
+  always answers true does the same more directly. Detecting these would need
+  the concretization `γ`, which the design never writes down (glossary).
+
+The adversary covers the four trusted operations: a reaching run executed on
+the JVM is evidence that does not come from the domain. Both examples above fall
+to any program whose target is actually reached — §2's "known-reachable
+locations as oracle".
+
+### Related work, for the write-up
+
+Cited from memory; check details before quoting.
+
+- **Untrusted solver, trusted checker.** McConnell, Mehlhorn, Näher, Schweitzer,
+  "Certifying algorithms", *Computer Science Review*, 2011: output a witness and
+  check it. Here the witness is the invariant map. **Translation validation**
+  (Pnueli, Siegel, Singerman, TACAS 1998; Necula, PLDI 2000): check each output
+  rather than verify the producer.
+- **The same split for abstract-interpretation fixed points.** Albert, Puebla,
+  Hermenegildo, "Abstraction-Carrying Code", LPAR 2004: the producer computes
+  the fixed point with widening, the consumer checks it in one pass — the
+  closest match to compute/certify. Besson, Jensen, Pichardie, "Proof-carrying
+  code from certified abstract interpretation and fixpoint compression", *TCS*
+  2006: the checker itself verified, and the map compressed (compare plan §16
+  item 21).
+- **Industrial instance.** The JVM's split bytecode verifier (JSR 202,
+  `StackMapTable`; earlier Eva Rose's lightweight bytecode verification): the
+  compiler emits types at branch targets and the JVM only checks them.
+- **Origin.** Necula, "Proof-Carrying Code", POPL 1997.
+- **The checks.** Floyd 1967, inductive assertions: check each edge locally,
+  argue by induction over runs. The backward, goal-directed form with ⊤ at the
+  target is from the dissertation (Ch. 4, Fig. 4.2) and Historia.
+
+**What differs here.** In all of the above the abstract domain is trusted code
+written by the analysis designers, and only the fixed point is checked. Here the
+domain is generated and untrusted, so a second, empirical layer — the adversary
+and its reaching runs — covers the operations the certifier must take on faith.
+That combination is the part to contrast in a related-work section.

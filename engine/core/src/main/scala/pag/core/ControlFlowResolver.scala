@@ -28,13 +28,13 @@ class ControlFlowResolver(cfg: Cfg):
   def outOf(loc: Loc): List[Transition] = bySource.getOrElse(loc, Nil)
 
   /** Where the worklist widens: the targets of back edges in a depth-first search
-    * from `seeds` over the backward graph (following `into`). Every cycle the
+    * from `targets` over the backward graph (following `into`). Every cycle the
     * search can reach contains a back edge, so every loop that can lead to a
-    * seed has a head. Deterministic, since `Cfg.transitions` is ordered.
+    * target has a head. Deterministic, since `Cfg.transitions` is ordered.
     *
     * Recursive, one frame per location on the current search path.
     */
-  def loopHeads(seeds: Set[Loc]): Set[Loc] =
+  def loopHeads(targets: Set[Loc]): Set[Loc] =
     /** (visited, heads) after searching from `loc`, with `onPath` the locations above it. */
     def search(loc: Loc, onPath: Set[Loc], visited: Set[Loc], heads: Set[Loc]): (Set[Loc], Set[Loc]) =
       into(loc).map(_.from).foldLeft((visited + loc, heads)) { case ((vis, hs), before) =>
@@ -42,6 +42,6 @@ class ControlFlowResolver(cfg: Cfg):
         else if vis(before) then (vis, hs)
         else search(before, onPath + loc, vis, hs)
       }
-    seeds.toList.sortBy(_.toString).foldLeft((Set.empty[Loc], Set.empty[Loc])) { case ((vis, hs), seed) =>
-      if vis(seed) then (vis, hs) else search(seed, Set.empty, vis, hs)
+    targets.toList.sortBy(_.toString).foldLeft((Set.empty[Loc], Set.empty[Loc])) { case ((vis, hs), target) =>
+      if vis(target) then (vis, hs) else search(target, Set.empty, vis, hs)
     }._2

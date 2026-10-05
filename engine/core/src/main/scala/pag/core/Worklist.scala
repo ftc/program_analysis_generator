@@ -18,7 +18,7 @@ final case class Computed[S](
 )
 
 /** The compute stage (implementation_strategy.md §7): a backward worklist from
-  * the seeds, seeded ⊤ there and ⊥ everywhere else. Pop a transition `ℓ → ℓ'`,
+  * the targets, seeded ⊤ there and ⊥ everywhere else. Pop a transition `ℓ → ℓ'`,
   * take `transfer(step, I(ℓ'))`, join it into `I(ℓ)` — widening at a loop head —
   * and queue the transitions into `ℓ` if `I(ℓ)` grew. First in, first out, and
   * no transition is queued twice at once.
@@ -32,14 +32,14 @@ object Worklist:
   def compute[S](
       d: Domain[S],
       resolver: ControlFlowResolver,
-      seeds: Set[Loc],
+      targets: Set[Loc],
       limits: Limits = Limits(),
       recorder: Recorder = NullRecorder,
       clock: () => Long = () => System.currentTimeMillis()
   ): Computed[S] =
     val start = clock()
-    val heads = resolver.loopHeads(seeds)
-    val ordered = seeds.toList.sortBy(_.toString)
+    val heads = resolver.loopHeads(targets)
+    val ordered = targets.toList.sortBy(_.toString)
 
     def stop(states: Map[Loc, S], why: Option[Incomplete], its: Int, queue: Queue[Transition], widened: Set[Loc]) =
       queue.foreach(recorder.unexplored)
@@ -88,7 +88,7 @@ object Worklist:
       case Right((bottom, top)) => run(bottom, top)
 
   /** A domain call: any `Throwable`, or a null result, is a `DomainFailure` (§7). */
-  private def guard[A](op: String)(call: => A): Either[Incomplete.DomainFailure, A] =
+  private[core] def guard[A](op: String)(call: => A): Either[Incomplete.DomainFailure, A] =
     try
       val a = call
       if a == null then Left(Incomplete.DomainFailure(op, NullPointerException(s"$op returned null"))) else Right(a)

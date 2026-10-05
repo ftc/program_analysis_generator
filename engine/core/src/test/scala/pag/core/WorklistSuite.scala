@@ -201,6 +201,7 @@ class WorklistSuite extends munit.FunSuite:
       def updated(loc: Loc, state: Any, widened: Boolean): Unit =
         updates.incrementAndGet(); if widened then widenings.incrementAndGet()
       def unexplored(t: Transition): Unit = unexplored.incrementAndGet()
+      def uncertified(t: Transition): Unit = ()
     val settled = Tally()
     val r = run(CountDomain(), loop, seed = 3, recorder = settled)
     assert(settled.updates.get > 0 && settled.widenings.get > 0)

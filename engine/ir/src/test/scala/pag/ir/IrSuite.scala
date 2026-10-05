@@ -149,3 +149,24 @@ class IrSuite extends munit.FunSuite:
     assertEquals(kind(Cmd.Nop), "nop")
     assertEquals(kind(Step.Skip), "skip")
     assertEquals(kind(X: RVal), "local")
+
+  test("Cfg.toString prints the CFG as pag ir --cfg does"):
+    def pre(i: Int) = Loc.AppLoc(Main, i, true)
+    def post(i: Int) = Loc.AppLoc(Main, i, false)
+    val entry = Loc.InternalMethodEntry(Main)
+    val cfg = Cfg(
+      List(
+        Transition(entry, Step.Skip, pre(0)),
+        Transition(pre(0), Step.Call(Some(X), RandInt, Nil), post(0)),
+        Transition(post(0), Step.Assume(RVal.Binop(X, BinOp.Lt, One)), pre(1))
+      ),
+      entry,
+      Loc.InternalMethodExit(Main)
+    )
+    assertEquals(
+      cfg.toString,
+      """cfg  init entry  exit exit
+        |  entry     —skip→  pre(0)
+        |  pre(0)    —x := call pag.probe.Rand.randInt()→  post(0)
+        |  post(0)   —assume(x < 1)→  pre(1)""".stripMargin
+    )

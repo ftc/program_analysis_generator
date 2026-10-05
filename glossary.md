@@ -193,9 +193,14 @@ any of them.
 `IterationLimit`, `Deadline`, `DomainFailure`. All three stop the search, so
 exactly one can fire. There is no "we pruned" case; see *abandoning*.
 
-**`AnalysisResult`** — the verdict plus what the search cost: iterations,
-unexplored count, elapsed time, where it widened. Always collected, so a
+**`AnalysisResult`** — the verdict, the invariant map (`states`), and what the
+search cost: iterations, unexplored count, elapsed time, where it widened. Always collected, so a
 campaign keeps these even at recording level `Off`.
+
+**`Certification`** — the certifier's findings: how many transitions it
+checked, which failed `[edge-inductive]`, and whether `[inductive]` and
+`[refute]` held. Only all three passing is `Refuted` (plan §7). Absent from an
+`AnalysisResult` whose search stopped early or whose domain failed.
 
 **`Computed`** — the compute stage's result: the invariant map, how the search
 stopped (`None` when the worklist emptied, else one `Incomplete`), and its cost.

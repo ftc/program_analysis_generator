@@ -18,4 +18,6 @@ enum Step:
 final case class Transition(from: Loc, step: Step, to: Loc)
 
 /** The lowered program a domain analyses (§5.3). */
-final case class Cfg(transitions: List[Transition], init: Loc, exit: Loc)
+final case class Cfg(transitions: List[Transition], init: Loc, exit: Loc):
+  /** For reading in a debugger: the CFG as `pag ir --cfg` prints it. */
+  override def toString: String = Pretty.cfg(this).mkString("\n")

@@ -1063,15 +1063,19 @@ enum Incomplete:
   case DomainFailure(op: String, error: Throwable)
 
 /** The verdict plus what the search cost. Collected at every recording level. */
-final case class AnalysisResult(
+final case class AnalysisResult[S](
   verdict:    Verdict,
+  certification: Option[Certification], // the three checks; absent if the certifier did not run
+  states:     Map[Loc, S],  // the invariant map, or what was computed before a stop; absent is ⊥
   iterations: Int,
   unexplored: Int,        // still in the worklist when the budget ran out
   elapsedMs:  Long,
   widenedAt:  Set[Loc]
 )
 
-def analyze[S](d: Domain[S], cfg: Cfg, q: Query, lim: Limits): AnalysisResult
+// resolves q (§6) itself and passes the one resolved set to both stages;
+// Left is a query the program cannot answer
+def analyze[S](d: Domain[S], lowered: Lowered, q: Query, lim: Limits): Either[String, AnalysisResult[S]]
 ```
 
 Two clearly separated stages, because the README's soundness argument depends on
@@ -1139,7 +1143,7 @@ the entry transition (§5.3).
 
 **Worklist order.** v1's worklist is first in, first out. Planned after the
 first experiment: a priority order from `ControlFlowResolver` — backward,
-transitions nearest the seeds first, so a location is joined from all its
+transitions nearest the targets first, so a location is joined from all its
 contributions before it propagates — ideally Bourdoncle's weak topological
 ordering (1993), whose component heads are also the widening points. In
 Historia a topological priority queue was a large speedup. Functionally it is
@@ -1803,7 +1807,12 @@ Delegation is **parent-first for `pag.api.*`** so engine and domain agree on the
 contract types, child-first otherwise so domains may carry conflicting
 dependencies. A smoke test runs immediately after loading, exercising every command form and
 operator the active profile enables, so a domain that cannot handle an enabled
-construct fails at load rather than deep in a run.
+construct fails at load rather than deep in a run. It also checks four lattice
+facts every sound domain satisfies: `isBottom(bottom())`, `!isBottom(top())`,
+`entails(bottom(), top())`, and `!entails(top(), bottom())`. These are cheap and
+catch the most damaging degenerate domains at load: an `entails` or `isBottom`
+that always answers true refutes every target, and the certifier cannot see it
+(`misc.md` §8).
 *Done when:* the interval domain loads from a jar with the engine having no
 compile-time dependency on it, and Phase 4's tests pass through the loaded path.
 
@@ -1817,9 +1826,18 @@ targets separate it from a deliberately weaker domain.
 
 ### Phase 8 — the mutant corpus and adversary calibration
 Deliberately unsound domains: a transfer that narrows too hard, an `entails` that
-is too permissive, an `isBottom` that fires on a satisfiable state, a `widen`
-that drops a case. Measure what fraction any given adversary breaks, and at what
-budget.
+is too permissive, an `isBottom` that fires on a satisfiable state, and the two
+extremes, an `entails` and an `isBottom` that always answer true — each refutes
+every target, so they are the floor any adversary must clear. Measure what
+fraction any given adversary breaks, and at what budget.
+
+Mutants of `join` and `widen` do not belong here. The certifier never calls
+them, so a `widen` that drops a case leaves a map that fails `[edge-inductive]`
+and the verdict is `Alarm`, never a false `Refuted` (§7, `misc.md` §8). They
+test the certifier, not the adversary, and are kept as `core` tests: a
+`join`/`widen` mutant must never yield `Refuted`. Only mutants of `transfer`,
+`entails`, `isBottom` and `top` — the operations the certifier trusts — count
+toward a kill rate.
 
 **Calibrate on rejected domains too.** Hand-written mutants are small edits
 that an adversary reading the source may spot by pattern, so they can overstate
@@ -2016,3 +2034,11 @@ framework, library, or the OS.
     lowering: that is trust-base code, and it removes locations that queries,
     the IR interpreter and the printed map refer to. *Decided — Shawn,
     2026-10-05:* postponed until measured. The skip optimization may also be useful for human debugging later.
+22. **A formal proof for the certifier.** §7 gives an informal induction
+    argument: if `transfer`, `entails`, `isBottom` and `top` are sound, a map
+    passing the three checks proves the target unreachable, so worklist,
+    widening, `join` and the resolver are outside the trust base. It has not
+    been proved formally, and the claim that `join` and `widen` need no trust
+    rests on it. A proof — likely short, over the lowered `Cfg`'s semantics —
+    would turn the trust-base split in §2 and `misc.md` §8 into a theorem.
+    *Decided — Shawn, 2026-10-05:* worth doing, not now.
