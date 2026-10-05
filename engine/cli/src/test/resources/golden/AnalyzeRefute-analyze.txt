@@ -1,5 +1,5 @@
 classes   <dir>   26 locations · profile bigint-main-v1
-domain    interval-ref
+domain    ref-interval
 query     Reachable(1) → pre(10)
 
   entry                                  ⊥

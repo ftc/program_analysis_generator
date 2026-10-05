@@ -124,7 +124,8 @@ engine/                    sbt multi-project, human-only
   cli/                     Scala 3. config, domain loading, entry point
 domains/                   every domain worth keeping, one directory each
   build-template/          the one Gradle build every domain is built with (below)
-  interval/                Java. the reference fixture, and later a target
+  ref-interval/            Java. the reference fixture, and later a target
+  ref-<name>/              a hand-written reference domain (ref-zones next, §16)
     src/  test/            the domain and its unit tests; no build file of its own
     domain.json            metadata (below)
   mut-<name>/              a hand-written mutant; domain.json names its bug
@@ -1497,11 +1498,11 @@ if (x.compareTo(BigInteger.ZERO) > 0) {
 ```
 
 ```
-$ pag analyze --domain domains/interval/out/interval.jar \
+$ pag analyze --domain domains/ref-interval/build/libs/ref-interval.jar \
               --classes probes/c07/out --reach 1
 
 classes   probes/c07/out            26 locations · profile bigint-main-v1
-domain    interval-ref 0.1.0        api 0.3.1
+domain    ref-interval
 query     Reachable(1) → pre(10)
 
   entry                             ⊥
@@ -1555,7 +1556,7 @@ were left `Unexplored`.
 The whole of §9 in one invocation, and what Phase 5's done-when exercises:
 
 ```
-$ pag check --domain domains/interval/out/gen-04.jar \
+$ pag check --domain domains/gen-0004/build/libs/gen-0004.jar \
             --classes probes/c08/out --reach 1 --inputs 5
 
 analysis    REFUTED            9 iterations · 3ms

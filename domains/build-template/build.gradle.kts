@@ -1,7 +1,7 @@
 // Builds one domain, named by -PdomainDir, against one api jar, -PapiJar:
 //
 //   domains/build-template/gradlew -p domains/build-template \
-//       -PdomainDir=/abs/path/domains/interval -PapiJar=/abs/path/pag-api.jar build
+//       -PdomainDir=/abs/path/domains/ref-interval -PapiJar=/abs/path/pag-api.jar build
 //
 // The domain directory holds only src/ (the domain) and test/ (its JUnit tests).
 // Output goes to <domainDir>/build/, and the jar is named after the directory.

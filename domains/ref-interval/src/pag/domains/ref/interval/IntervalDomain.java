@@ -1,4 +1,4 @@
-package pag.domains.interval;
+package pag.domains.ref.interval;
 
 import java.math.BigInteger;
 import java.math.RoundingMode;
@@ -10,8 +10,8 @@ import pag.api.Domain;
 import pag.api.LVal;
 import pag.api.RVal;
 import pag.api.Step;
-import pag.domains.interval.IntervalState.Bottom;
-import pag.domains.interval.IntervalState.Env;
+import pag.domains.ref.interval.IntervalState.Bottom;
+import pag.domains.ref.interval.IntervalState.Env;
 
 /**
  * The reference interval domain (implementation_strategy.md Phase 3): one
@@ -23,7 +23,7 @@ import pag.domains.interval.IntervalState.Env;
  */
 public final class IntervalDomain implements Domain<IntervalState> {
 
-    @Override public String name() { return "interval-ref"; }
+    @Override public String name() { return "ref-interval"; }
     @Override public IntervalState top() { return IntervalState.TOP; }
     @Override public IntervalState bottom() { return IntervalState.BOTTOM; }
     @Override public boolean isBottom(IntervalState s) { return s instanceof Bottom; }

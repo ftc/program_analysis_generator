@@ -287,7 +287,7 @@ policy (§7).
 
 **`top`, `bottom`, `isBottom`** — the extremes and the refutation test.
 
-**Reference domain** — the hand-written interval domain. A **fixture**: a
+**Reference domain** — the hand-written interval domain, `ref-interval` (directory, `domain.json` id, `name()`, and package `pag.domains.ref.interval`); the `ref-` prefix marks hand-written reference domains as `mut-` marks mutants and `gen-` generated ones. A **fixture**: a
 known-good baseline to develop against and to seed mutants from, not something
 the system requires.
 

@@ -1,5 +1,5 @@
 {
-  "id": "interval",
+  "id": "ref-interval",
   "status": "reference",
   "origin": "hand-written",
   "profile": "bigint-main-v1"

@@ -9,12 +9,12 @@ import pag.cli.DomainJars.*
   */
 class DomainLoaderSuite extends munit.FunSuite:
 
-  def load(jar: Path) = DomainLoader.load(jar)
+  def load(jar: Path): Either[DomainLoadFailure, Domain[Any]] = DomainLoader.load(jar)
   def failure(jar: Path): DomainLoadFailure = load(jar).fold(identity, d => fail(s"loaded ${d.name}"))
 
   test("the reference interval domain loads from its own sources"):
     withJar(intervalSources) { jar =>
-      assertEquals(load(jar).map(_.name), Right("interval-ref"))
+      assertEquals(load(jar).map(_.name), Right("ref-interval"))
     }
 
   test("a jar with no domain is a usage error"):

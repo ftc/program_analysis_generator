@@ -1,4 +1,4 @@
-package pag.domains.interval;
+package pag.domains.ref.interval;
 
 import java.math.BigInteger;
 import java.util.Optional;

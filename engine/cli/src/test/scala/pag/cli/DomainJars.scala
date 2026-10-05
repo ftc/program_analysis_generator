@@ -17,7 +17,7 @@ object DomainJars:
 
   /** The reference interval domain's sources, from the repository. */
   def intervalSources: Map[String, String] =
-    val src = repoRoot.resolve("domains/interval/src")
+    val src = repoRoot.resolve("domains/ref-interval/src")
     Using.resource(Files.walk(src)) { files =>
       files.iterator.asScala.filter(_.toString.endsWith(".java"))
         .map(p => src.relativize(p).toString -> Files.readString(p)).toMap
