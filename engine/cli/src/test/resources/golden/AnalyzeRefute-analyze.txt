@@ -1,0 +1,22 @@
+classes   <dir>   26 locations · profile bigint-main-v1
+domain    interval-ref
+query     Reachable(1) → pre(10)
+
+  entry                                  ⊥
+  pre(0)    args := @parameter0          ⊥
+  pre(1)    x := Rand.randInt()          ⊥
+  pre(2)    $stack3 := 0                 ⊥
+  pre(4)    if x <= 0 goto 11            ⊥
+  pre(5)    $stack3 := 1                 Env[at={x=Interval[lo=NegInf[], hi=Fin[n=-2]]}]
+  pre(6)    y := x + 1                   Env[at={x=Interval[lo=NegInf[], hi=Fin[n=-2]]}]
+  pre(7)    $stack3 := 0                 Env[at={y=Interval[lo=NegInf[], hi=Fin[n=-1]]}]
+  pre(9)    if y >= 0 goto 11            Env[at={y=Interval[lo=NegInf[], hi=Fin[n=-1]]}]
+  pre(10)   Reach.reach(1)               Env[at={}]   ← target
+  pre(11)   return                       ⊥
+  (post locations and nops elided; --all shows them)
+
+worklist    11 iterations · no widening · <n>ms
+certified   27/27 edges inductive
+entry       I(entry) = ⊥
+
+REFUTED

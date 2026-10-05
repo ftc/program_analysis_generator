@@ -4,13 +4,18 @@ import java.io.PrintStream
 import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
 
-import pag.core.{Lifting, Lowering, Profile, ProfileCheck}
+import scala.concurrent.duration.Duration
+
+import pag.core.{Analysis, AnalysisResult, Incomplete, Limits, Lifting, Lowering, Profile, ProfileCheck, Query,
+  Reachable, Verdict}
 import pag.harness.{Ended, IrInterpreter}
 import pag.ir.{IrProvider, Loc, Program, Untranslatable}
 import scopt.{OEffect, OParser}
 
 /** The `pag` entry point (implementation_strategy.md §11). Exit codes: 0 done,
-  * 1 usage or input error, 2 did not load (untranslatable or profile violation).
+  * 1 usage or input error, 2 did not load (untranslatable or profile violation),
+  * 4 inconclusive (a limit, or the engine itself out of memory or stack), 5 domain
+  * failure.
   */
 object Main:
 
@@ -23,7 +28,11 @@ object Main:
       enforce: Boolean = true,
       inputs: String = "",
       trace: Boolean = false,
-      stepLimit: Int = IrInterpreter.DefaultStepLimit
+      stepLimit: Int = IrInterpreter.DefaultStepLimit,
+      domain: Option[Path] = None,
+      reach: Option[Int] = None,
+      limits: Limits = Limits(),
+      all: Boolean = false
   )
 
   private val parser: OParser[Unit, Config] =
@@ -52,6 +61,27 @@ object Main:
           opt[Int]("step-limit").action((n, c) => c.copy(stepLimit = n))
             .text(s"stop after this many transitions (default ${IrInterpreter.DefaultStepLimit})")
         ),
+      cmd("analyze")
+        .action((_, c) => c.copy(command = Some("analyze")))
+        .text("analyze a reach query with a domain, printing the verdict and the invariant map")
+        .children(
+          opt[Path]("domain").required().valueName("<jar>").action((p, c) => c.copy(domain = Some(p)))
+            .text("the domain jar: exactly one class implementing pag.api.Domain"),
+          opt[Path]("classes").required().valueName("<dir>").action((p, c) => c.copy(classes = Some(p)))
+            .text("a directory holding the program's one class"),
+          opt[Int]("reach").required().valueName("ID").action((n, c) => c.copy(reach = Some(n)))
+            .text("the query: is reach(ID) reachable?"),
+          opt[Int]("iteration-limit").valueName("N")
+            .validate(n => if n > 0 then success else failure("--iteration-limit must be positive"))
+            .action((n, c) => c.copy(limits = c.limits.copy(iterations = n)))
+            .text(s"stop after N transitions (default ${Limits().iterations})"),
+          opt[Duration]("deadline").valueName("60s")
+            .validate(d => if d.isFinite && d.toMillis > 0 then success else failure("--deadline must be positive"))
+            .action((d, c) => c.copy(limits = c.limits.copy(deadlineMs = d.toMillis)))
+            .text(s"stop after this long (default ${Limits().deadlineMs / 1000}s)"),
+          opt[Unit]("all").action((_, c) => c.copy(all = true))
+            .text("print every location, post locations and nops included")
+        ),
       checkConfig(c => if c.command.isEmpty then failure("no command given") else success)
     )
 
@@ -69,10 +99,23 @@ object Main:
       case OEffect.ReportWarning(msg) => err.println(s"pag: warning: $msg")
       case OEffect.Terminate(_)       => ()
     }
-    config match
-      case Some(c) if c.command.contains("ir") && c.classes.nonEmpty  => ir(c, out, err)
-      case Some(c) if c.command.contains("run") && c.classes.nonEmpty => runProbe(c, out, err)
-      case _ => 1 // scopt's effects above already reported the error and the usage
+    engineGuarded(err) {
+      config match
+        case Some(c) if c.command.contains("ir") && c.classes.nonEmpty      => ir(c, out, err)
+        case Some(c) if c.command.contains("run") && c.classes.nonEmpty     => runProbe(c, out, err)
+        case Some(c) if c.command.contains("analyze") && c.classes.nonEmpty => analyze(c, out, err)
+        case _ => 1 // scopt's effects above already reported the error and the usage
+    }
+
+  /** An error outside any domain call is the engine's (§7): out of memory or stack
+    * is inconclusive, exit 4, never 3. Domain calls catch their own (`Worklist.guard`).
+    */
+  private[cli] def engineGuarded(err: PrintStream)(body: => Int): Int =
+    try body
+    catch
+      case e: VirtualMachineError =>
+        err.println(s"pag: the engine ran out of resources: $e")
+        4
 
   /** Load, check the profile, lift, and print the IR; with --cfg, lower and print the CFG too.
     * Order matters (§5): lifting assumes the profile check passed.
@@ -132,6 +175,34 @@ object Main:
       catch
         case e: Untranslatable           => err.println(s"pag: ${e.getMessage}"); 2
         case e: IllegalArgumentException => err.println(s"pag: ${e.getMessage}"); 1
+
+  /** Load, check, lift and lower the program; load the domain; analyze (§7) and
+    * print the result (§11). Always checked and lifted: there is no --no-enforce.
+    */
+  private def analyze(c: Config, out: PrintStream, err: PrintStream): Int =
+    withProgram(c.classes.get, enforce = true, err)(()) { (program, _) =>
+      val lifted = Lifting.lift(program, Lifting.Mode.Strict)
+      val lowered = Lowering.lower(lifted)
+      val query = Reachable(c.reach.get)
+      DomainLoader.load(c.domain.get) match
+        case Left(failure) => err.println(s"pag: ${failure.message}"); failure.exitCode
+        case Right(d) =>
+          Analysis.analyze(d, lowered, query, c.limits) match
+            case Left(message) => err.println(s"pag: $message"); 1
+            case Right(result) =>
+              val targets = Query.resolve(query, lowered).getOrElse(Set.empty) // resolved above; for display
+              AnalyzeReport.lines(c.classes.get, lifted, lowered, domainName(d), query, targets, result, c.all)
+                .foreach(out.println)
+              result.verdict match
+                case Verdict.Inconclusive(Incomplete.DomainFailure(op, e)) =>
+                  e.printStackTrace(err); 5
+                case Verdict.Inconclusive(_) => 4
+                case Verdict.Refuted | Verdict.Alarm => 0
+    }
+
+  /** `name()` is a domain call too; printing must not let it take pag down. */
+  private def domainName(d: pag.api.Domain[?]): String =
+    try String.valueOf(d.name) catch case e: Throwable => s"(name() threw $e)"
 
   private def ended(e: Ended): String = e match
     case Ended.Exit               => "exit"

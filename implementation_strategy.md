@@ -1434,7 +1434,7 @@ dashboard is built, so it has to carry what the dashboard would have shown —
 ```
 pag ir      <classes> [--cfg] [--no-lift] [--no-enforce]  what the front end produced
 pag run     <classes> [--inputs 3,-7] [--trace] [--step-limit N]   run on the IR interpreter
-pag analyze --domain <jar> --classes <dir> --reach ID [--iteration-limit N] [--deadline 60s]
+pag analyze --domain <jar> --classes <dir> --reach ID [--iteration-limit N] [--deadline 60s] [--all]
                                                         verdict and invariant map
 pag check   --domain <jar> --classes <dir> --reach ID   analyze, then try to falsify
 ```
@@ -1460,7 +1460,29 @@ it.
 ### `analyze` prints the invariant map
 
 With no dashboard this is the only way to see what a domain did, so the map is
-the default output rather than something behind a flag:
+the default output rather than something behind a flag.
+
+**What is printed.** `entry` and the `pre` location of every command but
+`nop`, each with its command; `post` locations, nops and `exit` are elided, and
+`--all` shows everything. Constant temps (`$stack3 := 0`) stay visible: they
+show where a constant came from. `--all` is the first level of a logging-level
+option that will grow as output does. **States print with as few domain calls as
+possible**, since this is debugging output: a location absent from the map is
+`⊥`, anything else is the state's own `toString` (guarded, since it is domain
+code too). ⊤ is not recognised — that would take an `entails` per location — so
+a domain whose states have no readable `toString` prints unreadably; domain
+prompts should ask for one. *Decided — Shawn, 2026-10-05.*
+
+**Flags for now; a config file later.** `analyze` takes `--domain`, `--classes`
+and `--reach` as flags rather than positionally. The option count will grow, and
+Historia's experience is that a config file (`--config`, above) ends up
+replacing most of them. *Decided — Shawn, 2026-10-05.*
+
+The example below is illustrative: it shows interval states in a readable
+notation, where the reference domain's records currently print as
+`Env[at={x=Interval[lo=NegInf[], hi=Fin[n=-2]]}]`. The output `pag analyze`
+actually produces for this probe is the golden file
+`engine/cli/src/test/resources/golden/AnalyzeRefute-analyze.txt`.
 
 For this probe (lines 10–15 of `Probe.java`):
 
