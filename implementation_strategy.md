@@ -1137,6 +1137,28 @@ misses a back edge or a predecessor therefore costs termination
 only as long as the certifier does not route its edge enumeration through the
 resolver. *Decided — Shawn, 2026-10-05.*
 
+**What a failed edge means.** A transition `ℓ —step→ ℓ'` fails
+`[edge-inductive]` when `transfer(step, I(ℓ'))` is not entailed by `I(ℓ)`:
+some states at `ℓ` step into what the map claims may reach the target, yet the
+map claims they cannot. The map contradicts itself at that edge, so it is not a
+proof. This is a statement about the map, not the program — it does not mean
+the target is reachable. The usual causes:
+
+- the worklist did not finish the job — a bug, or a broken resolver that
+  skipped the edge (Phase 4's tests do exactly this);
+- the domain's operations disagree with each other — a `join` that is not an
+  upper bound, a `widen` that drops states, an `entails` inconsistent with what
+  `transfer` and `join` produce, or a `transfer` that answers differently on
+  the same input — so the worklist believes a location covered that the
+  certifier, asking again, finds is not;
+- a corrupted or hand-written map.
+
+So an `Alarm` comes in two kinds, kept apart in `Certification`: **every edge
+inductive but `I(init)` not ⊥** — a genuine "could not prove it" — and **some
+edges uncertified** — a broken proof attempt, which for a generated domain is
+feedback worth giving: its operations disagree. `pag analyze` prints which
+(§11).
+
 Note that `[refute]` is `isBottom` rather than an `excludesInit` method: the
 entry admits every store, because initial constraints lower to an `assume` on
 the entry transition (§5.3).
@@ -1478,6 +1500,28 @@ REFUTED
 
 The constants in each comparison reach the domain as constants because lifting
 substitutes them within a basic block (§5.7); temps are elided above.
+
+When some edges fail, the certification line says how many and names them,
+and the verdict says why it is an `Alarm` (output illustrative):
+
+```
+worklist    31 iterations · widened at pre(4) · 6ms
+certified   25/27 edges inductive
+uncertified pre(6) —y := x + 1→ post(6)
+            post(4) —assume(x > 0)→ pre(6)
+entry       I(entry) = ⊥
+
+ALARM — the map is not inductive at 2 edges, so it is not a proof (§7)
+```
+
+When every edge passes but the entry is not ⊥, it is the other kind:
+
+```
+certified   27/27 edges inductive
+entry       I(entry) = x ↦ [1,+∞)
+
+ALARM — could not prove reach(1) unreachable
+```
 
 `--record full` additionally writes the derivation graph (§8) and, on an
 `Alarm`, renders a `CandidateTrace` from the entry to the query. On an

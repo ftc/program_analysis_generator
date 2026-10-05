@@ -219,7 +219,16 @@ stack overflow included) or returned null. A hang is not one:
 into a domain is wrapped; one exception must not end a campaign.
 
 **Alarm** — the analysis could not prove the target unreachable. Not a claim that
-it *is* reachable.
+it *is* reachable. Two kinds, told apart by `Certification`: every edge
+inductive but `I(ℓ_init)` not ⊥ (could not prove it), or some edges
+**uncertified** (the proof attempt was broken; plan §7, *What a failed edge
+means*).
+
+**uncertified edge** — a transition failing `[edge-inductive]`: the map claims
+states at its source cannot reach the target, though they step into states the
+map says can. A fact about the map, not the program. Listed in
+`Certification.uncertified`, reported to `Recorder.uncertified`, and later
+`StopReason.Uncertified` in the derivation graph.
 
 **Refutation** — a proof that a target is unreachable. The thing a reaching run
 can contradict.
