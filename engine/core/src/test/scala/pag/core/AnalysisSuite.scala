@@ -27,6 +27,15 @@ class AnalysisSuite extends munit.FunSuite:
       resolver: Option[ControlFlowResolver] = None): AnalysisResult[S] =
     Analysis.analyze(d, lowered(g), Reachable(1), limits, resolver = resolver).fold(e => fail(e), identity)
 
+  /** Every assignment of ⊥ or ⊤ to every location: 2^5 maps. */
+  val allMaps: List[Map[Loc, Flag]] =
+    locations.foldLeft(List(Map.empty[Loc, Flag]))((ms, l) => ms.flatMap(m => List(m + (l -> No), m + (l -> Maybe))))
+
+  /** A resolver that never widens and drops every transition into L(1). */
+  class Broken(g: Cfg) extends ControlFlowResolver(g):
+    override def loopHeads(targets: Set[Loc]): Set[Loc] = Set.empty
+    override def into(loc: Loc): List[Transition] = if loc == L(1) then Nil else super.into(loc)
+
   // --- Verdicts
 
   test("an unreachable target is Refuted, with all checks recorded") {
@@ -92,21 +101,16 @@ class AnalysisSuite extends munit.FunSuite:
 
   test("no map at all certifies a reachable target: every assignment of ⊥/⊤ to every location"):
     // A corrupted worklist can hand the certifier any map; with a sound domain, none refutes.
-    val maps = locations.foldLeft(List(Map.empty[Loc, Flag]))((ms, l) => ms.flatMap(m => List(m + (l -> No), m + (l -> Maybe))))
-    assertEquals(maps.size, 32)
-    val refuting = maps.filter(m => Certifier.certify(FlagDomain(), reachable, target, m).toOption.exists(_.refutes))
+    assertEquals(allMaps.size, 32)
+    val refuting = allMaps.filter(m => Certifier.certify(FlagDomain(), reachable, target, m).toOption.exists(_.refutes))
     assertEquals(refuting, Nil)
 
   test("the same enumeration is not vacuous: for the unreachable target, some map certifies"):
-    val maps = locations.foldLeft(List(Map.empty[Loc, Flag]))((ms, l) => ms.flatMap(m => List(m + (l -> No), m + (l -> Maybe))))
-    assert(maps.exists(m => Certifier.certify(FlagDomain(), unreachable, target, m).toOption.exists(_.refutes)))
+    assert(allMaps.exists(m => Certifier.certify(FlagDomain(), unreachable, target, m).toOption.exists(_.refutes)))
 
   test("a broken resolver — no loop heads, predecessors dropped — cannot produce Refuted"):
     // It drops every transition into L(1), so the worklist never reaches init and leaves it ⊥:
     // the computed map looks like a refutation. The certifier checks cfg.transitions itself.
-    class Broken(g: Cfg) extends ControlFlowResolver(g):
-      override def loopHeads(seeds: Set[Loc]): Set[Loc] = Set.empty
-      override def into(loc: Loc): List[Transition] = if loc == L(1) then Nil else super.into(loc)
     val r = analyze(FlagDomain(), reachable, resolver = Some(Broken(reachable)))
     assertEquals(r.verdict, Verdict.Alarm)
     val c = r.certification.get
@@ -114,8 +118,5 @@ class AnalysisSuite extends munit.FunSuite:
     assert(c.uncertified.nonEmpty, "and the certifier found the edges it skipped")
 
   test("a broken resolver on an unreachable target costs at most the proof, never soundness"):
-    class Broken(g: Cfg) extends ControlFlowResolver(g):
-      override def loopHeads(seeds: Set[Loc]): Set[Loc] = Set.empty
-      override def into(loc: Loc): List[Transition] = if loc == L(1) then Nil else super.into(loc)
     val v = analyze(FlagDomain(), unreachable, resolver = Some(Broken(unreachable))).verdict
     assert(v == Verdict.Refuted || v == Verdict.Alarm, v)

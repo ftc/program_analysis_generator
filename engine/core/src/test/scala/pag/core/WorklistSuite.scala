@@ -1,9 +1,9 @@
 package pag.core
 
-import java.math.BigInteger
 import pag.api
 import pag.api.Domain
 import pag.ir.*
+import pag.core.TestDomains.*
 
 /** The compute stage (implementation_strategy.md §7) on hand-built CFGs, with
   * small test domains whose fixed points can be worked out by hand.
@@ -11,38 +11,6 @@ import pag.ir.*
 class WorklistSuite extends munit.FunSuite:
 
   // --- Test domains
-
-  /** May some state here still reach the target? Refutes only constant comparisons. */
-  enum Flag:
-    case No, Maybe
-
-  class FlagDomain extends Domain[Flag]:
-    def name = "flag"
-    def top = Flag.Maybe
-    def bottom = Flag.No
-    def isBottom(s: Flag) = s == Flag.No
-    def entails(a: Flag, b: Flag) = a == Flag.No || b == Flag.Maybe
-    def join(a: Flag, b: Flag) = if a == Flag.Maybe || b == Flag.Maybe then Flag.Maybe else Flag.No
-    def widen(a: Flag, b: Flag) = join(a, b)
-    def transfer(step: api.Step, post: Flag) = step match
-      case a: api.Step.Assume =>
-        a.cond match
-          case c: api.RVal.Binop => (c.l, c.r) match
-              case (l: api.RVal.IntConst, r: api.RVal.IntConst) => if holds(l.v, c.op, r.v) then post else Flag.No
-              case _                                            => post
-          case _ => post
-      case _ => post
-
-  def holds(l: BigInteger, op: api.BinOp, r: BigInteger): Boolean =
-    val c = l.compareTo(r)
-    op match
-      case api.BinOp.Lt => c < 0
-      case api.BinOp.Le => c <= 0
-      case api.BinOp.Gt => c > 0
-      case api.BinOp.Ge => c >= 0
-      case api.BinOp.Eq => c == 0
-      case api.BinOp.Ne => c != 0
-      case _            => true
 
   /** Counts the steps between here and the target, restarting at 1 after ⊤:
     * ever-growing around a loop unless widening jumps to ⊤. 0 is ⊥. Not a
@@ -62,17 +30,7 @@ class WorklistSuite extends munit.FunSuite:
     def transfer(step: api.Step, post: Count) =
       if post.n == 0 then post else if post == Top then Count(1) else Count(post.n + 1)
 
-  // --- CFGs
-
-  val Main: MethodId = MethodId("Probe", "main", List(JType.ArrayOf(JType.Ref("java.lang.String"))), JType.Void)
-  val Big: JType = JType.Ref("java.math.BigInteger")
-  val x: LVal.Local = LVal.Local("x", Big)
-  def L(k: Int): Loc = Loc.AppLoc(Main, k, true)
-  def skip(a: Int, b: Int): Transition = Transition(L(a), Step.Skip, L(b))
-  def assign(a: Int, b: Int): Transition = Transition(L(a), Step.Assign(x, RVal.IntConst(a)), L(b))
-  def assume(a: Int, l: Int, op: BinOp, r: Int, b: Int): Transition =
-    Transition(L(a), Step.Assume(RVal.Binop(RVal.IntConst(l), op, RVal.IntConst(r))), L(b))
-  def cfg(ts: Transition*): Cfg = Cfg(ts.toList, L(0), L(99))
+  // --- CFGs (helpers in TestDomains)
 
   def run[S](d: Domain[S], g: Cfg, seed: Int, limits: Limits = Limits(), recorder: Recorder = NullRecorder,
       clock: () => Long = () => 0L): Computed[S] =
@@ -93,13 +51,13 @@ class WorklistSuite extends munit.FunSuite:
     assertEquals((r.stopped, r.iterations, r.unexplored, r.widenedAt), (None, 2, 0, Set.empty[Loc]))
 
   test("an infeasible assume leaves the location before it at ⊥"):
-    val r = run(FlagDomain(), cfg(skip(0, 1), assume(1, 1, BinOp.Gt, 2, 2)), seed = 2)
+    val r = run(FlagDomain(), cfg(skip(0, 1), guardEdge(1, 1, BinOp.Gt, 2, 2)), seed = 2)
     assertEquals(r.states, Map(L(2) -> Flag.Maybe))
     assertEquals((r.stopped, r.iterations), (None, 1))
 
   test("a feasible branch and an infeasible one: only the feasible side propagates"):
     // 0 → 1 → (assume 1 < 2) → 3; 0 → 2 → (assume 1 > 2) → 3
-    val g = cfg(skip(0, 1), skip(0, 2), assume(1, 1, BinOp.Lt, 2, 3), assume(2, 1, BinOp.Gt, 2, 3))
+    val g = cfg(skip(0, 1), skip(0, 2), guardEdge(1, 1, BinOp.Lt, 2, 3), guardEdge(2, 1, BinOp.Gt, 2, 3))
     assertEquals(run(FlagDomain(), g, seed = 3).states, Map(L(0) -> Flag.Maybe, L(1) -> Flag.Maybe, L(3) -> Flag.Maybe))
 
   test("one iteration is one transition, and a diamond processes each edge once"):
