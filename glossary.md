@@ -428,7 +428,9 @@ only. Source lines are not a service: they live on `Method` (§5.1).
 **`ControlFlowResolver`** — the one class in `core` that answers "what comes
 before here": predecessors and loop heads from the `Cfg`, and later, call
 targets through an interface the front end implements (plan §7). Named after
-Historia's class with the same job; see §12.
+Historia's class with the same job; see §12. Loop heads and predecessors are
+outside the trust base because the certifier never consults it; call targets
+will be inside it, since they decide which transitions exist.
 
 ---
 

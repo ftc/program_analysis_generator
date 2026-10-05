@@ -83,10 +83,10 @@ the loop checks for it (`misc.md` §1 has the argument):
 
 | code | where | the claim it carries |
 | --- | --- | --- |
-| loading, profile check, lifting, lowering | `frontend-soot`, `core` | the `Cfg` a domain analyses means what the bytecode does |
+| loading, profile check, lifting, lowering; once there are calls, `ControlFlowResolver`'s call targets (§7) | `frontend-soot`, `core` | the `Cfg` a domain analyses means what the bytecode does |
 | `reach` and its lowering | `probe-lib`, `core` | a marker prints exactly when the location of its `reach` call is reached |
 | IR interpreter, JVM run and marker check | `harness` | the executors implement the intended semantics |
-| certifier | `core` | only a certified map yields `Refuted` |
+| certifier | `core` | only a certified map yields `Refuted`; it enumerates `cfg.transitions` itself, never through `ControlFlowResolver` (§7) |
 | domain-vocabulary converter | `core` | the Java `Step` a domain receives means what the Scala `Step` means |
 
 A defect here does not show up as a bad domain; it shows up as a good domain
@@ -1097,9 +1097,14 @@ through it, and it keeps them apart:
 - *Needing the whole program* — which methods a call may reach. Answered
   through an interface the front end implements, so `core` still never sees
   Soot. v1 has one method and no calls to resolve, so the interface waits for
-  the profile setting that admits a second method.
+  the profile setting that admits a second method. **This half is trust
+  base when it arrives:** call targets decide which transitions *exist* in the
+  `Cfg`, and a missed target is an edge the certifier never sees. It joins
+  the first row of §2's table (the `Cfg` means what the bytecode does).
 
-*Decided — Shawn, 2026-10-01.*
+*Decided — Shawn, 2026-10-01.* Shawn raised (2026-10-05) that in Historia, a
+missed back edge could produce an unsound proof. Here it cannot, because of the
+rule below that the certifier never consults the resolver.
 
 **Certify.** Independently re-check, against the settled map:
 
@@ -1116,6 +1121,17 @@ which is otherwise very hard to locate. Only a map passing all three yields
 worklist concluded. Keeping these apart means
 widening, worklist order, and any future heuristic cannot affect soundness — a
 property worth a test of its own (Phase 4).
+
+**The certifier enumerates `cfg.transitions` itself and never asks
+`ControlFlowResolver` anything.** The argument for `Refuted` needs every
+transition checked: given `I(target) = ⊤`, `[edge-inductive]` on every edge,
+and `I(init) = ⊥`, induction backward along any run from `init` to the target
+puts a state in `I(init)`, so no such run exists. Loop heads and the worklist's
+choice of predecessors appear nowhere in that argument. A resolver bug that
+misses a back edge or a predecessor therefore costs termination
+(`IterationLimit`) or a failed check (`Alarm`), never a false `Refuted` — but
+only as long as the certifier does not route its edge enumeration through the
+resolver. *Decided — Shawn, 2026-10-05.*
 
 Note that `[refute]` is `isBottom` rather than an `excludesInit` method: the
 entry admits every store, because initial constraints lower to an `assume` on
@@ -1742,9 +1758,12 @@ next, but the call sites go in now so they are never retrofitted.
 *Done when:* `pag analyze` prints the map in §11's format; a program whose
 target is unreachable gets `Refuted` and one whose target is reachable gets
 `Alarm`; a domain that throws in `transfer` yields
-`Inconclusive(DomainFailure(...))` rather than taking the run down; and a test
+`Inconclusive(DomainFailure(...))` rather than taking the run down; a test
 that deliberately corrupts the worklist result still cannot produce `Refuted`,
-because certification is independent.
+because certification is independent; and a test that runs the worklist with
+a broken `ControlFlowResolver` — no loop heads, predecessors dropped — on a
+program whose target is reachable still cannot produce `Refuted`, because the
+certifier enumerates `cfg.transitions` itself (§7).
 
 ### Phase 4.5 — the derivation graph
 `Full` recording, the reverse view, `CandidateTrace` extraction, and a text
