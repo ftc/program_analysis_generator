@@ -6,7 +6,7 @@ import scala.jdk.CollectionConverters.*
 
 import pag.core.{Lifting, Lowering, Profile, ProfileCheck}
 import pag.harness.{Ended, IrInterpreter}
-import pag.ir.{IrProvider, Loc, Untranslatable}
+import pag.ir.{IrProvider, Loc, Program, Untranslatable}
 import scopt.{OEffect, OParser}
 
 /** The `pag` entry point (implementation_strategy.md §11). Exit codes: 0 done,
@@ -78,58 +78,57 @@ object Main:
     * Order matters (§5): lifting assumes the profile check passed.
     */
   private def ir(c: Config, out: PrintStream, err: PrintStream): Int =
-    val dir = c.classes.get
-    if !Files.isDirectory(dir) then
-      err.println(s"pag: not a directory: $dir"); 1
-    else
-      val profile = Profile.BigintMainV1
-      try
-        val program = frontEnd().load(dir)
-        val violations = if c.enforce then ProfileCheck.check(program, profile) else Nil
-        if violations.nonEmpty then
-          violations.foreach(v => err.println(v.message(program.sourceFile, profile.name)))
-          2
-        else
-          val mode = if c.enforce then Lifting.Mode.Strict else Lifting.Mode.Lenient
-          val shown = if c.lift then Lifting.lift(program, mode) else program
-          Show.program(shown, profile, checked = c.enforce, lifted = c.lift).foreach(out.println)
-          if c.cfg then
-            out.println()
-            Show.cfg(Lowering.lower(shown)).foreach(out.println)
-          0
-      catch
-        case e: Untranslatable           => err.println(s"pag: ${e.getMessage}"); 2
-        case e: IllegalArgumentException => err.println(s"pag: ${e.getMessage}"); 1
+    withProgram(c.classes.get, c.enforce, err)(()) { (program, _) =>
+      val mode = if c.enforce then Lifting.Mode.Strict else Lifting.Mode.Lenient
+      val shown = if c.lift then Lifting.lift(program, mode) else program
+      Show.program(shown, Profile.BigintMainV1, checked = c.enforce, lifted = c.lift).foreach(out.println)
+      if c.cfg then
+        out.println()
+        Show.cfg(Lowering.lower(shown)).foreach(out.println)
+      0
+    }
 
   /** Load, check the profile, lift, lower, and run on the IR interpreter (§9).
     * Always checked and lifted: the interpreter covers v1's lifted form only.
     */
   private def runProbe(c: Config, out: PrintStream, err: PrintStream): Int =
-    val dir = c.classes.get
+    withProgram(c.classes.get, enforce = true, err)(pag.probe.Inputs.parse(c.inputs)) { (program, inputs) =>
+      val lifted = Lifting.lift(program, Lifting.Mode.Strict)
+      val run = IrInterpreter.run(Lowering.lower(lifted), inputs, c.stepLimit)
+      val main = lifted.methods.find(_.id == lifted.entryMethod).get
+      out.println(s"${main.id}   inputs [${inputs.values.asScala.mkString(", ")}] · IR interpreter")
+      if c.trace then
+        run.visited.foreach {
+          case l @ Loc.AppLoc(_, i, true) => out.println(f"  ${Show.loc(l)}%-9s ${Show.cmd(main.body(i))}")
+          case l                          => out.println(s"  ${Show.loc(l)}")
+        }
+      out.println(s"reached   ${if run.reached.isEmpty then "(none)" else run.reached.mkString(" ")}")
+      out.println(s"ended     ${ended(run.ended)}")
+      0
+    }
+
+  /** The front every command shares: check the directory, run `before`, load,
+    * and run the profile check unless `enforce` is off; then `body`. `before`
+    * runs after the directory check and before loading, under the same error
+    * handling, so `run` reports a bad input before it loads anything. Exit 1 for
+    * a usage or input error, 2 when the program does not load or violates the
+    * profile.
+    */
+  private def withProgram[A](dir: Path, enforce: Boolean, err: PrintStream)(before: => A)(
+      body: (Program, A) => Int
+  ): Int =
     if !Files.isDirectory(dir) then
       err.println(s"pag: not a directory: $dir"); 1
     else
       val profile = Profile.BigintMainV1
       try
-        val inputs = pag.probe.Inputs.parse(c.inputs)
+        val prepared = before
         val program = frontEnd().load(dir)
-        val violations = ProfileCheck.check(program, profile)
+        val violations = if enforce then ProfileCheck.check(program, profile) else Nil
         if violations.nonEmpty then
           violations.foreach(v => err.println(v.message(program.sourceFile, profile.name)))
           2
-        else
-          val lifted = Lifting.lift(program, Lifting.Mode.Strict)
-          val run = IrInterpreter.run(Lowering.lower(lifted), inputs, c.stepLimit)
-          val main = lifted.methods.find(_.id == lifted.entryMethod).get
-          out.println(s"${main.id}   inputs [${inputs.values.asScala.mkString(", ")}] · IR interpreter")
-          if c.trace then
-            run.visited.foreach {
-              case l @ Loc.AppLoc(_, i, true) => out.println(f"  ${Show.loc(l)}%-9s ${Show.cmd(main.body(i))}")
-              case l                          => out.println(s"  ${Show.loc(l)}")
-            }
-          out.println(s"reached   ${if run.reached.isEmpty then "(none)" else run.reached.mkString(" ")}")
-          out.println(s"ended     ${ended(run.ended)}")
-          0
+        else body(program, prepared)
       catch
         case e: Untranslatable           => err.println(s"pag: ${e.getMessage}"); 2
         case e: IllegalArgumentException => err.println(s"pag: ${e.getMessage}"); 1
