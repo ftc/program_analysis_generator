@@ -10,8 +10,11 @@ import pag.ir.{Cfg, Loc, Transition}
   * Not trust base: the worklist uses it to choose what to do next and where to
   * widen, and the certifier checks the result against the `Cfg` itself. A wrong
   * answer here costs precision or termination, never soundness.
+  *
+  * Not final: Phase 4's tests substitute a broken resolver to show that it
+  * still cannot produce `Refuted`.
   */
-final class ControlFlowResolver(cfg: Cfg):
+class ControlFlowResolver(cfg: Cfg):
 
   private val byTarget: Map[Loc, List[Transition]] = cfg.transitions.groupBy(_.to)
   private val bySource: Map[Loc, List[Transition]] = cfg.transitions.groupBy(_.from)

@@ -1137,6 +1137,18 @@ Note that `[refute]` is `isBottom` rather than an `excludesInit` method: the
 entry admits every store, because initial constraints lower to an `assume` on
 the entry transition (§5.3).
 
+**Worklist order.** v1's worklist is first in, first out. Planned after the
+first experiment: a priority order from `ControlFlowResolver` — backward,
+transitions nearest the seeds first, so a location is joined from all its
+contributions before it propagates — ideally Bourdoncle's weak topological
+ordering (1993), whose component heads are also the widening points. In
+Historia a topological priority queue was a large speedup. Functionally it is
+an immutable `TreeSet` keyed by `(rank, index in cfg.transitions)`: total, so
+distinct transitions never collapse, and inserting a queued key is a no-op, so
+it also removes duplicates. Outside the trust base: order changes iterations
+and, at loops, what widening produces, never a verdict's soundness.
+*Decided — Shawn, 2026-10-05.*
+
 **The engine never abandons a state.** Every state the worklist produces is
 kept until it is joined, widened, or found already covered; nothing is skipped
 to save time. Skipping a state would leave out executions that reach the
@@ -1657,6 +1669,8 @@ rest:
    four hand-written mutants and one generated domain. *Done when* a kill rate
    is reported, however rough.
 4. **Phases 4.5, 6, 7, 9**, then the full versions of **8, 10, 11**.
+   Also after the first experiment: **worklist ordering** (§7, *Worklist
+   order*), judged by `Computed.iterations` on the fixtures.
 
 What the crude and full Phases 8, 10 and 11 are *for* is set out in
 `experiments.md`: a complexity ladder measuring where one-shot domain

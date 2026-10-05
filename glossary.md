@@ -197,6 +197,17 @@ exactly one can fire. There is no "we pruned" case; see *abandoning*.
 unexplored count, elapsed time, where it widened. Always collected, so a
 campaign keeps these even at recording level `Off`.
 
+**`Computed`** — the compute stage's result: the invariant map, how the search
+stopped (`None` when the worklist emptied, else one `Incomplete`), and its cost.
+Not a verdict: only the certifier turns it into one (plan §7).
+
+**iteration** — one transition processed by the worklist. The iteration limit
+(`Limits.iterations`, default 10,000) counts these, about two per command.
+
+**`Recorder`**, **`NullRecorder`** — the interface through which the analysis is
+observed (plan §8), called unconditionally; `NullRecorder` discards. Minimal
+until Phase 4.5 builds the derivation graph.
+
 **`DomainFailure`** — generated code threw (any `Throwable`, out-of-memory and
 stack overflow included) or returned null. A hang is not one:
 `pag` cannot stop it, so the campaign driver kills the process instead (§7). Every call
