@@ -60,7 +60,13 @@ class LoweringSuite extends munit.FunSuite:
     val lowered = lower(Cmd.Nop, Cmd.InvokeStmt(RVal.Invoke(InvokeKind.Static, Reach, None, List(int(7)))), ret)
     assert(lowered.cfg.transitions.contains(Transition(pre(1), Step.Skip, post(1))))
     assert(!lowered.cfg.transitions.exists(_.step.isInstanceOf[Step.Call]), "reach must not reach a domain")
-    assertEquals(lowered.reachSites, Map(BigInt(7) -> pre(1)))
+    assertEquals(lowered.reachSites, Map(BigInt(7) -> List(pre(1))))
+
+  test("reach(id) twice: both sites are recorded, in program order"):
+    // outside the profile (LiteralUnique), so only --no-enforce gets here; lowering records it anyway
+    def reach(id: Int) = Cmd.InvokeStmt(RVal.Invoke(InvokeKind.Static, Reach, None, List(int(id))))
+    val lowered = lower(reach(7), reach(8), reach(7), ret)
+    assertEquals(lowered.reachSites, Map(BigInt(7) -> List(pre(0), pre(2)), BigInt(8) -> List(pre(1))))
 
   test("main's args binding: a skip"):
     val bind = Cmd.Assign(LVal.Local("args", StringArray), LVal.Param(0, StringArray))

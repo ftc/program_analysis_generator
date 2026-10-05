@@ -37,7 +37,7 @@ object IrInterpreter:
 
   def run(lowered: Lowered, inputs: Inputs, stepLimit: Int = DefaultStepLimit): IrRun =
     val edges = lowered.cfg.transitions.groupBy(_.from)
-    val reachAt: Map[Loc, BigInt] = lowered.reachSites.map((id, loc) => loc -> id)
+    val reachAt: Map[Loc, BigInt] = for (id, locs) <- lowered.reachSites; loc <- locs yield loc -> id
     val visited = Vector.newBuilder[Loc]
     val reached = Vector.newBuilder[BigInt]
     var values = Map.empty[LVal.Local, BigInt]

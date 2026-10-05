@@ -595,7 +595,13 @@ is `InternalMethodExit(main)`.
 
 Lowering produces the `Cfg` of the entry method and, alongside it, the `pre`
 location of each `reach(id)` call, since lowering is where those calls
-disappear (`Lowered.reachSites`). A branch whose condition is not a
+disappear (`Lowered.reachSites`). It records **every** site, even two calls
+sharing an id, which only `enforce = false` lets through: a translation is
+faithful whether or not the profile holds. Uniqueness is a requirement of
+asking about a `reach` call, not of what it means, so it is enforced by the
+profile check and, as a backstop, by query resolution (§6); the IR interpreter
+marks every site, as the JVM prints at every call. *Decided — Shawn,
+2026-10-02.* A branch whose condition is not a
 comparison, a call assigned to anything but a local, and a command that falls
 through past the last one are engine bugs under the profile, and fail loudly.
 

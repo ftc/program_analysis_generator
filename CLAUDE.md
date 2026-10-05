@@ -77,6 +77,16 @@ Scala 3 (sbt) for the engine, including the IR in `engine/ir`; pure Java 21 for
 domains. `sbt test` runs everything. Only `engine/frontend-soot` may compile
 against `soot.*`.
 
+## Immutable by default
+
+In Scala, use `val` and immutable collections. A `var`, a `mutable` collection
+or a builder needs a reason that an immutable form would be clearly worse —
+measured cost, or a loop whose immutable form is markedly harder to read — and
+that reason goes in a comment beside it. Watch for mutation hidden by syntax:
+`m(k) = v` on a mutable map is `m.update(k, v)`. Existing mutable code is
+converted as its own refactoring change (rule 4), not in passing.
+*Decided — Shawn, 2026-10-05.*
+
 ## Inform the user if their terminology is inconsistent
 
 The file `glossary.md` contains the current meanings of all non-standard vocabulary used in this project. If the user uses some of this vocabulary in a way that does not appear to be consistent, ask for clarification.

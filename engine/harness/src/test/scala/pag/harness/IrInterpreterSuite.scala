@@ -57,6 +57,12 @@ class IrInterpreterSuite extends munit.FunSuite:
     assertEquals(r.reached, Vector[BigInt](1, 1, 1, 2))
     assertEquals(r.values(i), BigInt(3))
 
+  test("two reach calls sharing an id both print it, as the JVM would"):
+    // outside the profile (LiteralUnique); if x > 0 goto 3; reach(7); return; reach(7); return
+    for (value, expected) <- List("1" -> Vector[BigInt](7), "-1" -> Vector[BigInt](7)) do
+      val r = run(value, input(x), Cmd.Goto(bin(x, BinOp.Gt, int(0)), 4), reach(7), ret, reach(7), ret)
+      assertEquals(r.reached, expected, s"x = $value")
+
   test("inputs are used in order"):
     val r = run("7, -3", input(x), input(y), ret)
     assertEquals((r.values(x), r.values(y)), (BigInt(7), BigInt(-3)))

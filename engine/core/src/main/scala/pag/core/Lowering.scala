@@ -4,8 +4,10 @@ import pag.ir.*
 
 /** The entry method as a CFG, and the pre location of each reach(id) call:
   * lowering is where reach calls disappear, so it records where they were (§5.8).
+  * Every site, in program order: ids are unique only when the profile check
+  * ran, and a translation records what is there either way.
   */
-final case class Lowered(cfg: Cfg, reachSites: Map[BigInt, Loc.AppLoc])
+final case class Lowered(cfg: Cfg, reachSites: Map[BigInt, List[Loc.AppLoc]])
 
 /** Lowering: source IR to a transition relation over pre/post locations, one
   * row of implementation_strategy.md §5.3's table per command. Branches become
@@ -26,7 +28,6 @@ object Lowering:
       else throw IllegalStateException(s"${m.id}: command $i falls through past the last command")
 
     val edges = List.newBuilder[Transition]
-    val sites = Map.newBuilder[BigInt, Loc.AppLoc]
     edges += Transition(entry, Step.Skip, pre(0))
     for (c, i) <- m.body.zipWithIndex do
       def effect(s: Step) = edges += Transition(pre(i), s, post(i))
@@ -41,9 +42,7 @@ object Lowering:
           effect(Step.Call(Some(target), f, recv.toList ++ args)); thenTo(next(i))
         case Cmd.Assign(t, e) =>
           effect(Step.Assign(t, e)); thenTo(next(i))
-        case Cmd.InvokeStmt(RVal.Invoke(InvokeKind.Static, f, None, List(RVal.IntConst(id))))
-            if f.qualifiedName == "pag.probe.Reach.reach" =>
-          sites += id -> pre(i)
+        case ReachCall(_) =>
           effect(Step.Skip); thenTo(next(i))
         case Cmd.InvokeStmt(RVal.Invoke(_, f, recv, args)) =>
           effect(Step.Call(None, f, recv.toList ++ args)); thenTo(next(i))
@@ -60,8 +59,9 @@ object Lowering:
         case Cmd.Throw => // outside v1's profile; execution ends, so post(i) has no successor
           effect(Step.Skip)
 
-    val reach = sites.result()
-    Lowered(Cfg(edges.result(), entry, exit), reach)
+    // groupMap keeps each id's sites in program order
+    val sites = m.body.toList.zipWithIndex.collect { case (ReachCall(id), i) => id -> pre(i) }.groupMap(_._1)(_._2)
+    Lowered(Cfg(edges.result(), entry, exit), sites)
 
   /** ¬(a OP b) as another comparison: the operator flips, the operands stay (§5.1). */
   private def negate(cond: RVal): RVal = cond match
@@ -77,3 +77,10 @@ object Lowering:
           throw IllegalStateException(s"branch condition $cond is not a comparison")
       RVal.Binop(l, flipped, r)
     case _ => throw IllegalStateException(s"branch condition $cond is not a comparison")
+
+  /** A `reach(id)` call statement, matched by its id (§5.8). */
+  private object ReachCall:
+    def unapply(c: Cmd): Option[BigInt] = c match
+      case Cmd.InvokeStmt(RVal.Invoke(InvokeKind.Static, f, None, List(RVal.IntConst(id))))
+          if f.qualifiedName == "pag.probe.Reach.reach" => Some(id)
+      case _ => None
