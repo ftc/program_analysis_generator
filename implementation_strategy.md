@@ -1971,3 +1971,15 @@ framework, library, or the OS.
     have each assignment *of a constant* to it replaced by `nop` (never deleted,
     so locations stay; never a call, which has effects of its own). Sound with
     no flow analysis. *Decided — Shawn, 2026-10-01:* postponed.
+21. **Skip edges.** Lowering gives every command a `pre` and a `post` location,
+    so most edges are `skip` (§5.3). The transfer across one is free, but
+    joining its result and checking growth still call the domain's `join` and
+    `entails`, and certification checks `[edge-inductive]` on every edge. At
+    v1's program sizes this is noise beside model calls and JVM runs. If a
+    profile ever shows skips dominating, carry the state through chains of
+    single-edge skips **in the worklist**, without joining at each one; the
+    certifier still checks every edge of the unchanged `Cfg`, so the shortcut
+    can cost precision but never yield a false `Refuted`. Never merge skips in
+    lowering: that is trust-base code, and it removes locations that queries,
+    the IR interpreter and the printed map refer to. *Decided — Shawn,
+    2026-10-05:* postponed until measured. The skip optimization may also be useful for human debugging later.
