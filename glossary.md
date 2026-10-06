@@ -360,12 +360,12 @@ access or credentials. Plan §12.
 
 Four distinct collections, easy to confuse:
 
-| name | contents | used for |
-| --- | --- | --- |
-| **probe corpus** | programs the adversary wrote | attacking a domain |
-| **scoring corpus** | programs with many targets, some infeasible by construction | proof count |
-| **mutant corpus** | domains known to be unsound: hand-written mutants and every rejected domain, listed in `corpora/mutants.txt` | calibrating the adversary |
-| **reaching runs** | probes that actually broke a domain, under `domains/<id>/rejections/` | rejection records, generator feedback |
+| name               | contents                                                                                                     | used for                              |
+|--------------------|--------------------------------------------------------------------------------------------------------------|---------------------------------------|
+| **probe corpus**   | programs the adversary wrote                                                                                 | attacking a domain                    |
+| **scoring corpus** | programs with many targets, some infeasible by construction                                                  | proof count                           |
+| **mutant corpus**  | domains known to be unsound: hand-written mutants and every rejected domain, listed in `corpora/mutants.txt` | calibrating the adversary             |
+| **reaching runs**  | probes that actually broke a domain, under `domains/<id>/rejections/`                                        | rejection records, generator feedback |
 
 **`domain.json`**, **`run.json`** — the metadata kept beside each domain and each
 rejection in `domains/` (plan §3). Plain files in git for now.
@@ -461,18 +461,18 @@ will be inside it, since they decide which transitions exist.
 
 ## 12. Inherited terms, and what they mean here
 
-| term | in the dissertation / Historia | here |
-| --- | --- | --- |
-| Lemma 1 | *hoare triple soundness*, Ch. 4 p. 89, with a framework-spec parameter | the per-step soundness condition, heap/spec parameter dropped |
-| `IRWrapper` | Soot-coupled IR facade, ~2150 lines with APK and callback handling | `IrProvider`, translation only |
+| term                  | in the dissertation / Historia                                             | here                                                                                                                                     |
+|-----------------------|----------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
+| Lemma 1               | *hoare triple soundness*, Ch. 4 p. 89, with a framework-spec parameter     | the per-step soundness condition, heap/spec parameter dropped                                                                            |
+| `IRWrapper`           | Soot-coupled IR facade, ~2150 lines with APK and callback handling         | `IrProvider`, translation only                                                                                                           |
 | `ControlFlowResolver` | every "what comes before here" query, including callbacks and call targets | same name and job, smaller: predecessors and loop heads from the `Cfg`; call targets through a front-end interface, once there are calls |
-| `canSubsume` | entailment via Z3, ~1800 lines | `entails`, a domain method, no solver |
-| `IPathNode` | path-node tree, mutable status, implicit `OutputMode` | derivation graph (plan §8), redesigned |
-| `WitnessExplanation` | the printed path for an alarm | `CandidateTrace` |
-| `WitnessedQry` | search state meaning the entry was reached | `Verdict.Alarm` plus a `CandidateTrace` |
-| `InitialQuery` | `Reachable`, `ReceiverNonNull`, `CallinReturnNonNull`, … | `Reachable` only; the rest to be re-engineered |
-| **consistent** | consistent with known reachable locations | *avoid* — see `misc.md` §5 |
-| **witness** | an alarm that reached the initial state | *retired* |
+| `canSubsume`          | entailment via Z3, ~1800 lines                                             | `entails`, a domain method, no solver                                                                                                    |
+| `IPathNode`           | path-node tree, mutable status, implicit `OutputMode`                      | derivation graph (plan §8), redesigned                                                                                                   |
+| `WitnessExplanation`  | the printed path for an alarm                                              | `CandidateTrace`                                                                                                                         |
+| `WitnessedQry`        | search state meaning the entry was reached                                 | `Verdict.Alarm` plus a `CandidateTrace`                                                                                                  |
+| `InitialQuery`        | `Reachable`, `ReceiverNonNull`, `CallinReturnNonNull`, …                   | `Reachable` only; the rest to be re-engineered                                                                                           |
+| **consistent**        | consistent with known reachable locations                                  | *avoid* — see `misc.md` §5                                                                                                               |
+| **witness**           | an alarm that reached the initial state                                    | *retired*                                                                                                                                |
 
 ---
 
