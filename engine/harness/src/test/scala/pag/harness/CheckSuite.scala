@@ -1,6 +1,6 @@
 package pag.harness
 
-import pag.core.{Incomplete, Reachable, Verdict}
+import pag.results.{ErrorInfo, Incomplete, Outcome, Reachable, Verdict}
 
 /** The reachability check's judgment (implementation_strategy.md §9): one test
   * per row of the outcome table.
@@ -9,7 +9,7 @@ class CheckSuite extends munit.FunSuite:
 
   val q: Reachable = Reachable(1)
   val limit: Incomplete = Incomplete.IterationLimit(10)
-  val failure: Incomplete = Incomplete.DomainFailure("transfer", RuntimeException("boom"))
+  val failure: Incomplete = Incomplete.DomainFailure("transfer", ErrorInfo.of(RuntimeException("boom")))
 
   test("Refuted, and the run reaches the target: Unsound"):
     assertEquals(Check.judge(Verdict.Refuted, Vector(BigInt(1)), q), Outcome.Unsound)

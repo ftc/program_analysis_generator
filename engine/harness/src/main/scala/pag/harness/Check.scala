@@ -1,17 +1,6 @@
 package pag.harness
 
-import pag.core.{Incomplete, Reachable, Verdict}
-
-/** What a reachability check concludes (implementation_strategy.md §9). */
-enum Outcome:
-  /** Refuted, and the run printed `REACHED-<id>`: the domain is unsound. */
-  case Unsound
-
-  /** Nothing contradicted: not refuted, or refuted and this run does not reach the target. */
-  case Consistent
-
-  /** The analysis did not finish, so the run judges nothing. */
-  case NoVerdict(why: Incomplete)
+import pag.results.{Outcome, Reachable, Verdict}
 
 /** The reachability check's judgment (§9). Trust base (§2, the marker check):
   * the only place a run can overturn a refutation. Only the queried id counts,

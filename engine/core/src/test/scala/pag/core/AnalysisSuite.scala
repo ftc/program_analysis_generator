@@ -2,6 +2,7 @@ package pag.core
 
 import pag.api
 import pag.ir.*
+import pag.results.*
 import pag.core.TestDomains.*
 
 /** Compute then certify (implementation_strategy.md §7), and Phase 4's
@@ -27,7 +28,7 @@ class AnalysisSuite extends munit.FunSuite:
       resolver: Option[ControlFlowResolver] = None): AnalysisResult[S] =
     Analysis.analyze(d, lowered(g), Reachable(1), limits, resolver = resolver).fold(e => fail(e), identity)
 
-  /** Every assignment of ⊥ or ⊤ to every location: 2^5 maps. */
+  /** Every assignment of ⊥ or ⊤ to every location: 2&#94;5 maps. */
   val allMaps: List[Map[Loc, Flag]] =
     locations.foldLeft(List(Map.empty[Loc, Flag]))((ms, l) => ms.flatMap(m => List(m + (l -> No), m + (l -> Maybe))))
 
@@ -68,16 +69,17 @@ class AnalysisSuite extends munit.FunSuite:
 
   test("a domain that throws in transfer: Inconclusive(DomainFailure), and no certification"):
     val boom = RuntimeException("boom")
-    val d = new FlagDomain { override def transfer(s: api.Step, p: Flag) = throw boom }
+    val d = new FlagDomain { override def transfer(s: api.Step, p: Flag): Flag = throw boom }
     val r = analyze(d, unreachable)
-    assertEquals((r.verdict, r.certification), (Verdict.Inconclusive(Incomplete.DomainFailure("transfer", boom)), None))
+    val transferError = Incomplete.DomainFailure("transfer", ErrorInfo.of(boom))
+    assertEquals((r.verdict, r.certification), (Verdict.Inconclusive(transferError), None))
 
   test("a domain that fails only during certification is Inconclusive too, never Alarm"):
     // the worklist never calls isBottom; the certifier does, for [refute]
     val boom = RuntimeException("boom")
-    val d = new FlagDomain { override def isBottom(s: Flag) = throw boom }
+    val d = new FlagDomain { override def isBottom(s: Flag): Boolean = throw boom }
     assertEquals(analyze(d, unreachable).verdict,
-      Verdict.Inconclusive(Incomplete.DomainFailure("isBottom", boom)))
+      Verdict.Inconclusive(Incomplete.DomainFailure("isBottom", ErrorInfo.of(boom))))
 
   test("a search stopped by the iteration limit is Inconclusive, and is not certified"):
     val r = analyze(FlagDomain(), unreachable, Limits(iterations = 2))
@@ -93,7 +95,7 @@ class AnalysisSuite extends munit.FunSuite:
     assertEquals(Analysis.analyze(FlagDomain(), l, Reachable(2)).map(_.verdict), Right(Verdict.Alarm))
 
   test("a query the program cannot answer is Left, and nothing runs"):
-    val noDomain = new FlagDomain { override def top = throw AssertionError("the domain must not be called") }
+    val noDomain = new FlagDomain { override def top: Flag = throw AssertionError("the domain must not be called") }
     assertEquals(Analysis.analyze(noDomain, lowered(reachable), Reachable(7)).map(_.verdict),
       Left("no reach(7) call; the program has reach(1)"))
 

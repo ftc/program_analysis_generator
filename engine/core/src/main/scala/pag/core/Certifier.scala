@@ -2,6 +2,7 @@ package pag.core
 
 import pag.api.Domain
 import pag.ir.{Cfg, Loc, Step, Transition}
+import pag.results.Incomplete
 
 /** The outcome of the three checks (implementation_strategy.md §7). */
 final case class Certification(

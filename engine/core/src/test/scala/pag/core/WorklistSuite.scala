@@ -3,6 +3,7 @@ package pag.core
 import pag.api
 import pag.api.Domain
 import pag.ir.*
+import pag.results.*
 import pag.core.TestDomains.*
 
 /** The compute stage (implementation_strategy.md §7) on hand-built CFGs, with
@@ -20,14 +21,14 @@ class WorklistSuite extends munit.FunSuite:
   val Top: Count = Count(Int.MaxValue)
 
   class CountDomain extends Domain[Count]:
-    def name = "count"
-    def top = Top
-    def bottom = Count(0)
-    def isBottom(s: Count) = s.n == 0
-    def entails(a: Count, b: Count) = a.n <= b.n
-    def join(a: Count, b: Count) = if a.n >= b.n then a else b
-    def widen(a: Count, b: Count) = if b.n > a.n then Top else a
-    def transfer(step: api.Step, post: Count) =
+    def name: String = "count"
+    def top: Count = Top
+    def bottom: Count = Count(0)
+    def isBottom(s: Count): Boolean = s.n == 0
+    def entails(a: Count, b: Count): Boolean = a.n <= b.n
+    def join(a: Count, b: Count): Count = if a.n >= b.n then a else b
+    def widen(a: Count, b: Count): Count = if b.n > a.n then Top else a
+    def transfer(step: api.Step, post: Count): Count =
       if post.n == 0 then post else if post == Top then Count(1) else Count(post.n + 1)
 
   // --- CFGs (helpers in TestDomains)
@@ -83,7 +84,7 @@ class WorklistSuite extends munit.FunSuite:
 
   test("skip is the identity and never reaches the domain"):
     val d = new FlagDomain:
-      override def transfer(step: api.Step, post: Flag) = throw AssertionError("transfer on a skip")
+      override def transfer(step: api.Step, post: Flag): Flag = throw AssertionError("transfer on a skip")
     val r = run(d, cfg(skip(0, 1), skip(1, 2)), seed = 2)
     assertEquals((r.stopped, r.states.size), (None, 3))
 
@@ -106,42 +107,43 @@ class WorklistSuite extends munit.FunSuite:
 
   // --- Domain failures
 
-  test("transfer throws: DomainFailure carries the op and the exception itself"):
+  test("transfer throws: DomainFailure carries the op and the exception, as data"):
     val boom = RuntimeException("boom")
     val d = new FlagDomain:
-      override def transfer(step: api.Step, post: Flag) = throw boom
+      override def transfer(step: api.Step, post: Flag): Flag = throw boom
     val r = run(d, cfg(skip(0, 1), assign(1, 2)), seed = 2)
-    assertEquals(r.stopped, Some(Incomplete.DomainFailure("transfer", boom)))
+    assertEquals(r.stopped, Some(Incomplete.DomainFailure("transfer", ErrorInfo.of(boom))))
     assertEquals(r.states, Map(L(2) -> Flag.Maybe), "what was computed before the failure is kept")
     assertEquals(r.iterations, 1)
 
   test("join returns null: DomainFailure with a NullPointerException naming join"):
     val d = new FlagDomain:
-      override def join(a: Flag, b: Flag) = null
+      override def join(a: Flag, b: Flag): Flag = null
     run(d, cfg(skip(0, 1)), seed = 1).stopped match
-      case Some(Incomplete.DomainFailure("join", e: NullPointerException)) => assertEquals(e.getMessage, "join returned null")
+      case Some(Incomplete.DomainFailure("join", e)) =>
+        assertEquals((e.className, e.message), ("java.lang.NullPointerException", Some("join returned null")))
       case other                                                           => fail(s"got $other")
 
   test("widen recurses without end: the StackOverflowError is a DomainFailure"):
     def forever(n: Int): Int = forever(n + 1) + 1
     val d = new CountDomain:
-      override def widen(a: Count, b: Count) = Count(forever(0))
+      override def widen(a: Count, b: Count): Count = Count(forever(0))
     run(d, loop, seed = 3).stopped match
-      case Some(Incomplete.DomainFailure("widen", _: StackOverflowError)) => ()
+      case Some(Incomplete.DomainFailure("widen", e)) if e.className == "java.lang.StackOverflowError" => ()
       case other                                                          => fail(s"got $other")
 
   test("entails runs out of memory: the OutOfMemoryError is a DomainFailure"):
     val oom = OutOfMemoryError("simulated") // a real one would starve the test JVM
     val d = new FlagDomain:
-      override def entails(a: Flag, b: Flag) = throw oom
-    assertEquals(run(d, cfg(skip(0, 1)), seed = 1).stopped, Some(Incomplete.DomainFailure("entails", oom)))
+      override def entails(a: Flag, b: Flag): Boolean = throw oom
+    assertEquals(run(d, cfg(skip(0, 1)), seed = 1).stopped, Some(Incomplete.DomainFailure("entails", ErrorInfo.of(oom))))
 
   test("bottom throws: the search never starts"):
     val boom = IllegalStateException("no bottom")
     val d = new FlagDomain:
-      override def bottom = throw boom
+      override def bottom: Flag = throw boom
     val r = run(d, cfg(skip(0, 1)), seed = 1)
-    assertEquals((r.stopped, r.states, r.iterations), (Some(Incomplete.DomainFailure("bottom", boom)), Map.empty, 0))
+    assertEquals((r.stopped, r.states, r.iterations), (Some(Incomplete.DomainFailure("bottom", ErrorInfo.of(boom))), Map.empty, 0))
 
   test("an engine bug is not the domain's: the converter's exception propagates"):
     val bad = Transition(L(0), Step.Assign(LVal.StaticField("java.math.BigInteger", "ONE"), RVal.IntConst(1)), L(1))
@@ -152,9 +154,9 @@ class WorklistSuite extends munit.FunSuite:
   test("the recorder sees every update and every unexplored transition"):
     // A recorder is an observer by design, so a test one must keep what it sees.
     final class Tally extends Recorder:
-      val updates = java.util.concurrent.atomic.AtomicInteger()
-      val widenings = java.util.concurrent.atomic.AtomicInteger()
-      val unexplored = java.util.concurrent.atomic.AtomicInteger()
+      val updates: java.util.concurrent.atomic.AtomicInteger = java.util.concurrent.atomic.AtomicInteger()
+      val widenings: java.util.concurrent.atomic.AtomicInteger = java.util.concurrent.atomic.AtomicInteger()
+      val unexplored: java.util.concurrent.atomic.AtomicInteger = java.util.concurrent.atomic.AtomicInteger()
       def transferred(t: Transition, post: Any, contribution: Any): Unit = ()
       def updated(loc: Loc, state: Any, widened: Boolean): Unit =
         updates.incrementAndGet(); if widened then widenings.incrementAndGet()

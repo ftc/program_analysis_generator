@@ -8,7 +8,7 @@ import pag.ir.*
   */
 class SootIrProviderSuite extends munit.FunSuite:
 
-  val provider = SootIrProvider()
+  val provider: SootIrProvider = SootIrProvider()
   def load(fixture: String): Program = Fixtures.withCompiled(fixture)(provider.load)
 
   val BigInteger: JType = JType.Ref("java.math.BigInteger")
@@ -162,7 +162,7 @@ class SootIrProviderSuite extends munit.FunSuite:
     has("throw")      { case Cmd.Throw => }
 
   /** Each fixture holds one construct the IR cannot represent. */
-  val untranslatable = List(
+  val untranslatable: List[(String, String)] = List(
     "Unsupported"  -> "line 5",                 // division
     "Switch"       -> "line 5",                 // a switch statement
     "NullValue"    -> "line 5",                 // null

@@ -2,8 +2,9 @@ package pag.cli
 
 import java.nio.file.Path
 
-import pag.core.{AnalysisResult, Incomplete, Lowered, Reachable, Verdict}
+import pag.core.{AnalysisResult, Lowered}
 import pag.ir.{Cmd, Loc, Pretty, Program, Transition}
+import pag.results.{Incomplete, Reachable, Verdict}
 
 /** What `pag analyze` prints (implementation_strategy.md §11): the program and
   * query, the invariant map in program order, the search's cost, the

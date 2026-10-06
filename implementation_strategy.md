@@ -1061,7 +1061,7 @@ enum Verdict:
 enum Incomplete:
   case IterationLimit(at: Int)
   case Deadline(afterMs: Long)
-  case DomainFailure(op: String, error: Throwable)
+  case DomainFailure(op: String, error: ErrorInfo) // the Throwable as data: class, message, stack trace
 
 /** The verdict plus what the search cost. Collected at every recording level. */
 final case class AnalysisResult[S](
@@ -1713,6 +1713,14 @@ depended on by both the engine and `campaign/`. One definition, no schema to
 keep in sync. Deliberately *not* `engine/api`, which is what generated domains
 compile against and should not accumulate result types.
 
+It depends on nothing else in the engine, so the driver reads results without
+linking the engine (§12). What lives there is what both sides need as data:
+`Query`/`Reachable`, `Verdict`, `Incomplete`, `Outcome`, and `ErrorInfo` — a
+`Throwable` as data (class, message, stack trace), which is what
+`DomainFailure` carries. Types holding the invariant map or IR transitions
+(`AnalysisResult`, `Certification`) stay in `core`; what crosses is a summary
+built from them. *Decided — Shawn, 2026-10-05.*
+
 Two rules learned from Historia, where 147 codec declarations were spread across
 thirty files with **27 `RW.merge` sites enumerating sum types by hand**:
 
@@ -1725,10 +1733,12 @@ Every record carries a versioned envelope — engine version, api version, profi
 name, campaign id — which is the actual compatibility need and is independent of
 format.
 
-**One gotcha.** The IR types are Java records and sealed interfaces, which Scala
-3 derivation does not reach. If the derivation graph is ever serialized rather
-than rendered as text, `Loc` and `Step` need hand-written codecs. Two by hand is
-fine; twenty-seven is what went wrong before.
+**One gotcha.** The IR is Scala (§5.1), but the domain vocabulary in
+`engine/api` is Java records and sealed interfaces, which Scala 3 derivation does
+not reach. Nothing serializes the vocabulary today; if the derivation graph is
+ever serialized rather than rendered as text, its `Loc` and `Step` are Scala and
+derive, and anything holding `pag.api` values needs hand-written codecs. Two by
+hand is fine; twenty-seven is what went wrong before.
 
 ## 14. Phases
 

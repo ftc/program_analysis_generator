@@ -1,16 +1,10 @@
 package pag.core
 
 import pag.ir.Loc
+import pag.results.{Query, Reachable}
 
-/** What the analysis is asked (implementation_strategy.md §6). Sealed with one
-  * case: the other query forms reduce to `Reachable` (README.md).
-  */
-sealed trait Query
-
-/** Is the `reach(id)` call reachable? (§5.8) */
-final case class Reachable(id: Int) extends Query
-
-object Query:
+/** Resolves a query against a lowered program (§6). */
+object QueryResolver:
 
   /** The locations seeded ⊤ for `q` (§7). A set, because a later line-based form
     * resolves to several; `Reachable` resolves to the one `pre` location of its

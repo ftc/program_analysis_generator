@@ -4,6 +4,7 @@ import scala.annotation.tailrec
 import scala.collection.immutable.Queue
 import pag.api.Domain
 import pag.ir.{Loc, Step, Transition}
+import pag.results.{ErrorInfo, Incomplete}
 
 /** The compute stage's result: the invariant map and how the search stopped.
   * Not a verdict — only the certifier (§7) produces one.
@@ -91,5 +92,6 @@ object Worklist:
   private[core] def guard[A](op: String)(call: => A): Either[Incomplete.DomainFailure, A] =
     try
       val a = call
-      if a == null then Left(Incomplete.DomainFailure(op, NullPointerException(s"$op returned null"))) else Right(a)
-    catch case e: Throwable => Left(Incomplete.DomainFailure(op, e))
+      if a == null then Left(Incomplete.DomainFailure(op, ErrorInfo.of(NullPointerException(s"$op returned null"))))
+      else Right(a)
+    catch case e: Throwable => Left(Incomplete.DomainFailure(op, ErrorInfo.of(e)))

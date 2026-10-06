@@ -1,18 +1,7 @@
 package pag.core
 
 import pag.ir.{Loc, Transition}
-
-/** Why a search was incomplete (implementation_strategy.md §7). All three stop
-  * it, so exactly one can fire.
-  */
-enum Incomplete:
-  case IterationLimit(at: Int)
-  case Deadline(afterMs: Long)
-
-  /** `op` threw (any `Throwable`) or returned null; the null case carries a
-    * `NullPointerException` naming `op`.
-    */
-  case DomainFailure(op: String, error: Throwable)
+import pag.results.{Incomplete, Query, Verdict}
 
 /** The search's budget (§7, §11). An iteration is one transition processed. */
 final case class Limits(iterations: Int = 10_000, deadlineMs: Long = 60_000):
@@ -43,12 +32,6 @@ object NullRecorder extends Recorder:
   def updated(loc: Loc, state: Any, widened: Boolean): Unit = ()
   def unexplored(t: Transition): Unit = ()
   def uncertified(t: Transition): Unit = ()
-
-/** What the analysis learned, never how it stopped (§7). */
-enum Verdict:
-  case Refuted // certified unreachable
-  case Alarm // searched fully, could not prove it
-  case Inconclusive(why: Incomplete) // did not search fully
 
 /** The verdict, the invariant map, and what the search cost (§7).
   * `certification` is absent when the certifier did not run: the search stopped
@@ -92,7 +75,7 @@ object Analysis:
       clock: () => Long = () => System.currentTimeMillis(),
       resolver: Option[ControlFlowResolver] = None
   ): Either[String, AnalysisResult[S]] =
-    Query.resolve(q, lowered).map { targets =>
+    QueryResolver.resolve(q, lowered).map { targets =>
       val cfg = lowered.cfg
       val computed = Worklist.compute(d, resolver.getOrElse(ControlFlowResolver(cfg)), targets, limits, recorder, clock)
       def result(v: Verdict, c: Option[Certification]) =

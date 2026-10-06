@@ -63,7 +63,7 @@ lazy val scalaModule = Seq(
 )
 
 lazy val root = (project in file("."))
-  .aggregate(api, probeLib, ir, frontendSoot, core, harness, cli)
+  .aggregate(api, probeLib, ir, results, frontendSoot, core, harness, cli)
   .settings(
     name           := "program-analysis-generator",
     publish / skip := true
@@ -87,6 +87,12 @@ lazy val probeLib = (project in file("engine/probe-lib"))
 lazy val ir = (project in file("engine/ir"))
   .settings(scalaModule, sootBoundary, name := "pag-ir")
 
+/** Result types shared by the engine and the campaign driver (§13): plain data
+  * with no dependency on the rest of the engine, so the driver never links it (§12).
+  */
+lazy val results = (project in file("engine/results"))
+  .settings(scalaModule, sootBoundary, name := "pag-results")
+
 /** The only module with Soot on its compile classpath (§5.5). */
 lazy val frontendSoot = (project in file("engine/frontend-soot"))
   // probe-lib for tests only: fixtures are compiled against Rand and Reach.
@@ -104,7 +110,7 @@ lazy val frontendSoot = (project in file("engine/frontend-soot"))
 
 /** Profile check, lifting, lowering, worklist, certifier. */
 lazy val core = (project in file("engine/core"))
-  .dependsOn(api, ir)
+  .dependsOn(api, ir, results)
   .settings(scalaModule, sootBoundary, name := "pag-core")
 
 /** Executor, probe runner, verdicts, scoring. */

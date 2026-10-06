@@ -2,8 +2,9 @@ package pag.cli
 
 import java.nio.file.Path
 
-import pag.core.{AnalysisResult, Incomplete, Reachable, Verdict}
-import pag.harness.{JvmRunResult, Outcome}
+import pag.core.AnalysisResult
+import pag.harness.JvmRunResult
+import pag.results.{Incomplete, Outcome, Reachable, Verdict}
 
 /** What `pag check` prints (implementation_strategy.md §11): one line for the
   * analysis, one for the JVM run, then the outcome. `pag analyze` shows the map.
@@ -52,4 +53,4 @@ object CheckReport:
   private def incomplete(i: Incomplete): String = i match
     case Incomplete.IterationLimit(n)    => s"iteration limit $n"
     case Incomplete.Deadline(ms)         => s"deadline after ${ms}ms"
-    case Incomplete.DomainFailure(op, e) => s"$op threw ${e.getClass.getName}"
+    case Incomplete.DomainFailure(op, e) => s"$op threw ${e.className}"

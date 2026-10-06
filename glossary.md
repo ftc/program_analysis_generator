@@ -170,7 +170,9 @@ later without a clash.
 
 ## 3. Queries and verdicts
 
-**Query** — the input naming what to ask about. Sealed, one case for now.
+**Query** — the input naming what to ask about. Sealed, one case for now; in
+`engine/results`. `QueryResolver.resolve` (in `core`) turns one into the
+locations seeded ⊤ (plan §6).
 
 **`reach(id)`** — `pag.probe.Reach.reach(int)`, the call a probe places at each
 location it asks about (§5.8). Prints `REACHED-<id>` and has no other effect;
@@ -214,7 +216,9 @@ observed (plan §8), called unconditionally; `NullRecorder` discards. Minimal
 until Phase 4.5 builds the derivation graph.
 
 **`DomainFailure`** — generated code threw (any `Throwable`, out-of-memory and
-stack overflow included) or returned null. A hang is not one:
+stack overflow included) or returned null. Carries the op and an **`ErrorInfo`**:
+the `Throwable` as data — class name, message, stack trace — so it can be
+printed, stored and fed back without keeping the exception. A hang is not one:
 `pag` cannot stop it, so the campaign driver kills the process instead (§7). Every call
 into a domain is wrapped; one exception must not end a campaign.
 
@@ -398,8 +402,10 @@ serving both via Borer. JSON by default; CBOR when the derivation graph at
 as, so binary never costs inspectability.
 
 **`engine/results`** — the small shared module holding result ADTs and codecs,
-depended on by both the engine and `campaign/`. Deliberately not `engine/api`,
-which generated domains compile against.
+depended on by both the engine and `campaign/`, and depending on nothing else in
+the engine. Holds `Query`/`Reachable`, `Verdict`, `Incomplete`, `Outcome` and
+`ErrorInfo` (plan §13). Deliberately not `engine/api`, which generated domains
+compile against.
 
 **Versioned envelope** — engine version, api version, profile name, campaign id
 on every record. The actual compatibility need, independent of format.

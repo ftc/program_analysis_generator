@@ -16,14 +16,14 @@ object TestDomains:
     * passes every other state through unchanged, so it never excludes a run.
     */
   class FlagDomain extends Domain[Flag]:
-    def name = "flag"
-    def top = Flag.Maybe
-    def bottom = Flag.No
-    def isBottom(s: Flag) = s == Flag.No
-    def entails(a: Flag, b: Flag) = a == Flag.No || b == Flag.Maybe
-    def join(a: Flag, b: Flag) = if a == Flag.Maybe || b == Flag.Maybe then Flag.Maybe else Flag.No
-    def widen(a: Flag, b: Flag) = join(a, b)
-    def transfer(step: api.Step, post: Flag) = step match
+    def name: String = "flag"
+    def top: Flag = Flag.Maybe
+    def bottom: Flag = Flag.No
+    def isBottom(s: Flag): Boolean = s == Flag.No
+    def entails(a: Flag, b: Flag): Boolean = a == Flag.No || b == Flag.Maybe
+    def join(a: Flag, b: Flag): Flag = if a == Flag.Maybe || b == Flag.Maybe then Flag.Maybe else Flag.No
+    def widen(a: Flag, b: Flag): Flag = join(a, b)
+    def transfer(step: api.Step, post: Flag): Flag = step match
       case a: api.Step.Assume =>
         a.cond match
           case c: api.RVal.Binop =>

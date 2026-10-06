@@ -6,10 +6,10 @@ import scala.jdk.CollectionConverters.*
 
 import scala.concurrent.duration.Duration
 
-import pag.core.{Analysis, AnalysisResult, Incomplete, Limits, Lifting, Lowering, Profile, ProfileCheck, Query,
-  Reachable, Verdict}
-import pag.harness.{Check, Ended, IrInterpreter, JvmRun, Outcome}
+import pag.core.{Analysis, AnalysisResult, Limits, Lifting, Lowering, Profile, ProfileCheck, QueryResolver}
+import pag.harness.{Check, Ended, IrInterpreter, JvmRun}
 import pag.ir.{IrProvider, Loc, Program, Untranslatable}
+import pag.results.{Incomplete, Outcome, Reachable, Verdict}
 import scopt.{OEffect, OParser}
 
 /** The `pag` entry point (implementation_strategy.md §11). Exit codes: 0 done,
@@ -82,12 +82,12 @@ object Main:
       cmd("analyze")
         .action((_, c) => c.copy(command = Some("analyze")))
         .text("analyze a reach query with a domain, printing the verdict and the invariant map")
-        .children((analysisOptions :+ opt[Unit]("all").action((_, c) => c.copy(all = true))
-          .text("print every location, post locations and nops included"))*),
+        .children(analysisOptions :+ opt[Unit]("all").action((_, c) => c.copy(all = true))
+          .text("print every location, post locations and nops included") *),
       cmd("check")
         .action((_, c) => c.copy(command = Some("check")))
         .text("analyze, then run the program on the JVM with the given inputs; exit 3 if a refutation is contradicted")
-        .children((analysisOptions :+ inputsOption)*),
+        .children(analysisOptions :+ inputsOption *),
       checkConfig(c => if c.command.isEmpty then failure("no command given") else success)
     )
 
@@ -198,7 +198,7 @@ object Main:
           Analysis.analyze(d, lowered, query, c.limits) match
             case Left(message) => err.println(s"pag: $message"); 1
             case Right(result) =>
-              val targets = Query.resolve(query, lowered).getOrElse(Set.empty) // resolved above; for display
+              val targets = QueryResolver.resolve(query, lowered).getOrElse(Set.empty) // resolved above; for display
               body(Analyzed(lifted, lowered, domainName(d), query, targets, result), prepared)
     }
 
@@ -241,7 +241,7 @@ object Main:
   /** 0 for a verdict, 4 for a limit, 5 for a domain failure with its stack trace on stderr. */
   private def verdictExit(r: AnalysisResult[?], err: PrintStream): Int = r.verdict match
     case Verdict.Inconclusive(Incomplete.DomainFailure(_, e)) =>
-      e.printStackTrace(err)
+      err.print(e.stackTrace)
       5
     case Verdict.Inconclusive(_)                              => 4
     case Verdict.Refuted | Verdict.Alarm                      => 0

@@ -2,7 +2,10 @@ package pag.core
 
 import pag.api
 import pag.ir.*
+import pag.results.*
 import pag.core.TestDomains.*
+
+import java.util.concurrent.ConcurrentLinkedQueue
 
 /** The certifier (implementation_strategy.md §7): one test per check, on maps
   * written out by hand rather than produced by the worklist.
@@ -17,7 +20,7 @@ class CertifierSuite extends munit.FunSuite:
   val unreachable: Cfg = cfg(skip(0, 1), assign(1, 2), guardEdge(2, 1, BinOp.Gt, 2, 3))
   val target: Set[Loc] = Set(L(3))
 
-  def certify(g: Cfg, states: Map[Loc, Flag], d: FlagDomain = FlagDomain(), recorder: Recorder = NullRecorder) =
+  def certify(g: Cfg, states: Map[Loc, Flag], d: FlagDomain = FlagDomain(), recorder: Recorder = NullRecorder): Certification =
     Certifier.certify(d, g, target, states, recorder).fold(f => fail(s"domain failure $f"), identity)
 
   // --- All three pass, or not
@@ -68,19 +71,19 @@ class CertifierSuite extends munit.FunSuite:
   test("a domain call that throws during certification is a DomainFailure, not an Alarm"):
     val boom = RuntimeException("boom")
     def failing(op: String): FlagDomain = op match
-      case "transfer" => new FlagDomain { override def transfer(s: api.Step, p: Flag) = throw boom }
-      case "entails"  => new FlagDomain { override def entails(a: Flag, b: Flag) = throw boom }
-      case "isBottom" => new FlagDomain { override def isBottom(s: Flag) = throw boom }
-      case "top"      => new FlagDomain { override def top = throw boom }
-      case "bottom"   => new FlagDomain { override def bottom = throw boom }
+      case "transfer" => new FlagDomain { override def transfer(s: api.Step, p: Flag): Flag = throw boom }
+      case "entails"  => new FlagDomain { override def entails(a: Flag, b: Flag): Boolean = throw boom }
+      case "isBottom" => new FlagDomain { override def isBottom(s: Flag): Boolean = throw boom }
+      case "top"      => new FlagDomain { override def top: Flag = throw boom }
+      case "bottom"   => new FlagDomain { override def bottom: Flag = throw boom }
     for op <- List("transfer", "entails", "isBottom", "top", "bottom") do
       assertEquals(Certifier.certify(failing(op), unreachable, target, Map(L(3) -> Maybe)).left.toOption: Option[Incomplete],
-        Some(Incomplete.DomainFailure(op, boom)): Option[Incomplete], op)
+        Some(Incomplete.DomainFailure(op, ErrorInfo.of(boom))): Option[Incomplete], op)
 
   test("a null from a domain call during certification is a DomainFailure"):
-    val d = new FlagDomain { override def transfer(s: api.Step, p: Flag) = null }
+    val d = new FlagDomain { override def transfer(s: api.Step, p: Flag): Flag = null }
     Certifier.certify(d, unreachable, target, Map(L(3) -> Maybe)) match
-      case Left(Incomplete.DomainFailure("transfer", _: NullPointerException)) => ()
+      case Left(Incomplete.DomainFailure("transfer", e)) if e.className == "java.lang.NullPointerException" => ()
       case other                                                               => fail(s"got $other")
 
   test("an engine bug in the converter propagates"):
@@ -92,7 +95,7 @@ class CertifierSuite extends munit.FunSuite:
   test("the recorder hears about every uncertified edge, in CFG order"):
     // A recorder is an observer by design, so a test one must keep what it sees.
     final class Heard extends Recorder:
-      val edges = java.util.concurrent.ConcurrentLinkedQueue[Transition]()
+      val edges: ConcurrentLinkedQueue[Transition] = java.util.concurrent.ConcurrentLinkedQueue[Transition]()
       def transferred(t: Transition, post: Any, contribution: Any): Unit = ()
       def updated(loc: Loc, state: Any, widened: Boolean): Unit = ()
       def unexplored(t: Transition): Unit = ()
