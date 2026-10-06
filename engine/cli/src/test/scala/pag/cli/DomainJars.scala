@@ -7,13 +7,28 @@ import javax.tools.ToolProvider
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
-/** Builds domain jars for tests: Java sources compiled against `api.jar` alone,
+/** Builds domain jars for tests: Java sources compiled against pag.api alone,
   * as the Gradle template does (§3), then packed with `java.util.jar`.
   */
 object DomainJars:
 
-  val apiJar: Path = Paths.get(sys.props("pag.apiJar"))
-  val repoRoot: Path = Paths.get(sys.props("pag.repoRoot"))
+  /** pag.api's classes: the jar sbt packages (`-Dpag.apiJar`, build.sbt), or,
+    * under a runner that does not pass it such as IntelliJ, wherever this JVM
+    * loaded `pag.api.Domain` from — `engine/api/target/classes`. Either serves as
+    * a classpath.
+    */
+  val apiPath: Path = Option(sys.props("pag.apiJar")).map(Paths.get(_)).getOrElse(
+    Paths.get(classOf[pag.api.Domain[?]].getProtectionDomain.getCodeSource.getLocation.toURI))
+
+  /** The repository: `-Dpag.repoRoot` from sbt, or else the nearest directory
+    * above the working directory holding both build.sbt and domains/.
+    */
+  val repoRoot: Path = Option(sys.props("pag.repoRoot")).map(Paths.get(_)).getOrElse {
+    val start = Paths.get("").toAbsolutePath
+    Iterator.iterate(start)(_.getParent).takeWhile(_ != null)
+      .find(d => Files.exists(d.resolve("build.sbt")) && Files.isDirectory(d.resolve("domains")))
+      .getOrElse(sys.error(s"no repository root (build.sbt and domains/) at or above $start; set -Dpag.repoRoot"))
+  }
 
   /** The reference interval domain's sources, from the repository. */
   def intervalSources: Map[String, String] =
@@ -35,7 +50,7 @@ object DomainJars:
       }
       val classes = dir.resolve("classes"); Files.createDirectories(classes)
       val javac = ToolProvider.getSystemJavaCompiler
-      val args = List("--release", "21", "-classpath", apiJar.toString, "-d", classes.toString) ++ files.map(_.toString)
+      val args = List("--release", "21", "-classpath", apiPath.toString, "-d", classes.toString) ++ files.map(_.toString)
       val errors = java.io.ByteArrayOutputStream()
       require(javac.run(null, null, errors, args*) == 0, s"javac failed:\n$errors")
       Using.resource(JarOutputStream(Files.newOutputStream(jar))) { out =>
@@ -51,12 +66,20 @@ object DomainJars:
       Using.resource(Files.walk(dir))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
       Files.deleteIfExists(jar)
 
-  /** The class files of `pag.api`, read from api.jar, for a jar that bundles its own copy. */
+  /** The class files of `pag.api`, from the jar or the classes directory, for a jar that bundles its own copy. */
   def apiClasses: Map[String, Array[Byte]] =
-    Using.resource(java.util.jar.JarFile(apiJar.toFile)) { j =>
-      j.entries.asScala.filter(e => e.getName.startsWith("pag/api/") && e.getName.endsWith(".class"))
-        .map(e => e.getName -> j.getInputStream(e).readAllBytes()).toMap
-    }
+    def isApiClass(name: String) = name.startsWith("pag/api/") && name.endsWith(".class")
+    if Files.isDirectory(apiPath) then
+      Using.resource(Files.walk(apiPath)) { files =>
+        files.iterator.asScala.filter(Files.isRegularFile(_))
+          .map(f => apiPath.relativize(f).toString.replace(File.separatorChar, '/') -> f)
+          .collect { case (name, f) if isApiClass(name) => name -> Files.readAllBytes(f) }.toMap
+      }
+    else
+      Using.resource(java.util.jar.JarFile(apiPath.toFile)) { j =>
+        j.entries.asScala.filter(e => isApiClass(e.getName))
+          .map(e => e.getName -> j.getInputStream(e).readAllBytes()).toMap
+      }
 
   /** A minimal domain over `Object`, with `body` spliced into the class and the
     * bodies of `isBottom` and `transfer` replaceable.

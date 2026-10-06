@@ -1340,8 +1340,19 @@ one.
 A reaching run is concrete and self-contained:
 
 ```scala
-final case class ReachingRun(source: Path, classes: Path, inputs: List[BigInt], query: Reachable)
+// a CheckResult (§13) whose outcome is Unsound: the classes, inputs and query that reached the target
+final case class CheckResult(envelope, query: Reachable, classes: String, inputs: List[BigInt],
+                             analysis: AnalysisSummary, run: RunSummary, outcome: Outcome)
 ```
+
+`pag` is given only the compiled classes, never the `.java` file, so the
+reaching run it reports names the classes directory. Whoever compiled the probe
+— the campaign driver — adds the source when it records the rejection as
+`rejections/<r>/Probe.java` beside `run.json` (§3). Replay is then two steps,
+`javac` and `pag check`. Having `pag check --source` compile the probe itself,
+tying source and classes together and making replay one command, is the
+planned extension once replay is needed (Phase 8's calibration).
+*Decided — Shawn, 2026-10-05.*
 
 The analysis refutes "reachable on *any* input," so a reaching run names the
 specific inputs `Rand.randInt` returns on the way there (§5.6). Verdict: run it; if `REACHED-<id>` appears on
@@ -1465,8 +1476,10 @@ default to 10,000 iterations and 60s (§7).
 scans the jar for it; zero or several such classes is exit code 1. Nothing
 else in the jar names the class, so a generated domain has no extra file to
 forget. If domains later need configuration, only this rule changes.
-*Decided — Shawn, 2026-10-01.* `--json` works on all of
-them; human-readable text is the default. `--config <file>` supplies domains and
+*Decided — Shawn, 2026-10-01.* `--json` prints a record instead of text;
+human-readable text is the default. `check --json` prints a `CheckResult` (§13)
+and nothing else on stdout, with the same exit codes; the other commands gain
+`--json` as the driver needs them. `--config <file>` supplies domains and
 limits in bulk instead of flags, for campaign use.
 
 One later subcommand, `score` (proof count over the scoring corpus), once there
@@ -1731,9 +1744,21 @@ thirty files with **27 `RW.merge` sites enumerating sum types by hand**:
 - **Derive sums, never enumerate them.** Scala 3's `Mirror` derivation covers
   sealed hierarchies, so adding a case cannot silently break a codec.
 
-Every record carries a versioned envelope — engine version, api version, profile
-name, campaign id — which is the actual compatibility need and is independent of
-format.
+Every record carries a versioned envelope, which is the actual compatibility
+need and is independent of format. Since git is the storage, the commit
+identifies the engine, the api and the reference domains together:
+`Envelope(commit, dirty, profile)`. `dirty` records uncommitted changes at build
+time, when the commit alone does not identify the code. Both come from a small
+generator in `build.sbt` that runs `git rev-parse HEAD` and `git status
+--porcelain` and stops the build if either fails or the commit does not look
+like one. A campaign id joins when the driver exists. *Decided — Shawn,
+2026-10-05.*
+
+**What is in place.** Borer 1.18.0 with `MapBasedCodecs` derivation, all codecs
+in `pag.results.Codecs`, and `Wire.encode`/`decode` taking a `Format` (JSON or
+CBOR; only JSON is used). `Option` encodes as `null` or the bare value
+(`NullOptions`) so records read naturally; decoding is strict, so a missing
+field is an error rather than a default.
 
 **One gotcha.** The IR is Scala (§5.1), but the domain vocabulary in
 `engine/api` is Java records and sealed interfaces, which Scala 3 derivation does

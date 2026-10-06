@@ -1,6 +1,7 @@
 package pag.cli
 
 import java.io.PrintStream
+import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
 
@@ -9,7 +10,8 @@ import scala.concurrent.duration.Duration
 import pag.core.{Analysis, AnalysisResult, Limits, Lifting, Lowering, Profile, ProfileCheck, QueryResolver}
 import pag.harness.{Check, Ended, IrInterpreter, JvmRun}
 import pag.ir.{IrProvider, Loc, Program, Untranslatable}
-import pag.results.{Incomplete, Outcome, Reachable, Verdict}
+import pag.results.{Incomplete, Outcome, Reachable, Verdict, Wire}
+import pag.results.Codecs.given
 import scopt.{OEffect, OParser}
 
 /** The `pag` entry point (implementation_strategy.md §11). Exit codes: 0 done,
@@ -32,7 +34,8 @@ object Main:
       domain: Option[Path] = None,
       reach: Option[Int] = None,
       limits: Limits = Limits(),
-      all: Boolean = false
+      all: Boolean = false,
+      json: Boolean = false
   )
 
   private val parser: OParser[Unit, Config] =
@@ -87,7 +90,8 @@ object Main:
       cmd("check")
         .action((_, c) => c.copy(command = Some("check")))
         .text("analyze, then run the program on the JVM with the given inputs; exit 3 if a refutation is contradicted")
-        .children(analysisOptions :+ inputsOption *),
+        .children(analysisOptions ++ List(inputsOption, opt[Unit]("json").action((_, c) => c.copy(json = true))
+          .text("print the result as JSON (a CheckResult, §13) instead of text")) *),
       checkConfig(c => if c.command.isEmpty then failure("no command given") else success)
     )
 
@@ -231,7 +235,10 @@ object Main:
       val run = JvmRun.run(c.classes.get, mainClass, inputs)
       val runMs = System.currentTimeMillis() - started
       val outcome = Check.judge(a.result.verdict, run.reached, a.query)
-      CheckReport.lines(c.classes.get, a.query, a.result, inputs, run, runMs, outcome).foreach(out.println)
+      if c.json then
+        val record = CheckRecord(c.classes.get, a.query, a.result, inputs, run, runMs, outcome)
+        out.println(String(Wire.encode(record), UTF_8))
+      else CheckReport.lines(c.classes.get, a.query, a.result, inputs, run, runMs, outcome).foreach(out.println)
       outcome match
         case Outcome.Unsound    => 3
         case Outcome.Consistent => 0

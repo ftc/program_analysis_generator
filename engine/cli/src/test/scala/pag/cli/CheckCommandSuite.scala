@@ -1,6 +1,10 @@
 package pag.cli
 
+import java.nio.charset.StandardCharsets.UTF_8
+
 import pag.cli.DomainJars.*
+import pag.results.{CheckResult, Incomplete, Outcome, Reachable, Verdict, Wire}
+import pag.results.Codecs.given
 
 /** `pag check` end to end (implementation_strategy.md §9, §11): analyze, then the
   * JVM run, then the judgment, with its exit codes. AnalyzeRefute's target is
@@ -63,6 +67,31 @@ class CheckCommandSuite extends munit.FunSuite:
     val r = check("AnalyzeAlarm", refutesAllStub, "--reach", "1")
     assertEquals(r.exit, 0)
     assert(r.out.contains("inputs [] ·") && r.out.contains("· exit 1"), r.out)
+
+  // --- --json (implementation_strategy.md §13)
+
+  def decoded(r: Pag.Result): CheckResult =
+    Wire.decode[CheckResult](r.out.getBytes(UTF_8)).fold(e => fail(s"$e\n${r.out}"), identity)
+
+  test("--json prints only the CheckResult, which decodes and says what the text says") {
+    val r = check("AnalyzeAlarm", refutesAllStub, "--reach", "1", "--inputs", "5", "--json")
+    assertEquals(r.exit, 3, "the exit codes do not change")
+    assertEquals(r.out.linesIterator.size, 1, r.out)
+    val c = decoded(r)
+    assertEquals((c.query, c.inputs, c.outcome), (Reachable(1), List(BigInt(5)), Outcome.Unsound))
+    assertEquals((c.analysis.verdict, c.run.reached, c.run.exitCode), (Verdict.Refuted, List(BigInt(1)), 0))
+    assertEquals(c.envelope.profile, "bigint-main-v1")
+    assert(c.envelope.commit.matches("[0-9a-f]{40}"), c.envelope.commit)
+  }
+
+  test("--json on a domain failure carries the error as data"):
+    val c = decoded(check("AnalyzeAlarm", throwingStub, "--reach", "1", "--inputs", "5", "--json"))
+    c.analysis.verdict match
+      case Verdict.Inconclusive(Incomplete.DomainFailure("transfer", e)) =>
+        assertEquals((e.className, e.message), ("java.lang.IllegalStateException", Some("boom")))
+        assert(e.stackTrace.contains("at stub.Throws.transfer"), e.stackTrace)
+      case other => fail(s"got $other")
+    assertEquals((c.analysis.edges, c.analysis.uncertified), (None, None), "the certifier did not run")
 
   test("malformed inputs are a usage error, exit 1"):
     val r = check("AnalyzeAlarm", intervalSources, "--reach", "1", "--inputs", "five")

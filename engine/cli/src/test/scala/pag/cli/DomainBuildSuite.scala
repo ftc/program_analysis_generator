@@ -1,9 +1,11 @@
 package pag.cli
 
-import java.nio.file.{Files, Path, Paths}
+import java.nio.file.{Files, Path}
 import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
+
+import pag.cli.DomainJars.{apiPath, repoRoot}
 
 /** The reference domain, built and tested through the Gradle build template
   * (implementation_strategy.md §3, "How domains are built"; Phase 3), so that
@@ -13,14 +15,12 @@ class DomainBuildSuite extends munit.FunSuite:
 
   override val munitTimeout: FiniteDuration = scala.concurrent.duration.Duration(10, "min") // the first run downloads Gradle and JUnit
 
-  val repoRoot: Path = Paths.get(sys.props("pag.repoRoot"))
-  val apiJar: Path = Paths.get(sys.props("pag.apiJar"))
   val template: Path = repoRoot.resolve("domains/build-template")
   val interval: Path = repoRoot.resolve("domains/ref-interval")
 
   test("the template builds the reference domain against the api jar alone, and its tests pass"):
     val command = List(template.resolve("gradlew").toString, "-p", template.toString,
-      s"-PdomainDir=$interval", s"-PapiJar=$apiJar", "clean", "build")
+      s"-PdomainDir=$interval", s"-PapiJar=$apiPath", "clean", "build")
     val log = Files.createTempFile("gradle-build", ".txt")
     try
       val process = ProcessBuilder(command.asJava).redirectErrorStream(true).redirectOutput(log.toFile).start()

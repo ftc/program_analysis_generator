@@ -204,6 +204,15 @@ checked, which failed `[edge-inductive]`, and whether `[inductive]` and
 `[refute]` held. Only all three passing is `Refuted` (plan §7). Absent from an
 `AnalysisResult` whose search stopped early or whose domain failed.
 
+**`CheckResult`** — one reachability check as data (plan §9, §13): envelope,
+query, classes directory, inputs, an analysis summary (verdict and costs, no
+map), the JVM run's markers and ending, and the `Outcome`. What `pag check
+--json` prints; with outcome `Unsound`, it is the reaching run the driver
+records.
+
+**Envelope** — the provenance every record carries: the commit `pag` was built
+from, whether the tree was dirty then, and the profile (plan §13).
+
 **`Computed`** — the compute stage's result: the invariant map, how the search
 stopped (`None` when the worklist emptied, else one `Incomplete`), and its cost.
 Not a verdict: only the certifier turns it into one (plan §7).
@@ -314,7 +323,9 @@ running a program. `pag check` performs it.
 
 **`ReachingRun`** — a program, its inputs, and the location it gets to, where
 the domain proved that location unreachable. **The only artifact in this project
-that proves anything.** Formerly called a witness.
+that proves anything.** Formerly called a witness. Not its own type: it is a
+`CheckResult` whose outcome is `Unsound`, plus the probe's source, which the
+driver adds (plan §9).
 
 
 **Marker** — the `REACHED-<id>` string `reach(id)` prints. Presence on stdout is
