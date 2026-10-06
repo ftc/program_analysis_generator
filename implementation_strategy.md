@@ -1020,7 +1020,9 @@ a convenience layer over `Reachable` rather than additional power. `Query` stays
 a sealed trait with one case, which is the whole concession made to that
 future.
 
-Resolution looks up the one `reach(id)` call in the lowered `Cfg`, and seeds
+Resolution (`QueryResolver.resolve` in `core`; *Decided — Shawn, 2026-10-05*,
+since `Query` itself lives in `engine/results`, §13) looks up the one
+`reach(id)` call in the lowered `Cfg`, and seeds
 `I(pre) = ⊤` there and `⊥` everywhere else. The query's abstract state is `⊤`
 — Historia uses `State.topState` — which is what keeps `[inductive]` in §7
 trivial.

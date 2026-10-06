@@ -87,6 +87,15 @@ that reason goes in a comment beside it. Watch for mutation hidden by syntax:
 converted as its own refactoring change (rule 4), not in passing.
 *Decided — Shawn, 2026-10-05.*
 
+## Public members carry explicit types
+
+In Scala, every public `def`, `val` and `given` — in classes, objects and
+traits, test code included, and overrides in anonymous classes — states its
+type: `def join(a: Flag, b: Flag): Flag`, not `def join(a: Flag, b: Flag)`.
+Local `val`s inside a method body may leave it inferred. This keeps IntelliJ's
+inspections quiet and makes a signature readable without its body.
+*Decided — Shawn, 2026-10-05.*
+
 ## Inform the user if their terminology is inconsistent
 
 The file `glossary.md` contains the current meanings of all non-standard vocabulary used in this project. If the user uses some of this vocabulary in a way that does not appear to be consistent, ask for clarification.
