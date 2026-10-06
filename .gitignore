@@ -16,3 +16,6 @@ project/project/
 # Gradle: the template's own cache, and each domain's build output
 domains/build-template/.gradle/
 domains/*/build/
+
+# demo_scripts build output
+demo_scripts/out/
