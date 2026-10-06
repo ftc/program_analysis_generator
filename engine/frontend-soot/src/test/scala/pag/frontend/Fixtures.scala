@@ -18,13 +18,23 @@ object Fixtures:
     * throws. Whatever `use` returns must not refer to the files.
     */
   def withCompiled[A](name: String)(use: Path => A): A =
+    withTempDir("fixture-src") { srcDir =>
+      val src = srcDir.resolve(s"$name.java")
+      Files.writeString(src, source(name))
+      withCompiledSource(src)(use)
+    }
+
+  /** The text of `/fixtures/<name>.java`. */
+  def source(name: String): String =
+    val in = getClass.getResourceAsStream(s"/fixtures/$name.java")
+    try String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8) finally in.close()
+
+  /** Compiles a probe source file the same way, for sources not in the test
+    * resources (a recorded rejection being replayed, say).
+    */
+  def withCompiledSource[A](src: Path)(use: Path => A): A =
     withTempDir("fixture-classes") { out =>
-      withTempDir("fixture-src") { srcDir =>
-        val src = srcDir.resolve(s"$name.java")
-        val in = getClass.getResourceAsStream(s"/fixtures/$name.java")
-        try Files.copy(in, src) finally in.close()
-        javac(src, out, name)
-      }
+      javac(src, out, src.getFileName.toString)
       use(out)
     }
 

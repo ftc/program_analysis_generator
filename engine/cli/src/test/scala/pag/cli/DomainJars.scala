@@ -30,13 +30,16 @@ object DomainJars:
       .getOrElse(sys.error(s"no repository root (build.sbt and domains/) at or above $start; set -Dpag.repoRoot"))
   }
 
-  /** The reference interval domain's sources, from the repository. */
-  def intervalSources: Map[String, String] =
-    val src = repoRoot.resolve("domains/ref-interval/src")
+  /** A domain's sources from the repository, `domains/<id>/src`, path → text. */
+  def domainSources(id: String): Map[String, String] =
+    val src = repoRoot.resolve(s"domains/$id/src")
     Using.resource(Files.walk(src)) { files =>
       files.iterator.asScala.filter(_.toString.endsWith(".java"))
         .map(p => src.relativize(p).toString -> Files.readString(p)).toMap
     }
+
+  /** The reference interval domain's sources. */
+  def intervalSources: Map[String, String] = domainSources("ref-interval")
 
   /** A jar of `sources` (path → Java source), plus `extra` files copied in verbatim
     * (path in jar → bytes), handed to `body` and deleted afterwards.

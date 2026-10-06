@@ -1,0 +1,11 @@
+{
+  "id": "mut-add-off-by-one",
+  "status": "mutant",
+  "origin": "hand-written",
+  "profile": "bigint-main-v1",
+  "plantedBug": {
+    "what": "backward transfer through addition narrows the left operand's upper end one too low, so y := x + 1 with y = 10 gives x in [9,8], bottom, instead of [9,9]",
+    "where": "src/pag/domains/mut/addoffbyone/IntervalDomain.java, restrict, the BinOp.Add case (marked PLANTED BUG)",
+    "copiedFrom": "ref-interval"
+  }
+}

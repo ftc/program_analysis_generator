@@ -1,0 +1,3 @@
+# The mutant corpus (implementation_strategy.md §3): one domain id per line,
+# every domain whose status is mutant or rejected.
+mut-add-off-by-one

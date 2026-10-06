@@ -306,7 +306,9 @@ the system requires.
 
 **Mutant** — a domain known to be unsound, used to calibrate the adversary:
 either hand-written with a planted bug, or a generated domain the adversary
-rejected.
+rejected. Hand-written mutants live in `domains/mut-<name>/`, with `domain.json`
+naming the bug under `plantedBug` and the code marking it `// PLANTED BUG`;
+`corpora/mutants.txt` lists them. The first is `mut-add-off-by-one`.
 
 **Smoke test** — checks at domain load that every construct the active profile
 enables is handled, so failures surface at load rather than mid-run.

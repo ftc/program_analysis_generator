@@ -131,7 +131,7 @@ domains/                   every domain worth keeping, one directory each
   mut-<name>/              a hand-written mutant; domain.json names its bug
   gen-<nnnn>/              a generated domain
     rejections/<r>/        one per reaching run that rejected it
-      Probe.java           the program
+      <Class>.java         the probe's source, under its class's name (Java requires it)
       run.json             everything needed to replay it (below)
 campaign/                  the outer loop. Separate codebase, drives pag by
                            subprocess; never linked against the engine (§12)
@@ -1957,6 +1957,33 @@ test the certifier, not the adversary, and are kept as `core` tests: a
 `entails`, `isBottom` and `top` — the operations the certifier trusts — count
 toward a kill rate.
 
+**The first mutant** is `mut-add-off-by-one` (Phase 5): backward transfer
+through addition narrows the left operand's upper end one too low. It plants
+the README's narrowing bug in addition rather than in a copy, because Soot's
+copy propagation removes `y = x` before the IR sees it, so no probe can
+exercise a copy. A test checks that it differs from `ref-interval` only by its
+name, header and the one marked `// PLANTED BUG`.
+
+**The adversary sees nothing that identifies a mutant as a mutant** — not in the
+source, not in names, not in `pag`'s output. The first mutant leaks in four
+places: its header comment, the `// PLANTED BUG` marker, its package
+(`pag.domains.mut.addoffbyone`), and `name()`, which `pag analyze` and `check`
+print. Harmless while a human writes the counterexamples (Phase 5); fixed
+before any model is shown a mutant. *Decided — Shawn, 2026-10-06:*
+
+- **A mutant is stored as its reference plus a patch.** `domains/mut-<name>/`
+  holds `domain.json` and `bug.patch`, not a copy; the build applies the patch
+  to the reference's source and gives the result an opaque package and
+  `name()`, as a generated domain would have.
+- **The patch is the bug's description.** It names exactly what changed, so
+  `domain.json` points at it instead of restating it, and integrity is checked
+  by construction — the mutant is the reference plus that diff — replacing the
+  marker-counting test.
+- **The adversary is shown the patched source only**, never the patch,
+  `domain.json`, or the directory name.
+
+This also settles §16 item 23 for mutants: no copies to drift.
+
 **Calibrate on rejected domains too.** Hand-written mutants are small edits
 that an adversary reading the source may spot by pattern, so they can overstate
 its strength against real bugs. Every domain the adversary rejects is a
@@ -2160,3 +2187,13 @@ framework, library, or the OS.
     rests on it. A proof — likely short, over the lowered `Cfg`'s semantics —
     would turn the trust-base split in §2 and `misc.md` §8 into a theorem.
     *Decided — Shawn, 2026-10-05:* worth doing, not now.
+23. **Domain storage.** A mutant is a full copy of the domain it mutates
+    (`mut-add-off-by-one` is `ref-interval` with one planted change), and every
+    generated domain is a full directory. That is right for reviewing one domain
+    but will not scale: copies drift, and a corpus of hundreds of near-identical
+    directories is hard to read. Options when it hurts: store mutants as a
+    reference plus a patch, applied at build time; or move domains out of git
+    into the SQLite store §3 anticipates. *Decided — Shawn, 2026-10-05:* full
+    copies for now; revisit before the corpus grows. For mutants, settled:
+    reference plus patch, before the adversary sees one (Phase 8; *Decided —
+    Shawn, 2026-10-06*). Generated domains remain full directories.
