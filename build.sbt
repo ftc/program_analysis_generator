@@ -1,4 +1,4 @@
-ThisBuild / scalaVersion := "3.3.6" // Scala 3 LTS
+ThisBuild / scalaVersion := "3.3.8" // Scala 3 LTS
 ThisBuild / organization := "com.example"
 ThisBuild / version      := "0.1.0-SNAPSHOT"
 

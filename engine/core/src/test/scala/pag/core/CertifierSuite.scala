@@ -9,7 +9,7 @@ import pag.core.TestDomains.*
   */
 class CertifierSuite extends munit.FunSuite:
 
-  import Flag.{Maybe, No}
+  import Flag.Maybe
 
   // 0 —skip→ 1 —x := 1→ 2 —assume(1 < 2)→ 3, the target: reachable
   val reachable: Cfg = cfg(skip(0, 1), assign(1, 2), guardEdge(2, 1, BinOp.Lt, 2, 3))

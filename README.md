@@ -503,7 +503,7 @@ Two triggers, either of which would bring it back:
   probe based on observed states would keep working when a probe based on
   constructed executions stops.
 
-Scala 3 (LTS 3.3.6) project built with sbt 1.11.7.
+Scala 3 (LTS 3.3.8) project built with sbt 1.11.7.
 
 ## Layout
 
@@ -577,7 +577,7 @@ cd program_analysis_generator
 sbt test
 ```
 
-The first run downloads sbt, the Scala 3.3.6 compiler, MUnit, JUnit and Soot
+The first run downloads sbt, the Scala 3.3.8 compiler, MUnit, JUnit and Soot
 into `~/.cache/coursier` (`~/Library/Caches/Coursier` on macOS) and takes a few
 minutes. One of Soot's dependencies comes from Google's Maven repository
 (`maven.google.com`) rather than Maven Central. Later builds start in seconds.
