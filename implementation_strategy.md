@@ -1345,6 +1345,21 @@ The analysis refutes "reachable on *any* input," so a reaching run names the
 specific inputs `Rand.randInt` returns on the way there (§5.6). Verdict: run it; if `REACHED-<id>` appears on
 stdout, the domain is unsound.
 
+**The judgment** (`harness`'s `Check.judge`, trust base). `pag check` runs the
+JVM whatever the verdict — an adversary wants to know whether its probe reaches
+the target either way, and a reached `Alarm` confirms the alarm is real.
+*Decided — Shawn, 2026-10-05.* Only the queried id counts, and a marker printed
+before a timeout or a crash still counts:
+
+| verdict | `REACHED-<id>` printed | outcome | exit |
+| --- | --- | --- | --- |
+| `Refuted` | yes | **unsound** | 3 |
+| `Refuted` | no | consistent | 0 |
+| `Alarm` | yes | consistent — the alarm is real | 0 |
+| `Alarm` | no | consistent | 0 |
+| `Inconclusive` (a limit) | either | no verdict | 4 |
+| `Inconclusive` (`DomainFailure`) | either | no verdict | 5 |
+
 Because §5.5 reads the IR from a class file and the marker is the program's own
 `reach` call (§5.8), the artifact analysed and the artifact executed are the
 same class file, byte for byte. There is no translation and no rewriting
@@ -1559,10 +1574,10 @@ $ pag check --domain domains/gen-0004/build/libs/gen-0004.jar \
             --classes probes/c08/out --reach 1 --inputs 5
 
 analysis    REFUTED            9 iterations · 3ms
-execution   REACHED-1          inputs [5] · 12ms
+execution   REACHED-1          inputs [5] · 412ms
 
 UNSOUND — the domain refuted reach(1), but the program reaches it
-reaching run   probes/c08/Probe.java  inputs [5]
+reaching run   probes/c08/out  inputs [5]
 ```
 
 ### Exit codes are the agent-facing contract

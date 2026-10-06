@@ -8,7 +8,7 @@ import scala.concurrent.duration.Duration
 
 import pag.core.{Analysis, AnalysisResult, Incomplete, Limits, Lifting, Lowering, Profile, ProfileCheck, Query,
   Reachable, Verdict}
-import pag.harness.{Ended, IrInterpreter}
+import pag.harness.{Check, Ended, IrInterpreter, JvmRun, Outcome}
 import pag.ir.{IrProvider, Loc, Program, Untranslatable}
 import scopt.{OEffect, OParser}
 
@@ -38,6 +38,25 @@ object Main:
   private val parser: OParser[Unit, Config] =
     val b = OParser.builder[Config]
     import b.*
+    // defs, not vals: each command gets its own option instances
+    def inputsOption = opt[String]("inputs").valueName("3,-7").action((s, c) => c.copy(inputs = s))
+      .text("the values randInt returns, in order (§5.6)")
+    def analysisOptions = List(
+      opt[Path]("domain").required().valueName("<jar>").action((p, c) => c.copy(domain = Some(p)))
+        .text("the domain jar: exactly one class implementing pag.api.Domain"),
+      opt[Path]("classes").required().valueName("<dir>").action((p, c) => c.copy(classes = Some(p)))
+        .text("a directory holding the program's one class"),
+      opt[Int]("reach").required().valueName("ID").action((n, c) => c.copy(reach = Some(n)))
+        .text("the query: is reach(ID) reachable?"),
+      opt[Int]("iteration-limit").valueName("N")
+        .validate(n => if n > 0 then success else failure("--iteration-limit must be positive"))
+        .action((n, c) => c.copy(limits = c.limits.copy(iterations = n)))
+        .text(s"stop after N transitions (default ${Limits().iterations})"),
+      opt[Duration]("deadline").valueName("60s")
+        .validate(d => if d.isFinite && d.toMillis > 0 then success else failure("--deadline must be positive"))
+        .action((d, c) => c.copy(limits = c.limits.copy(deadlineMs = d.toMillis)))
+        .text(s"stop after this long (default ${Limits().deadlineMs / 1000}s)")
+    )
     OParser.sequence(
       programName("pag"),
       cmd("ir")
@@ -55,8 +74,7 @@ object Main:
         .text("run a directory's one class on the IR interpreter, reporting the reach ids it passes")
         .children(
           arg[Path]("<classes-dir>").required().action((p, c) => c.copy(classes = Some(p))),
-          opt[String]("inputs").valueName("3,-7").action((s, c) => c.copy(inputs = s))
-            .text("the values randInt returns, in order (§5.6)"),
+          inputsOption,
           opt[Unit]("trace").action((_, c) => c.copy(trace = true)).text("also print every location visited"),
           opt[Int]("step-limit").action((n, c) => c.copy(stepLimit = n))
             .text(s"stop after this many transitions (default ${IrInterpreter.DefaultStepLimit})")
@@ -64,24 +82,12 @@ object Main:
       cmd("analyze")
         .action((_, c) => c.copy(command = Some("analyze")))
         .text("analyze a reach query with a domain, printing the verdict and the invariant map")
-        .children(
-          opt[Path]("domain").required().valueName("<jar>").action((p, c) => c.copy(domain = Some(p)))
-            .text("the domain jar: exactly one class implementing pag.api.Domain"),
-          opt[Path]("classes").required().valueName("<dir>").action((p, c) => c.copy(classes = Some(p)))
-            .text("a directory holding the program's one class"),
-          opt[Int]("reach").required().valueName("ID").action((n, c) => c.copy(reach = Some(n)))
-            .text("the query: is reach(ID) reachable?"),
-          opt[Int]("iteration-limit").valueName("N")
-            .validate(n => if n > 0 then success else failure("--iteration-limit must be positive"))
-            .action((n, c) => c.copy(limits = c.limits.copy(iterations = n)))
-            .text(s"stop after N transitions (default ${Limits().iterations})"),
-          opt[Duration]("deadline").valueName("60s")
-            .validate(d => if d.isFinite && d.toMillis > 0 then success else failure("--deadline must be positive"))
-            .action((d, c) => c.copy(limits = c.limits.copy(deadlineMs = d.toMillis)))
-            .text(s"stop after this long (default ${Limits().deadlineMs / 1000}s)"),
-          opt[Unit]("all").action((_, c) => c.copy(all = true))
-            .text("print every location, post locations and nops included")
-        ),
+        .children((analysisOptions :+ opt[Unit]("all").action((_, c) => c.copy(all = true))
+          .text("print every location, post locations and nops included"))*),
+      cmd("check")
+        .action((_, c) => c.copy(command = Some("check")))
+        .text("analyze, then run the program on the JVM with the given inputs; exit 3 if a refutation is contradicted")
+        .children((analysisOptions :+ inputsOption)*),
       checkConfig(c => if c.command.isEmpty then failure("no command given") else success)
     )
 
@@ -104,6 +110,7 @@ object Main:
         case Some(c) if c.command.contains("ir") && c.classes.nonEmpty      => ir(c, out, err)
         case Some(c) if c.command.contains("run") && c.classes.nonEmpty     => runProbe(c, out, err)
         case Some(c) if c.command.contains("analyze") && c.classes.nonEmpty => analyze(c, out, err)
+        case Some(c) if c.command.contains("check") && c.classes.nonEmpty   => check(c, out, err)
         case _ => 1 // scopt's effects above already reported the error and the usage
     }
 
@@ -176,11 +183,12 @@ object Main:
         case e: Untranslatable           => err.println(s"pag: ${e.getMessage}"); 2
         case e: IllegalArgumentException => err.println(s"pag: ${e.getMessage}"); 1
 
-  /** Load, check, lift and lower the program; load the domain; analyze (§7) and
-    * print the result (§11). Always checked and lifted: there is no --no-enforce.
+  /** Everything `analyze` and `check` share: load, check, lift and lower the
+    * program; load the domain; analyze (§7). Always checked and lifted: there is
+    * no --no-enforce. `before` is as for `withProgram`.
     */
-  private def analyze(c: Config, out: PrintStream, err: PrintStream): Int =
-    withProgram(c.classes.get, enforce = true, err)(()) { (program, _) =>
+  private def withAnalysis[A](c: Config, err: PrintStream)(before: => A)(body: (Analyzed, A) => Int): Int =
+    withProgram(c.classes.get, enforce = true, err)(before) { (program, prepared) =>
       val lifted = Lifting.lift(program, Lifting.Mode.Strict)
       val lowered = Lowering.lower(lifted)
       val query = Reachable(c.reach.get)
@@ -191,14 +199,52 @@ object Main:
             case Left(message) => err.println(s"pag: $message"); 1
             case Right(result) =>
               val targets = Query.resolve(query, lowered).getOrElse(Set.empty) // resolved above; for display
-              AnalyzeReport.lines(c.classes.get, lifted, lowered, domainName(d), query, targets, result, c.all)
-                .foreach(out.println)
-              result.verdict match
-                case Verdict.Inconclusive(Incomplete.DomainFailure(op, e)) =>
-                  e.printStackTrace(err); 5
-                case Verdict.Inconclusive(_) => 4
-                case Verdict.Refuted | Verdict.Alarm => 0
+              body(Analyzed(lifted, lowered, domainName(d), query, targets, result), prepared)
     }
+
+  /** One analysis and what it was run on. */
+  private final case class Analyzed(
+      program: Program,
+      lowered: pag.core.Lowered,
+      domain: String,
+      query: Reachable,
+      targets: Set[Loc],
+      result: AnalysisResult[?]
+  )
+
+  /** Print the invariant map and the verdict (§11). */
+  private def analyze(c: Config, out: PrintStream, err: PrintStream): Int =
+    withAnalysis(c, err)(()) { (a, _) =>
+      AnalyzeReport.lines(c.classes.get, a.program, a.lowered, a.domain, a.query, a.targets, a.result, c.all)
+        .foreach(out.println)
+      verdictExit(a.result, err)
+    }
+
+  /** The reachability check (§9): analyze, then run the class file on the JVM with
+    * the given inputs, whatever the verdict, and judge.
+    */
+  private def check(c: Config, out: PrintStream, err: PrintStream): Int =
+    withAnalysis(c, err)(pag.probe.Inputs.parse(c.inputs)) { (a, parsed) =>
+      val inputs = parsed.values.asScala.toList.map(BigInt(_))
+      val mainClass = a.program.entryMethod.declaringClass
+      val started = System.currentTimeMillis()
+      val run = JvmRun.run(c.classes.get, mainClass, inputs)
+      val runMs = System.currentTimeMillis() - started
+      val outcome = Check.judge(a.result.verdict, run.reached, a.query)
+      CheckReport.lines(c.classes.get, a.query, a.result, inputs, run, runMs, outcome).foreach(out.println)
+      outcome match
+        case Outcome.Unsound    => 3
+        case Outcome.Consistent => 0
+        case Outcome.NoVerdict(_) => verdictExit(a.result, err)
+    }
+
+  /** 0 for a verdict, 4 for a limit, 5 for a domain failure with its stack trace on stderr. */
+  private def verdictExit(r: AnalysisResult[?], err: PrintStream): Int = r.verdict match
+    case Verdict.Inconclusive(Incomplete.DomainFailure(_, e)) =>
+      e.printStackTrace(err)
+      5
+    case Verdict.Inconclusive(_)                              => 4
+    case Verdict.Refuted | Verdict.Alarm                      => 0
 
   /** `name()` is a domain call too; printing must not let it take pag down. */
   private def domainName(d: pag.api.Domain[?]): String =
