@@ -1,8 +1,6 @@
 package pag.cli
 
-import java.io.{ByteArrayOutputStream, PrintStream}
-import java.nio.charset.StandardCharsets.UTF_8
-
+import pag.cli.Pag.{Result, golden}
 import pag.frontend.Fixtures
 
 /** `pag ir` end to end: front end through ServiceLoader, profile check,
@@ -10,20 +8,8 @@ import pag.frontend.Fixtures
   */
 class IrCommandSuite extends munit.FunSuite:
 
-  final case class Result(exit: Int, out: String, err: String)
-
-  def pag(args: String*): Result =
-    val out = ByteArrayOutputStream()
-    val err = ByteArrayOutputStream()
-    val exit = Main.run(args.toList, PrintStream(out, true, UTF_8), PrintStream(err, true, UTF_8))
-    Result(exit, out.toString(UTF_8), err.toString(UTF_8))
-
   def ir(fixture: String, flags: String*): Result =
-    Fixtures.withCompiled(fixture)(dir => pag(("ir" :: dir.toString :: flags.toList)*))
-
-  def golden(name: String): String =
-    val in = getClass.getResourceAsStream(s"/golden/$name")
-    try String(in.readAllBytes(), UTF_8) finally in.close()
+    Fixtures.withCompiled(fixture)(dir => Pag(("ir" :: dir.toString :: flags.toList)*))
 
   /** Generated once and reviewed by hand against Loop.java; a change here is a
     * change in what pag shows, and needs the same review.
@@ -59,8 +45,8 @@ class IrCommandSuite extends munit.FunSuite:
     assert(r.out.linesIterator.next().contains("profile not checked"), r.out)
 
   test("usage and input errors exit 1"):
-    assertEquals(pag().exit, 1)
-    assertEquals(pag("ir").exit, 1)
+    assertEquals(Pag().exit, 1)
+    assertEquals(Pag("ir").exit, 1)
     assertEquals(ir("Loop", "--bogus").exit, 1)
-    assertEquals(pag("ir", "/no/such/dir").exit, 1)
+    assertEquals(Pag("ir", "/no/such/dir").exit, 1)
     assertEquals(ir("TwoClasses").exit, 1)

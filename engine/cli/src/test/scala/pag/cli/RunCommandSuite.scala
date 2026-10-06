@@ -1,8 +1,6 @@
 package pag.cli
 
-import java.io.{ByteArrayOutputStream, PrintStream}
-import java.nio.charset.StandardCharsets.UTF_8
-
+import pag.cli.Pag.{Result, golden}
 import pag.frontend.Fixtures
 
 /** `pag run`: the pipeline, then the IR interpreter (implementation_strategy.md
@@ -10,19 +8,8 @@ import pag.frontend.Fixtures
   */
 class RunCommandSuite extends munit.FunSuite:
 
-  final case class Result(exit: Int, out: String, err: String)
-
   def run(fixture: String, flags: String*): Result =
-    Fixtures.withCompiled(fixture) { dir =>
-      val out = ByteArrayOutputStream()
-      val err = ByteArrayOutputStream()
-      val exit = Main.run("run" :: dir.toString :: flags.toList, PrintStream(out, true, UTF_8), PrintStream(err, true, UTF_8))
-      Result(exit, out.toString(UTF_8), err.toString(UTF_8))
-    }
-
-  def golden(name: String): String =
-    val in = getClass.getResourceAsStream(s"/golden/$name")
-    try String(in.readAllBytes(), UTF_8) finally in.close()
+    Fixtures.withCompiled(fixture)(dir => Pag(("run" :: dir.toString :: flags.toList)*))
 
   /** Reviewed by hand: x = 10, so `if x != 10 goto 6` falls through to reach(1). */
   test("golden: pag run --trace on Equals, input 10"):

@@ -58,8 +58,16 @@ object DomainJars:
         .map(e => e.getName -> j.getInputStream(e).readAllBytes()).toMap
     }
 
-  /** A minimal domain over `Object`, with `body` spliced into the class. */
-  def stub(name: String, body: String = "", modifiers: String = "public"): (String, String) =
+  /** A minimal domain over `Object`, with `body` spliced into the class and the
+    * bodies of `isBottom` and `transfer` replaceable.
+    */
+  def stub(
+      name: String,
+      body: String = "",
+      modifiers: String = "public",
+      isBottom: String = """return s.equals("bottom");""",
+      transfer: String = "return post;"
+  ): (String, String) =
     s"stub/$name.java" ->
       s"""package stub;
          |import pag.api.*;
@@ -68,10 +76,17 @@ object DomainJars:
          |  public String name() { return "$name"; }
          |  public Object top() { return "top"; }
          |  public Object bottom() { return "bottom"; }
-         |  public boolean isBottom(Object s) { return s.equals("bottom"); }
+         |  public boolean isBottom(Object s) { $isBottom }
          |  public boolean entails(Object a, Object b) { return a.equals("bottom") || b.equals("top"); }
          |  public Object join(Object a, Object b) { return a.equals("top") || b.equals("top") ? "top" : "bottom"; }
          |  public Object widen(Object a, Object b) { return join(a, b); }
-         |  public Object transfer(Step step, Object post) { return post; }
+         |  public Object transfer(Step step, Object post) { $transfer }
          |}
          |""".stripMargin
+
+  /** transfer throws IllegalStateException("boom"). */
+  val throwingStub: Map[String, String] =
+    Map(stub("Throws", transfer = """throw new IllegalStateException("boom");"""))
+
+  /** Refutes every target: isBottom always answers true (misc.md §8). */
+  val refutesAllStub: Map[String, String] = Map(stub("RefutesAll", isBottom = "return true;"))

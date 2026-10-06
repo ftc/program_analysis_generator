@@ -4,7 +4,7 @@ import java.io.{ByteArrayOutputStream, PrintStream}
 import java.nio.charset.StandardCharsets.UTF_8
 
 import pag.cli.DomainJars.*
-import pag.frontend.Fixtures
+import pag.cli.Pag.{Result, golden}
 
 /** `pag analyze` end to end (implementation_strategy.md §11, Phase 4's
   * done-when): the reference interval domain, built from its sources, on probes
@@ -12,35 +12,12 @@ import pag.frontend.Fixtures
   */
 class AnalyzeCommandSuite extends munit.FunSuite:
 
-  final case class Result(exit: Int, out: String, err: String)
-
-  def pag(args: String*): Result =
-    val out = ByteArrayOutputStream()
-    val err = ByteArrayOutputStream()
-    val exit = Main.run(args.toList, PrintStream(out, true, UTF_8), PrintStream(err, true, UTF_8))
-    Result(exit, out.toString(UTF_8), err.toString(UTF_8))
-
   def analyze(fixture: String, sources: Map[String, String], flags: String*): Result =
-    withJar(sources) { jar =>
-      Fixtures.withCompiled(fixture) { dir =>
-        pag((List("analyze", "--domain", jar.toString, "--classes", dir.toString) ++ flags)*)
-      }
-    }
-
-  def golden(name: String): String =
-    val in = getClass.getResourceAsStream(s"/golden/$name")
-    try String(in.readAllBytes(), UTF_8) finally in.close()
+    Pag.withDomain("analyze", fixture, sources, flags*)
 
   /** The temp directory and the timing vary run to run. */
   def masked(out: String): String =
     out.replaceAll("(?m)^classes   \\S+", "classes   <dir>").replaceAll("\\d+ms", "<n>ms")
-
-  /** A stub domain (DomainJars.stub) whose `transfer` throws. */
-  val throwing: Map[String, String] =
-    Map(stub("Throws")).map { (k, v) =>
-      k -> v.replace("public Object transfer(Step step, Object post) { return post; }",
-        "public Object transfer(Step step, Object post) { throw new IllegalStateException(\"boom\"); }")
-    }
 
   /** Reviewed by hand against AnalyzeRefute.java: backward from reach(1), y <= -1, then x <= -2,
     * which contradicts the branch's x > 0, so everything before pre(5) is bottom. 26 locations
@@ -58,7 +35,7 @@ class AnalyzeCommandSuite extends munit.FunSuite:
     assert(r.out.trim.endsWith("ALARM — could not prove reach(1) unreachable"), r.out)
 
   test("a domain that throws in transfer: DOMAIN FAILURE, exit 5, stack trace on stderr"):
-    val r = analyze("AnalyzeRefute", throwing, "--reach", "1")
+    val r = analyze("AnalyzeRefute", throwingStub, "--reach", "1")
     assertEquals(r.exit, 5)
     assert(r.out.trim.endsWith("DOMAIN FAILURE — transfer threw java.lang.IllegalStateException: boom"), r.out)
     assert(r.out.contains("certified   not run"), r.out)
@@ -97,7 +74,7 @@ class AnalyzeCommandSuite extends munit.FunSuite:
 
   test("there is no --no-enforce, and --domain, --classes and --reach are required"):
     assertEquals(analyze("AnalyzeRefute", intervalSources, "--reach", "1", "--no-enforce").exit, 1)
-    assertEquals(pag("analyze", "--reach", "1").exit, 1)
+    assertEquals(Pag("analyze", "--reach", "1").exit, 1)
 
   test("an engine VirtualMachineError is inconclusive, exit 4, never 3"):
     val err = ByteArrayOutputStream()
