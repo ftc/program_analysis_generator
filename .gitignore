@@ -19,3 +19,8 @@ domains/*/build/
 
 # demo_scripts build output
 demo_scripts/out/
+
+# campaign attempts: attempt.json and the domain's sources are committed (§3);
+# what a build or an evaluation produces from them is not
+results/**/domain/build/
+results/**/work/

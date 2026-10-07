@@ -40,10 +40,13 @@ object FakeServer:
     val server = FakeServer(script.toList)
     try body(server) finally server.stop()
 
-  /** A chat completion as llama.cpp returns one, with fields the client ignores. */
+  /** A chat completion as llama.cpp returns one, with fields the client ignores.
+    * The texts are JSON-escaped, so a whole Java file can be the content.
+    */
   def completion(content: String, reasoning: Option[String] = None): String =
-    val thinking = reasoning.fold("")(r => s""","reasoning_content":"$r"""")
+    def quoted(text: String): String = io.bullet.borer.Json.encode(text).toUtf8String
+    val thinking = reasoning.fold("")(r => s""","reasoning_content":${quoted(r)}""")
     s"""{"id":"chatcmpl-1","object":"chat.completion","created":1791328342,"model":"m.gguf",""" +
       s""""system_fingerprint":"b1","choices":[{"index":0,"finish_reason":"stop",""" +
-      s""""message":{"role":"assistant","content":"$content"$thinking}}],""" +
+      s""""message":{"role":"assistant","content":${quoted(content)}$thinking}}],""" +
       """"usage":{"prompt_tokens":120,"completion_tokens":45,"total_tokens":165},"timings":{"predicted_ms":900.5}}"""
