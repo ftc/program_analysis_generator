@@ -263,8 +263,11 @@ real. Open questions:
    fix seeds where the server allows.
 3. **Reasoning and budgets.** Qwen3.x thinks before answering
    (`reasoning_content`): on or off; the token budget, which counts the
-   thinking; and the client's timeout. The first real sample was still
-   generating after 20 minutes at about 28 tokens/s, with no cap set.
+   thinking; and the client's timeout. The first real sample (Qwen3.8 27B,
+   2026-10-07) generated over 47,000 tokens in 30 minutes, about 28 tokens/s,
+   with no cap, and had not finished when the client's 30-minute timeout fired;
+   a bug then retried it from scratch, and the run was stopped. Fixed: a timeout
+   is no longer retried.
 4. **What a row means.** Which columns decide "acceptable", and the summary
    statistic across samples (any success in N, or the rate).
 5. **The inspection rubric.** Categories for "what it tracks" (constants, signs,

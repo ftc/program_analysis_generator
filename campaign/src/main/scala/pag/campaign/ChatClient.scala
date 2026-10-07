@@ -35,7 +35,10 @@ final case class ChatFailure(message: String, status: Option[Int], body: Option[
 /** A client for the OpenAI-compatible `/v1/chat/completions` API that Ollama,
   * vLLM, llama.cpp and hosted models serve (implementation_strategy.md §10).
   * Connection failures, 429 and 5xx are retried with backoff (§12); anything else
-  * is reported at once. `env` and `sleep` are parameters so tests can replace them.
+  * is reported at once. **A timeout is not retried**: it means the model is still
+  * generating, slowly, not that the server is unreachable, and a retry would start
+  * the whole generation over. `env` and `sleep` are parameters so tests can
+  * replace them.
   */
 final class ChatClient(
     agent: AgentConfig,
@@ -67,6 +70,9 @@ final class ChatClient(
             Left((ChatFailure(s"HTTP ${response.statusCode}", Some(response.statusCode), Some(response.body), tries),
               retryable))
         catch
+          // HttpTimeoutException is an IOException, so it must be caught first
+          case _: java.net.http.HttpTimeoutException =>
+            Left((ChatFailure(s"no reply within ${agent.timeoutSeconds} s (not retried)", None, None, tries), false))
           case e: java.io.IOException => Left((ChatFailure(s"no response: $e", None, None, tries), true))
       outcome match
         case Left((_, true)) if tries <= agent.retries =>

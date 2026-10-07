@@ -40,14 +40,20 @@ object Campaign:
       _ <- Either.cond(samples > 0, (), s"--samples must be positive, not $samples")
       corpusHash <- corpusSha256(tools.corpus)
       _ <- pin(dir, CampaignPin(AgentRecord.of(agent), prompt.version, prompt.sha256, corpusHash, Attempt.Profile))
-    yield (1 to samples).toList.map { sample =>
-      val attemptDir = dir.resolve(f"attempt-$sample%03d")
-      val outcome =
-        if Files.exists(attemptDir.resolve("attempt.json")) then SampleOutcome.Kept(attemptDir.getFileName.toString)
-        else SampleOutcome.Ran(Attempt.run(name, sample, agent, client, prompt, tools, attemptDir))
-      progress(outcome)
-      outcome
-    }
+    yield
+      val status = StatusReporter(dir, name, samples, agent.timeoutSeconds)
+      val outcomes = (1 to samples).toList.map { sample =>
+        val attemptDir = dir.resolve(f"attempt-$sample%03d")
+        val outcome =
+          if Files.exists(attemptDir.resolve("attempt.json")) then SampleOutcome.Kept(attemptDir.getFileName.toString)
+          else
+            status.attempt(attemptDir.getFileName.toString)
+            SampleOutcome.Ran(Attempt.run(name, sample, agent, client, prompt, tools, attemptDir, status.stage))
+        progress(outcome)
+        outcome
+      }
+      status.finished()
+      outcomes
 
   /** Writes the pin on a campaign's first run; afterwards, the same pin or a refusal naming what changed. */
   private def pin(dir: Path, current: CampaignPin): Either[String, Unit] =
@@ -70,6 +76,12 @@ object Campaign:
             s"campaign ${dir.getFileName} was run with different inputs (${changed.mkString(", ")} changed); " +
               "start a new campaign rather than mix two experiments' samples")
         }
+
+  /** A campaign's pinned inputs, if it has been run. */
+  def pinned(dir: Path): Option[CampaignPin] =
+    val file = dir.resolve("campaign.json")
+    Option.when(Files.isRegularFile(file))(file)
+      .flatMap(f => Json.decode(Files.readAllBytes(f)).to[CampaignPin].valueEither.toOption)
 
   /** A hash of the corpus: its manifest and every probe source, in name order. */
   def corpusSha256(corpus: Path): Either[String, String] =

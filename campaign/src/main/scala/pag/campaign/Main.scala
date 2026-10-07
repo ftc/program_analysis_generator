@@ -9,8 +9,8 @@ import scopt.OParser
 /** The campaign driver's entry point (implementation_strategy.md §12). */
 object Main:
 
-  final case class Args(config: Option[Path] = None, campaign: Option[String] = None, samples: Int = 1,
-      prompt: String = "generator-v1")
+  final case class Args(command: String = "", config: Option[Path] = None, campaign: Option[String] = None,
+      samples: Int = 1, prompt: String = "generator-v1", every: Option[Int] = None)
 
   private val parser: OParser[Unit, Args] =
     val b = OParser.builder[Args]
@@ -18,6 +18,7 @@ object Main:
     OParser.sequence(
       programName("campaign"),
       cmd("generate")
+        .action((_, a) => a.copy(command = "generate"))
         .text("run a campaign's samples: ask the generator, build, evaluate on the smoke corpus, record")
         .children(
           opt[Path]("config").required().valueName("<file>").action((p, a) => a.copy(config = Some(p)))
@@ -28,12 +29,25 @@ object Main:
             .text("how many attempts the campaign should hold (default 1); existing ones are kept"),
           opt[String]("prompt").valueName("<version>").action((v, a) => a.copy(prompt = v))
             .text("campaign/prompts/<version>/ (default generator-v1)")
-        )
+        ),
+      cmd("status")
+        .action((_, a) => a.copy(command = "status"))
+        .text("show a campaign's progress, its finished attempts, and warnings")
+        .children(
+          opt[String]("campaign").required().valueName("<name>").action((n, a) => a.copy(campaign = Some(n))),
+          opt[Int]("every").valueName("SECONDS").action((n, a) => a.copy(every = Some(n)))
+            .text("refresh every SECONDS until interrupted (Ctrl-C)")
+        ),
+      checkConfig(a => if a.command.isEmpty then failure("no command given") else success)
     )
 
   def main(args: Array[String]): Unit =
     OParser.parse(parser, args, Args()) match
       case None => sys.exit(1)
+      case Some(a) if a.command == "status" =>
+        Repo.root() match
+          case Left(e)     => System.err.println(s"campaign: $e"); sys.exit(1)
+          case Right(repo) => watch(repo.resolve("results").resolve(a.campaign.get), a.campaign.get, a.every)
       case Some(a) =>
         val outcome = for
           repo <- Repo.root()
@@ -47,6 +61,30 @@ object Main:
         outcome match
           case Left(message) => System.err.println(s"campaign: $message"); sys.exit(1)
           case Right(done)   => println(s"${done.size} samples in results/${a.campaign.get}/")
+
+  /** Draws the status screen once, or every `every` seconds until interrupted. */
+  private def watch(dir: Path, name: String, every: Option[Int]): Unit =
+    val baseUrl = Campaign.pinned(dir).map(_.agent.baseUrl)
+    @scala.annotation.tailrec
+    def loop(history: List[Reading]): Unit =
+      val now = java.time.Instant.now()
+      val slots = baseUrl.toRight("model     no campaign.json yet: unknown server").flatMap(Slots.fetch)
+      val reading = slots.toOption.flatMap(_.filter(_.busy).maxByOption(_.decoded)).map(s => Reading(now, s.decoded))
+      val kept = (history ++ reading).filter(r => java.time.Duration.between(r.at, now).getSeconds <= 300)
+      val attempts = attemptRecords(dir)
+      val screen = StatusView.render(now, name, Status.read(dir), attempts, slots, kept)
+      if every.isDefined then print("\u001b[H\u001b[2J") // clear the terminal
+      println(screen.mkString("\n"))
+      every match
+        case Some(s) => Thread.sleep(s * 1000L); loop(kept)
+        case None    => ()
+    loop(Nil)
+
+  private def attemptRecords(dir: Path): List[AttemptRecord] =
+    if !Files.isDirectory(dir) then Nil
+    else Using.resource(Files.list(dir))(_.iterator.asScala.toList)
+      .map(_.resolve("attempt.json")).filter(Files.isRegularFile(_))
+      .flatMap(f => Attempt.read(f).toOption).sortBy(_.attempt)
 
   /** One line per sample, as it finishes. */
   private def report(outcome: SampleOutcome): Unit = outcome match

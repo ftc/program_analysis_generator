@@ -623,6 +623,8 @@ sbt "cli/run run <classes-dir> --inputs 10 --trace"   # run it on the IR interpr
 bash demo_scripts/common.sh     # build what a campaign needs, including the pag launcher
 sbt "campaign/run generate --config config/<file>.json --campaign <name> --samples N"
                                 # ask the generator model N times; results/<name>/ keeps every attempt
+sbt "campaign/run status --campaign <name> --every 5"
+                                # watch a running campaign: progress, live generation, finished attempts, warnings
 sbt core/console     # Scala REPL with a module on the classpath
 sbt ~test            # re-run tests on every file change
 sbt clean            # delete build output under target/
