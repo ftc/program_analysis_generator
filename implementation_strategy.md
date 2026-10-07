@@ -2103,6 +2103,21 @@ run — no reply, no files, no compile — and the record is written in every ca
 last, through a temporary file and an atomic move, so its presence means the
 attempt finished. That is what lets a campaign resume (§12).
 
+**`campaign status`, a command-line dashboard.** Campaigns run for hours, so
+problems must show early. `campaign status --campaign <name> [--every 5]`
+refreshes one screen from three sources — finished `attempt.json`s, a small
+`status.json` the `generate` loop rewrites at each stage, and llama.cpp's
+`/slots` — showing: progress (samples done, the current stage, time per
+attempt, an estimated finish); the live generation (tokens so far, the rate
+over the last minute, a stall flag, time left before the client's timeout, room
+left in the context, the prompt-token count, other busy slots); a mini Table 1
+of finished attempts with failure reasons; and warnings — the same failure
+several times running (a prompt or format problem, the cheapest to catch),
+a generation nearing its timeout or the context limit, a stall, an unsound
+attempt, a killed `pag`. Every model runs on llama.cpp (E3), so `/slots` is the
+one live source; streaming replies and GPU statistics are left out.
+*Decided — Shawn, 2026-10-07.*
+
 **A campaign's inputs are pinned** (crude Phase 10, `campaign generate`). A
 campaign is the unit of work with fixed inputs (§12), so its first run writes
 `results/<campaign>/campaign.json`: the agent configuration, the prompt's version
