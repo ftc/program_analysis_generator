@@ -140,18 +140,45 @@ model's licence, before running**:
 | Google | Gemma 3 (up to 27B) | small, strong general models |
 | Microsoft | Phi-4 | small, trained heavily on reasoning |
 
-**Setup and first model.** A dual RTX 3090 machine with Ollama, vLLM and
-llama.cpp. **Every model is served by llama.cpp**, as a **size ladder within one
-family, Qwen3.8**: comparing sizes of one family separates "smaller models cannot
-do this" from differences in training data or chat template between families.
-Which Qwen3.8 sizes, and at what quantization, is for the setup discussion;
-holding the quantization level constant across sizes keeps size the only thing
-that varies. One server for all also gives one progress source (llama.cpp's
-`/slots`) for `campaign status`. *Decided — Shawn, 2026-10-07*, replacing the
-plan to use the Ollama models on Shawn's Mac.
-The first model is Qwen3.8 27B at a 6-bit quantization, served by llama.cpp's
-OpenAI-compatible server at `http://localhost:8933/v1` (checked 2026-10-06 with
-`/v1/models`):
+**The models: a Qwen3.5 size ladder.** *Decided — Shawn, 2026-10-07.* Every
+model is served by llama.cpp on a dual RTX 3090 machine, as a size ladder
+within one family, which separates "smaller models cannot do this" from
+differences in training data or chat template between families:
+
+| model | source |
+| --- | --- |
+| Qwen3.5-0.8B | https://huggingface.co/Qwen/Qwen3.5-0.8B |
+| Qwen3.5-2B | https://huggingface.co/Qwen/Qwen3.5-2B |
+| Qwen3.5-4B | https://huggingface.co/Qwen/Qwen3.5-4B |
+| Qwen3.5-9B | https://huggingface.co/Qwen/Qwen3.5-9B |
+| Qwen3.5-27B | https://huggingface.co/Qwen/Qwen3.5-27B |
+
+About a 34× range in steps of 2–3×, so the size where one-shot generation
+breaks can be located. **Shawn makes his own Q8 GGUFs** of each, with llama.cpp's
+converter and quantizer, from the official repositories: one quantization level
+for every size, so size is the only thing that varies, and each model keeps its
+own chat template (which carries the thinking switch). Each model's `source`
+records the repository, its **revision** (commit), the GGUF file name, **the
+SHA-256 of the GGUF produced**, and — until there is a field for it — the
+llama.cpp commit used, in the file name. Qwen3.8 27B (below) may be added later
+as a side point, a newer generation at the top size, depending on the results.
+The 0.8B and 2B will probably mostly fail early (no usable files, or no
+compile); that is the floor, and they are cheap enough for extra samples.
+
+**From the Qwen3.5-27B model card** (read 2026-10-07): post-trained, Apache 2.0;
+**thinking on by default**, turned off per request with
+`chat_template_kwargs: {"enable_thinking": false}`; recommended sampling in
+thinking mode for coding: temperature 0.6, top_p 0.95, top_k 20, min_p 0,
+presence_penalty 0; recommended output length 32,768 tokens for most queries and
+81,920 "for benchmarking on highly complex problems"; 262,144 tokens of context.
+The card's summary also mentions "Gated Delta Networks combined with sparse
+Mixture-of-Experts"; whether the 27B itself is dense was not settled. The
+smaller sizes' cards were not read.
+
+**The first model actually run** was Qwen3.8 27B, for the pipeline check
+(campaign `phase10-check-qwen3.8-27b`), at a 6-bit quantization, served by
+llama.cpp's OpenAI-compatible server at `http://localhost:8933/v1` (checked
+2026-10-06 with `/v1/models`):
 
 | field | as the server reports it |
 | --- | --- |
@@ -257,8 +284,24 @@ part of what it is told (plan Phase 10).
 An iteration or two on the experimental setup comes before rung 0 is run for
 real. Open questions:
 
-1. **Models.** A Qwen3.8 size ladder on llama.cpp, the 27B at the top (E3).
-   Which smaller sizes, and one quantization level for all?
+1. ~~**Models.**~~ *Decided:* the Qwen3.5 ladder, 0.8B to 27B, as Q8 GGUFs Shawn
+   makes, on llama.cpp (E3).
+   **Proposals for the rest, from the model card** (not yet decided):
+   - sampling as the card recommends for coding in thinking mode — temperature
+     0.6, top_p 0.95, top_k 20, min_p 0, presence_penalty 0 — the same for every
+     size; the client sends only `temperature` today, so `AgentConfig` gains the
+     other four;
+   - an explicit `maxTokens`: the card's 32,768 to start, or 81,920 for the
+     27B; a reply cut off there (`finish_reason: "length"`) becomes its own
+     outcome, "ran out of tokens", in the record, `campaign status` and Table 1;
+   - a timeout covering the budget: 81,920 tokens at about 28 tokens/s is about
+     49 minutes, so an hour or more for the 27B;
+   - thinking on for the main runs, as the models are meant to be used, set
+     explicitly per campaign; thinking off as a cheaper variation later (check
+     that llama.cpp passes `chat_template_kwargs` through first);
+   - five samples per size to start; more for the cheap small sizes;
+   - a llama.cpp context of about 64k–96k rather than the full 262k, which covers
+     the output budget with a smaller KV cache.
 2. **Samples and sampling.** How many samples per model; temperature; whether to
    fix seeds where the server allows.
 3. **Reasoning and budgets.** Qwen3.x thinks before answering
