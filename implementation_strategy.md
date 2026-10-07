@@ -125,6 +125,7 @@ engine/                    sbt multi-project, human-only
 domains/                   every domain worth keeping, one directory each
   build-template/          the one Gradle build every domain is built with (below)
   ref-interval/            Java. the reference fixture, and later a target
+  ref-sign/                Java. the generator prompt's worked example (Phase 10)
   ref-<name>/              a hand-written reference domain (ref-zones next, §16)
     src/  test/            the domain and its unit tests; no build file of its own
     domain.json            metadata (below)

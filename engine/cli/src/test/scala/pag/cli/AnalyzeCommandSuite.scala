@@ -17,7 +17,7 @@ class AnalyzeCommandSuite extends munit.FunSuite:
 
   /** The temp directory and the timing vary run to run. */
   def masked(out: String): String =
-    out.replaceAll("(?m)^classes   \\S+", "classes   <dir>").replaceAll("\\d+ms", "<n>ms")
+    out.replaceAll("(?m)^classes {3}\\S+", "classes   <dir>").replaceAll("\\d+ms", "<n>ms")
 
   /** Reviewed by hand against AnalyzeRefute.java: backward from reach(1), y <= -1, then x <= -2,
     * which contradicts the branch's x > 0, so everything before pre(5) is bottom. 26 locations
@@ -27,6 +27,14 @@ class AnalyzeCommandSuite extends munit.FunSuite:
     val r = analyze("AnalyzeRefute", intervalSources, "--reach", "1")
     assertEquals((r.exit, r.err), (0, ""))
     assertEquals(masked(r.out), golden("AnalyzeRefute-analyze.txt"))
+
+  test("the sign domain loads and refutes a target guarded by contradictory signs"):
+    val r = analyze("SignRefute", domainSources("ref-sign"), "--reach", "1")
+    assertEquals((r.exit, r.err), (0, ""))
+    assert(r.out.contains("domain    ref-sign"), r.out)
+    // backward: reaching the target needs x < 0 before the inner test, which the outer x > 0 contradicts
+    assert(r.out.contains("x ∈ {−}"), r.out)
+    assert(r.out.trim.endsWith("REFUTED"), r.out)
 
   test("a reachable target is an ALARM, exit 0"):
     val r = analyze("AnalyzeAlarm", intervalSources, "--reach", "1")
