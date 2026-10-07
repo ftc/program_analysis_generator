@@ -463,6 +463,12 @@ worklist, invariant map, certifier.
 talks to a model: agent drivers and the mutant corpus belong to `campaign/` and
 `domains/`.
 
+**`campaign/`** — the campaign driver (plan §12): talks to models and runs `pag`
+as a subprocess. An sbt module of the main build that may link only
+`engine/results`, which a build check enforces. Its chat client speaks the
+OpenAI-compatible `/v1/chat/completions` API (Ollama, vLLM, llama.cpp) and keeps
+a reasoning model's separate `reasoning_content` alongside its answer.
+
 **Trust base** — the human-written code a verdict rests on unchecked: the
 front end (loading through lowering), `reach` and its lowering, the executor, the
 certifier, and the domain-vocabulary converter (§2). Exhaustively unit tested and reviewed before merge, as a

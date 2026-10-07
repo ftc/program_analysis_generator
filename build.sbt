@@ -63,7 +63,7 @@ lazy val scalaModule = Seq(
 )
 
 lazy val root = (project in file("."))
-  .aggregate(api, probeLib, ir, results, frontendSoot, core, harness, cli)
+  .aggregate(api, probeLib, ir, results, frontendSoot, core, harness, cli, campaign)
   .settings(
     name           := "program-analysis-generator",
     publish / skip := true
@@ -175,3 +175,26 @@ lazy val cli = (project in file("engine/cli"))
       s"-Dpag.repoRoot=${(ThisBuild / baseDirectory).value}"
     )
   )
+
+/** The campaign driver (§12): talks to models and runs pag as a subprocess. It
+  * shares only engine/results with the engine, never links the rest, and the
+  * check below enforces that before its tests run.
+  */
+lazy val campaign = (project in file("campaign"))
+  .dependsOn(results)
+  .settings(
+    scalaModule,
+    sootBoundary,
+    name := "pag-campaign",
+    checkOnlyResults := {
+      val engine = (ThisBuild / baseDirectory).value / "engine"
+      val linked = (Compile / internalDependencyClasspath).value.map(_.data)
+        .filter(f => f.toPath.startsWith(engine.toPath) && !f.toPath.startsWith((engine / "results").toPath))
+      if (linked.nonEmpty)
+        sys.error(s"campaign: engine modules on its classpath (${linked.mkString(", ")}); only engine/results may be")
+    },
+    Test / test := (Test / test).dependsOn(checkOnlyResults).value
+  )
+
+/** Fails if any engine module but results is on the campaign's classpath (§12). */
+lazy val checkOnlyResults = taskKey[Unit]("fail if the campaign links engine modules other than results")

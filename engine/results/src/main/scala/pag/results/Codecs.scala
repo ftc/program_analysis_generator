@@ -7,6 +7,9 @@ import io.bullet.borer.derivation.MapBasedCodecs.*
 /** Every codec, in one object (implementation_strategy.md §13), derived rather
   * than written: a new case of a sealed type cannot silently go unencoded.
   * Case classes are JSON objects keyed by field name; `None` is `null`.
+  *
+  * Record types must not have default values: Borer leaves a field out of the
+  * encoding when it equals its default, so a record would silently lose it.
   */
 object Codecs:
   given Codec[ErrorInfo] = deriveCodec[ErrorInfo]
