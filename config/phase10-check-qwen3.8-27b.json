@@ -1,0 +1,13 @@
+{
+  "agents": {
+    "generator": {
+      "baseUrl": "http://localhost:8933/v1",
+      "model": "/home/s/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K_XL.gguf",
+      "temperature": 0.2,
+      "source": {
+        "url": "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF",
+        "file": "Qwen3.8-27B-UD-Q6_K_XL.gguf"
+      }
+    }
+  }
+}

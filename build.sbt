@@ -189,6 +189,8 @@ lazy val campaign = (project in file("campaign"))
     scalaModule,
     sootBoundary,
     name := "pag-campaign",
+    libraryDependencies += "com.github.scopt" %% "scopt" % "4.1.0",
+    Compile / mainClass := Some("pag.campaign.Main"),
     checkOnlyResults := {
       val engine = (ThisBuild / baseDirectory).value / "engine"
       val linked = (Compile / internalDependencyClasspath).value.map(_.data)
