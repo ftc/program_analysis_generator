@@ -88,6 +88,17 @@ class ChatClientSuite extends munit.FunSuite:
     assert(failure.message.startsWith("no response"), failure.message)
     assertEquals((failure.tries, slept.size), (2, 1))
 
+  test("a timeout is not retried: the model is slow, not gone, and a retry would start over"):
+    val server = FakeServer(List(200 -> completion("too late")), delayMs = 3000)
+    try
+      val slept = java.util.concurrent.ConcurrentLinkedQueue[Long]()
+      val agent = AgentConfig(server.baseUrl, "m", timeoutSeconds = 1, retries = 3)
+      val failure = ChatClient(agent, sleep = ms => { slept.add(ms); () }).chat(hello).fold(identity, r => fail(r.toString))
+      assertEquals((failure.message, failure.tries), ("no reply within 1 s (not retried)", 1))
+      assert(slept.isEmpty, "no backoff, no second try")
+      assertEquals(server.received.size, 1)
+    finally server.stop()
+
   test("models() returns the server's own report, raw"):
     withServer(200 -> """{"data":[{"id":"m.gguf"}]}""") { s =>
       assertEquals(client(s.baseUrl)._1.models(), Right("""{"data":[{"id":"m.gguf"}]}"""))

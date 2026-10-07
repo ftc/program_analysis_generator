@@ -1686,6 +1686,7 @@ rejected domains to `corpora/mutants.txt`.
 | `pag` exits non-zero | read the code (§11) and route: 2 is a bad probe, 3 a rejection, 5 a broken domain |
 | `pag` hangs | kill the process after a wall-clock bound; that is the real timeout |
 | model API fails or rate-limits | retry with backoff; do not lose the attempt |
+| model reply times out | **do not retry**: the model is slow, not gone, and a retry starts the generation over; record the failure. llama.cpp cancels a generation when its client disconnects (observed 2026-10-07), so an abandoned request does not keep the GPU busy |
 | the driver itself crashes | resume — a campaign runs for hours over paid APIs, so progress must be durable, not in memory |
 
 Durable progress is the requirement that shapes the rest of its design, and it

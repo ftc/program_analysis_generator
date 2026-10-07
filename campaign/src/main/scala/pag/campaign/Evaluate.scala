@@ -64,13 +64,15 @@ object Evaluate:
       probeLib: Path,
       workDir: Path,
       deadline: FiniteDuration = Deadline,
-      timeout: FiniteDuration = Timeout
+      timeout: FiniteDuration = Timeout,
+      stage: String => Unit = _ => ()
   ): Either[String, Evaluation] =
     require(deadline < timeout, s"pag's deadline $deadline must come before the wall-clock kill $timeout")
     for
       corpus <- Corpus.read(corpusDir)
       compiled <- compile(corpus, corpusDir, probeLib, workDir.resolve("probes"))
-    yield Evaluation(corpus.targets.map { t =>
+    yield Evaluation(corpus.targets.zipWithIndex.map { (t, i) =>
+      stage(s"evaluating target ${i + 1} of ${corpus.targets.size} (${t.probe})")
       val command = pag ++ List("check", "--domain", domainJar.toString, "--classes", compiled(t.probe).toString,
         "--reach", t.reach.toString, "--inputs", t.inputs.mkString(","), "--deadline", s"${deadline.toMillis}ms",
         "--json")

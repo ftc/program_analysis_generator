@@ -14,7 +14,7 @@ final case class Received(method: String, path: String, authorization: Option[St
   * answers each request with the next scripted (status, body), repeating the
   * last, and keeps what it received. Mutable by nature — it observes requests.
   */
-final class FakeServer(script: List[(Int, String)]):
+final class FakeServer(script: List[(Int, String)], delayMs: Long = 0):
   private val server: HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
   private val pending: ConcurrentLinkedQueue[(Int, String)] = ConcurrentLinkedQueue(script.asJava)
   private val log: ConcurrentLinkedQueue[Received] = ConcurrentLinkedQueue()
@@ -23,6 +23,7 @@ final class FakeServer(script: List[(Int, String)]):
     val body = String(exchange.getRequestBody.readAllBytes(), UTF_8)
     log.add(Received(exchange.getRequestMethod, exchange.getRequestURI.getPath,
       Option(exchange.getRequestHeaders.getFirst("Authorization")), body))
+    if delayMs > 0 then Thread.sleep(delayMs) // a slow model: received, then answered late
     val (status, reply) = if pending.size > 1 then pending.poll() else pending.peek()
     val bytes = reply.getBytes(UTF_8)
     exchange.sendResponseHeaders(status, bytes.length.toLong)

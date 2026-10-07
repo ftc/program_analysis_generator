@@ -24,14 +24,16 @@ final case class BuildResult(
   */
 object Build:
 
-  def run(template: Path, domainDir: Path, api: Path, timeout: FiniteDuration = 5.minutes): BuildResult =
+  def run(template: Path, domainDir: Path, api: Path, timeout: FiniteDuration = 5.minutes,
+      stage: String => Unit = _ => ()): BuildResult =
     val gradle = List(template.resolve("gradlew").toString, "-p", template.toString, "--console=plain",
       s"-PdomainDir=$domainDir", s"-PapiJar=$api")
     val started = System.currentTimeMillis()
+    stage("compiling")
     val compile = Processes.run(gradle :+ "jar", timeout)
     val jar = domainDir.resolve(s"build/libs/${domainDir.getFileName}.jar")
     val compiled = compile.exitCode.contains(0) && Files.isRegularFile(jar)
-    val test = if compiled then Some(Processes.run(gradle :+ "test", timeout)) else None
+    val test = if compiled then { stage("running its tests"); Some(Processes.run(gradle :+ "test", timeout)) } else None
     val (run, failures, errors) = if compiled then junitCounts(domainDir.resolve("build/test-results/test")) else (0, 0, 0)
     BuildResult(Option.when(compiled)(jar), log(compile), run, failures, errors, test.fold("")(log),
       System.currentTimeMillis() - started)

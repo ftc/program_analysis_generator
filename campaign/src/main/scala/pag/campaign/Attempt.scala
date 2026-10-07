@@ -22,17 +22,19 @@ object Attempt:
   val Profile: String = "bigint-main-v1"
 
   def run(campaign: String, sample: Int, agent: AgentConfig, client: ChatClient, prompt: Prompt, tools: Tools,
-      dir: Path): AttemptRecord =
+      dir: Path, stage: String => Unit = _ => ()): AttemptRecord =
     val started = Instant.now()
     val attempt = dir.getFileName.toString
     Files.createDirectories(dir)
     val serverModels = client.models().toOption
+    stage("asking the model")
     val chat = client.chat(prompt.messages)
     val parsed = chat.toOption.map(r => Reply.files(r.content))
     val written = parsed.map(p => write(p.files, dir.resolve("domain")))
-    val build = written.filter(_.nonEmpty).map(_ => Build.run(tools.template, dir.resolve("domain"), tools.api))
+    val build = written.filter(_.nonEmpty).map(_ => Build.run(tools.template, dir.resolve("domain"), tools.api,
+      stage = stage))
     val evaluation = build.flatMap(_.jar).map { jar =>
-      Evaluate.run(tools.pag, jar, tools.corpus, tools.probeLib, dir.resolve("work"))
+      Evaluate.run(tools.pag, jar, tools.corpus, tools.probeLib, dir.resolve("work"), stage = stage)
     }
     val targets = evaluation.flatMap(_.toOption).fold(List.empty[TargetRecord])(_.results.map { r =>
       TargetRecord(r.target.probe, r.target.reach, r.target.reachable, r.target.rung, r.cell, r.exitCode, r.check,
@@ -68,6 +70,7 @@ object Attempt:
         unsound
       )
     )
+    stage("writing the record")
     save(record, dir.resolve("attempt.json"))
     record
 
