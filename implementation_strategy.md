@@ -145,6 +145,7 @@ corpora/
   mutants.txt              the mutant corpus: a list of domain ids (below)
 results/
   <campaign>/              durable per-attempt records, so a campaign resumes
+report/                    the experimental report: LaTeX, generated tables, manual inspection notes
 config/                    run configurations
 docker/                    compose files and mount definitions
 ```
@@ -1811,7 +1812,11 @@ rest:
 2. **Crude Phase 10** — a generator loop in `campaign/` with no containers:
    the generated jar goes on `pag`'s classpath by path, and "the corpus" is a
    handful of hand-written probes. *Done when* a generated domain compiles,
-   loads and refutes one target.
+   loads and refutes one target. Then **the report**: `report/` (LaTeX) and
+   `campaign report`, which fills Table 1 — one shot, rung 0, the smoke corpus,
+   one row per attempt, with a manual-inspection column the script never writes
+   (`experiments.md`, *The report*). The experimental setup is discussed before
+   the first real run. *Decided — Shawn, 2026-10-07.*
 3. **Crude Phases 11 and 8** — an adversary proposing probes against three or
    four hand-written mutants and one generated domain. *Done when* a kill rate
    is reported, however rough.

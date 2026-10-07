@@ -140,7 +140,9 @@ model's licence, before running**:
 | Google | Gemma 3 (up to 27B) | small, strong general models |
 | Microsoft | Phi-4 | small, trained heavily on reasoning |
 
-**Setup and first model.** Dual RTX 3090, with Ollama, vLLM and llama.cpp.
+**Setup and first model.** Two machines: a dual RTX 3090 machine, with Ollama,
+vLLM and llama.cpp, serving the 27B model; and Shawn's Mac, whose Ollama holds
+the smaller models (the table below).
 The first model is Qwen3.8 27B at a 6-bit quantization, served by llama.cpp's
 OpenAI-compatible server at `http://localhost:8933/v1` (checked 2026-10-06 with
 `/v1/models`):
@@ -182,7 +184,7 @@ would likely outpace the setup quickly — so a few smaller models should be
 benchmarked beside it. **Open, to discuss before E3:** which smaller models,
 and at what sizes and quantizations.
 
-Installed now (Ollama, `localhost:11434`, checked 2026-10-06 with `/api/tags`),
+Installed now on Shawn's Mac (Ollama, `localhost:11434`, checked 2026-10-06 with `/api/tags`),
 already a ladder across three families:
 
 | model (exact Ollama name) | parameters | quantization |
@@ -204,6 +206,63 @@ ceiling: it says whether a rung is hard because the task is hard or because the
 model is small.
 
 ---
+
+## The report
+
+*Decided — Shawn, 2026-10-07.* Results are written up as they come, in a LaTeX
+report kept in the repository, with tables generated from the attempt records
+rather than copied by hand.
+
+- **`report/`** — the LaTeX source (`report.tex`), built with `latexmk`. It
+  `\input`s generated tables from `report/tables/`.
+- **`campaign report`** — reads `results/<campaign>/` and writes the tables.
+  Scala, in the campaign module (one language, plan §12), reading the records
+  with the same codecs that wrote them. Rerunnable at any time; it only ever
+  overwrites `report/tables/`.
+- **Manual inspection is a column the script never writes.** Shawn's judgment of
+  each generated domain lives in a hand-edited file, `report/inspection.json`,
+  keyed by attempt id; the script merges it in, so regenerating a table never
+  loses a note, and an attempt not yet inspected shows a blank.
+
+### Table 1 — one shot, rung 0, the smoke corpus
+
+One row per attempt; models grouped, smallest first.
+
+| column | meaning |
+| --- | --- |
+| model | as recorded: name, parameters, quantization |
+| sample | which of the N samples for that model |
+| files | source files read from the reply (0: no usable reply) |
+| builds | compiled by the Gradle template |
+| own tests | its own JUnit tests pass (how many) |
+| loads | `pag` found exactly one domain class and constructed it |
+| one column per target | R refuted, A alarm, ✗ refuted a reachable target (unsound), – not run |
+| proved | refutations among the four unreachable targets |
+| caught | sound so far: no reachable target refuted |
+| cost | prompt and completion tokens; wall-clock time |
+| inspection | Shawn's: what the domain tracks, and anything seen by eye |
+
+The smoke corpus is never shown to a model; it is how a domain is judged, not
+part of what it is told (plan Phase 10).
+
+### The setup, to discuss before the first real run
+
+An iteration or two on the experimental setup comes before rung 0 is run for
+real. Open questions:
+
+1. **Models.** Qwen3.8 27B on the RTX 3090 machine, plus the smaller models on
+   Shawn's Mac (E3's Ollama table). Which, and how many sizes?
+2. **Samples and sampling.** How many samples per model; temperature; whether to
+   fix seeds where the server allows.
+3. **Reasoning.** Qwen3.x thinks before answering (`reasoning_content`): on or
+   off, and the token budget, which counts the thinking.
+4. **What a row means.** Which columns decide "acceptable", and the summary
+   statistic across samples (any success in N, or the rate).
+5. **The inspection rubric.** Categories for "what it tracks" (constants, signs,
+   intervals, something else, nothing coherent), and what to note by eye.
+6. **Fairness across models.** The same prompt for all; differences in chat
+   templates and quantization noted rather than controlled.
+7. **The report's shape.** Sections, and whether any figure is wanted yet.
 
 ## Order
 
