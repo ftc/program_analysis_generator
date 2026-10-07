@@ -236,7 +236,7 @@ One row per attempt; models grouped, smallest first.
 | builds | compiled by the Gradle template |
 | own tests | its own JUnit tests pass (how many) |
 | loads | `pag` found exactly one domain class and constructed it |
-| one column per target | R refuted, A alarm, ✗ refuted a reachable target (unsound), – not run |
+| one column per target | R refuted, A alarm, ✗ refuted a reachable target (unsound), I inconclusive — did not converge (iteration limit or deadline), E domain failure (threw or returned null), H hung (killed at the wall-clock bound), – not run |
 | proved | refutations among the four unreachable targets |
 | caught | sound so far: no reachable target refuted |
 | cost | prompt and completion tokens; wall-clock time |

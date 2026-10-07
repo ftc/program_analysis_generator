@@ -1,0 +1,13 @@
+{
+  "about": "The smoke corpus (implementation_strategy.md Phase 10; experiments.md Table 1). Never shown to a model. `reachable` is the true answer; `inputs` are what pag check runs with, and for a reachable target they reach it.",
+  "targets": [
+    { "probe": "Const1", "reach": 1, "reachable": false, "inputs": [],  "rung": 0, "provableBy": "constants, intervals" },
+    { "probe": "Const2", "reach": 1, "reachable": true,  "inputs": [],  "rung": 0, "provableBy": "nothing: reachable" },
+    { "probe": "Sign1",  "reach": 1, "reachable": false, "inputs": [1], "rung": 1, "provableBy": "signs, intervals" },
+    { "probe": "Range1", "reach": 1, "reachable": false, "inputs": [4], "rung": 1, "provableBy": "intervals" },
+    { "probe": "Range2", "reach": 1, "reachable": true,  "inputs": [5], "rung": 1, "provableBy": "nothing: reachable" },
+    { "probe": "Arith1", "reach": 1, "reachable": false, "inputs": [1], "rung": 2, "provableBy": "intervals, narrowing through +" },
+    { "probe": "Loop1",  "reach": 1, "reachable": false, "inputs": [3], "rung": 4, "provableBy": "intervals with widening; a domain that does not converge hits the iteration limit" },
+    { "probe": "Loop2",  "reach": 1, "reachable": true,  "inputs": [2], "rung": 4, "provableBy": "nothing: reachable" }
+  ]
+}

@@ -142,6 +142,7 @@ probes/
                            domains/<id>/rejections/
 corpora/
   scoring/                 programs used to measure proof count
+  smoke/                   crude Phase 10's eight probes and manifest.json of true answers
   mutants.txt              the mutant corpus: a list of domain ids (below)
 results/
   <campaign>/              durable per-attempt records, so a campaign resumes
@@ -2064,6 +2065,28 @@ at a time, and recorded — the information ladder in `experiments.md` E1.
 *Decided — Shawn, 2026-10-07*, replacing the 2026-10-06 plan to show a sign
 domain and the README's worked cases; `ref-sign` remains as a reference domain
 and a later rung.
+
+**The smoke corpus** (`corpora/smoke/`) judges what a generated domain can do
+and is never shown to a model. Eight probes, each with one target and its true
+answer in `manifest.json`: five unreachable targets spread across what different
+domains can prove (`Const1` constants, `Sign1` signs, `Range1` intervals,
+`Arith1` intervals that narrow back through `+`, `Loop1` intervals that widen)
+and three reachable ones with inputs that reach them (`Const2`, `Range2`,
+`Loop2`), so a domain refuting any of them is caught unsound at once. `Loop1`
+makes the loop matter: the target depends on a fact the loop carries, so working
+backward each trip raises a bound without end, and only widening stops it — a
+domain that does not converge shows `I` (iteration limit) before anyone inspects
+it by hand; a test confirms `ref-interval` without widening does exactly that.
+`Loop2` catches loop handling that drops states. `campaign`'s `Evaluate` runs
+`pag check --json` on every target under two clocks: `pag --deadline 20s`, after
+which pag stops cleanly and reports inconclusive (`I`), and a 30-second
+wall-clock kill for a domain stuck inside one call (`H`); the gap keeps a slow
+domain from being reported as a hung one. *Decided — Shawn, 2026-10-07*: the
+smoke probes take under a second, so nothing waits longer than 30 seconds; `ref-interval` proves
+all five, `ref-sign` only `Sign1`. *Loop probes added at Shawn's suggestion,
+2026-10-07.* Order matters in such probes: a test on `x` placed *after* `y = x + 1`
+reaches the assignment already constrained, so a plain forward check suffices
+and no narrowing is exercised; `Arith1` puts the test first.
 
 **The prompt is versioned text, assembled.** Templates live in
 `campaign/prompts/<version>/` (`system.md`, `user.md`) with `{{slots}}` filled

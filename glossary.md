@@ -310,6 +310,12 @@ first prompt shows no example at all (plan Phase 10). The `ref-` prefix marks ha
 known-good baseline to develop against and to seed mutants from, not something
 the system requires.
 
+**Smoke corpus** — `corpora/smoke/`: eight hand-written probes with known
+answers that judge a generated domain in crude Phase 10, never shown to the
+model. Five unreachable targets measure what it proves (one, `Loop1`, needs
+widening, so non-convergence shows); three reachable ones, run with inputs that
+reach them, catch a domain that refutes them (plan Phase 10).
+
 **Mutant** — a domain known to be unsound, used to calibrate the adversary:
 either hand-written with a planted bug, or a generated domain the adversary
 rejected. Hand-written mutants live in `domains/mut-<name>/`, with `domain.json`

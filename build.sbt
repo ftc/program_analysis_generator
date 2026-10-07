@@ -181,7 +181,10 @@ lazy val cli = (project in file("engine/cli"))
   * check below enforces that before its tests run.
   */
 lazy val campaign = (project in file("campaign"))
-  .dependsOn(results)
+  // cli for tests only: they run the real pag in-process and build domain jars with
+  // cli's test helpers. The main code still links only results, which the check
+  // below enforces on the main classpath.
+  .dependsOn(results, cli % "test->test")
   .settings(
     scalaModule,
     sootBoundary,

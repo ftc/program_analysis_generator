@@ -1,5 +1,7 @@
-# Shared setup for the demo scripts; sourced, not run. Builds what pag needs,
-# then defines `pag` and `compile_probe`. Stops at the first unexpected result.
+# Shared setup: builds what pag needs, defines `pag` and `compile_probe`, and
+# writes demo_scripts/out/pag, a launcher the campaign uses. The demo scripts
+# source it; run it directly (`bash demo_scripts/common.sh`) to set up the
+# campaign. Stops at the first unexpected result.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -33,3 +35,13 @@ compile_probe() {
 
 # pag ARGS...: runs pag in this JVM, without sbt around it.
 pag() { java -cp "$PAG_CP" pag.cli.Main "$@"; }
+
+# The same as a launcher other programs can run: the campaign runs pag through it
+# (implementation_strategy.md §12). Rewritten on every setup, so it never points
+# at a stale classpath.
+cat > "$OUT/pag" <<LAUNCHER
+#!/usr/bin/env bash
+# Written by demo_scripts/common.sh; rerun \`bash demo_scripts/common.sh\` to refresh.
+exec java -cp "$PAG_CP" pag.cli.Main "\$@"
+LAUNCHER
+chmod +x "$OUT/pag"
