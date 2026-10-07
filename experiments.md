@@ -120,6 +120,61 @@ model's licence, before running**:
 | Google | Gemma 3 (up to 27B) | small, strong general models |
 | Microsoft | Phi-4 | small, trained heavily on reasoning |
 
+**Setup and first model.** Dual RTX 3090, with Ollama, vLLM and llama.cpp.
+The first model is Qwen3.8 27B at a 6-bit quantization, served by llama.cpp's
+OpenAI-compatible server at `http://localhost:8933/v1` (checked 2026-10-06 with
+`/v1/models`):
+
+| field | as the server reports it |
+| --- | --- |
+| model id (send as `"model"`) | `/home/s/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K_XL.gguf` |
+| parameters | 27,320,697,856 |
+| file size | 25,913,155,584 bytes |
+| context | 262,144 tokens (`n_ctx`, equal to `n_ctx_train`) |
+| quantization | `UD-Q6_K_XL` by file name (Unsloth dynamic); the server's `ftype` field says `Q4_K - Small` |
+| capabilities | `completion`, `multimodal` |
+
+Source: `https://huggingface.co/unsloth/Qwen3.8-27B-GGUF`, file
+`Qwen3.8-27B-UD-Q6_K_XL.gguf` (from Shawn's shell history on the serving
+machine). Revision and SHA-256 not yet recorded.
+
+The two quantization labels disagree. The size — about 7.6 bits per weight —
+fits the file name's 6-bit mix with some layers kept wider, not a 4-bit model,
+so `ftype` is likely a nominal label from the file header; recorded as reported.
+Each attempt records the model id, so a different file is a different model.
+
+**Identifying a model.** A Hugging Face repository URL is a pointer, not an
+identity: one repository holds many quantization files, and repositories are
+re-uploaded under the same name (for chat-template or tokenizer fixes, say). So
+each model's config carries a `source` (plan §10): the URL and the **file** say
+where to get it, the **revision** (the repository commit) pins the upload, and
+the file's **SHA-256** says which bytes it was — the one identifier that holds
+wherever the file lives and whatever it is called, and which matches the hash
+Hugging Face shows for the file. Compute it once on the serving machine
+(`sha256sum <file>`). The model is not the whole configuration: the chat
+template, context size, server sampling defaults and server version also change
+behaviour, which is why each attempt also records the request parameters and
+the server's own report. A fuller provenance scheme is being worked on
+separately by a coworker of Shawn's; these fields are a placeholder it can
+replace. The goal is to
+see how the system behaves across levels of model capability — frontier models
+would likely outpace the setup quickly — so a few smaller models should be
+benchmarked beside it. **Open, to discuss before E3:** which smaller models,
+and at what sizes and quantizations.
+
+Installed now (Ollama, `localhost:11434`, checked 2026-10-06 with `/api/tags`),
+already a ladder across three families:
+
+| model (exact Ollama name) | parameters | quantization |
+| --- | --- | --- |
+| `llama3.2:3b` | 3.2B | Q4_K_M |
+| `gemma3:latest` | 4.3B | Q4_K_M |
+| `qwen2.5-coder:14b` | 14.8B | Q4_K_M |
+
+The 27B model is not among them; it is served by llama.cpp on port 8933
+(above). Open WebUI on `localhost:3000` is a chat front end over these servers,
+not an endpoint the campaign uses.
+
 Run the generator and the adversary as **different** models (§10); E3 should
 include a few cross-pairings, since a weak adversary would make every generator
 look sound.

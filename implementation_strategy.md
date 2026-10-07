@@ -1441,14 +1441,34 @@ An agent asked to write a domain and then attack it has no reason to attack hard
 The generator and adversary are configured separately so they can be different
 models — which the paragraph above requires anyway.
 
-```hocon
-agents {
-  generator { baseUrl = "http://localhost:11434/v1", model = "qwen2.5-coder:32b",
-               apiKeyEnv = "PAG_GENERATOR_KEY", temperature = 0.2 }
-  adversary { baseUrl = "https://api.example.com/v1", model = "...",
-               apiKeyEnv = "PAG_ADVERSARY_KEY", temperature = 0.9 }
-}
+```json
+{ "agents": {
+    "generator": { "baseUrl": "http://localhost:8933/v1",
+                   "model": "/home/s/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K_XL.gguf",
+                   "apiKeyEnv": "PAG_GENERATOR_KEY", "temperature": 0.2,
+                   "source": { "url": "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF",
+                               "file": "Qwen3.8-27B-UD-Q6_K_XL.gguf",
+                               "revision": null, "sha256": null } },
+    "adversary": { "baseUrl": "https://api.example.com/v1", "model": "...",
+                   "apiKeyEnv": "PAG_ADVERSARY_KEY", "temperature": 0.9 } } }
 ```
+
+**`source` says where a model came from and which bytes it is**: the download
+URL, the file, the repository revision and the file's SHA-256, entered by hand
+once per model. The campaign copies it into every attempt record without
+interpreting it — a placeholder for a fuller provenance scheme being designed
+separately, which can replace it. Each attempt also records, automatically, the
+request parameters it sent and what the server reported about the model at the
+time (`/v1/models`, and llama.cpp's `/props` if present), so an unrecorded swap
+of the model file still shows as a changed size or parameter count (E3 in
+`experiments.md`). *Decided — Shawn, 2026-10-06.*
+
+**Config is JSON**, read with the same Borer codecs as every record (§13). A
+config is read once, or once every few minutes, so its format has no
+performance cost; HOCON was considered for data repeatedly serialized through
+the algorithm, which config is not. *Decided — Shawn, 2026-10-06.* The client
+speaks the OpenAI-compatible `/v1/chat/completions` API, which Ollama, vLLM and
+hosted models all serve.
 
 Credentials are named by environment variable, never written to the config file
 and never to the repo. Every result records which agent config produced
@@ -1670,6 +1690,12 @@ Decided: one language on the human-written side. The only source-level coupling
 to the engine is `engine/results` (§13); everything else goes through
 subprocesses and exit codes.
 
+**A module of the main build, separate as a process.** `campaign/` is an sbt
+module beside the engine's, so one `sbt test` covers both, and a build check
+(like the Soot boundary, §5.5) fails if any engine module but `results` reaches
+its classpath. It runs `pag` through the launcher that `demo_scripts/common.sh`
+builds, never by linking. *Decided — Shawn, 2026-10-06.*
+
 ## 13. Serialization
 
 Results cross a process boundary (§12) and are stored durably, so the format is
@@ -1679,10 +1705,8 @@ because Historia's serialization got annoyingly slow.** Both are satisfiable.
 
 ### One codec set, two wire formats, chosen in config
 
-```hocon
-serialization {
-  format = "json"      # or "cbor"
-}
+```json
+{ "serialization": { "format": "json" } }
 ```
 
 [Borer](https://github.com/sirthias/borer) is the fit: the same `Encoder` and
@@ -2021,7 +2045,14 @@ First code in `campaign/` (§12): generate → build → `pag analyze` on a smok
 corpus → report. Bounded retries, durable per-attempt records, every attempt
 logged with api version, corpus hash and outcome.
 *Done when:* a small model produces a domain that compiles, loads, and refutes at
-least one target, working from the contract and the reference example alone.
+least one target, working from the contract and the worked example alone.
+
+**The worked example is not the target domain.** Shown all of `ref-interval`, a
+model could copy it and "succeed" without writing anything, and E1 would
+measure copying. So the prompt's worked example is a small **sign domain**
+(states such as −, 0, +; `domains/ref-sign/`), together with the README's six
+worked interval transfer cases, and the model writes intervals itself.
+*Decided — Shawn, 2026-10-06.*
 This is E1's first data point (`experiments.md`): rung R0–R1, one shot, one
 model; the attempt records must already carry what E1 needs (prompt version,
 sample, each feedback round's kind and outcome).
