@@ -125,7 +125,7 @@ engine/                    sbt multi-project, human-only
 domains/                   every domain worth keeping, one directory each
   build-template/          the one Gradle build every domain is built with (below)
   ref-interval/            Java. the reference fixture, and later a target
-  ref-sign/                Java. the generator prompt's worked example (Phase 10)
+  ref-sign/                Java. a second reference; the ladder's worked-example rung (E1)
   ref-<name>/              a hand-written reference domain (ref-zones next, §16)
     src/  test/            the domain and its unit tests; no build file of its own
     domain.json            metadata (below)
@@ -2048,12 +2048,33 @@ logged with api version, corpus hash and outcome.
 *Done when:* a small model produces a domain that compiles, loads, and refutes at
 least one target, working from the contract and the worked example alone.
 
-**The worked example is not the target domain.** Shown all of `ref-interval`, a
-model could copy it and "succeed" without writing anything, and E1 would
-measure copying. So the prompt's worked example is a small **sign domain**
-(states such as −, 0, +; `domains/ref-sign/`), together with the README's six
-worked interval transfer cases, and the model writes intervals itself.
-*Decided — Shawn, 2026-10-06.*
+**The prompt describes no solution.** The question is whether a model can come
+up with a domain, not whether it can implement one it is given. So the first
+prompt holds the least information that defines the task: the reply format, a
+general statement (prove `reach` calls unreachable, soundly; what to track is up
+to the model), and the contract. No kind of domain is named, and no worked
+example or worked case is shown; even the contract's Javadoc example of an
+interval transfer was removed. Context is added only when models fail, one rung
+at a time, and recorded — the information ladder in `experiments.md` E1.
+*Decided — Shawn, 2026-10-07*, replacing the 2026-10-06 plan to show a sign
+domain and the README's worked cases; `ref-sign` remains as a reference domain
+and a later rung.
+
+**The prompt is versioned text, assembled.** Templates live in
+`campaign/prompts/<version>/` (`system.md`, `user.md`) with `{{slots}}` filled
+from the repository at run time — so far only `{{contract}}`, `engine/api`'s
+sources; each rung of the ladder brings its own — so the prompt can never drift
+from the code it describes. An attempt records
+the **full messages sent** and the full reply, not just their identity: the
+prompt is rebuilt from the repository, so a later commit or a dirty tree would
+make it impossible to recover what the model actually saw, and feedback rounds
+grow the conversation anyway. It also records the version and the SHA-256 of the
+messages, for grouping attempts that saw the identical prompt and spotting
+drift. At about 28 KB a prompt, inlining costs little; storing each distinct
+prompt once under its hash is the change to make if it ever does.
+*Decided — Shawn, 2026-10-07.* The reply's files are
+read from fenced blocks naming their path; a path that could write outside the
+attempt's `src/` and `test/` is refused, since the files come from a model.
 This is E1's first data point (`experiments.md`): rung R0–R1, one shot, one
 model; the attempt records must already carry what E1 needs (prompt version,
 sample, each feedback round's kind and outcome).

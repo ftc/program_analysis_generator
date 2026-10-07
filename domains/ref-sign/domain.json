@@ -3,5 +3,5 @@
   "status": "reference",
   "origin": "hand-written",
   "profile": "bigint-main-v1",
-  "role": "the generator prompt's worked example (implementation_strategy.md Phase 10)"
+  "role": "a second reference domain, and the worked example of the information ladder's rung 3 (experiments.md E1)"
 }

@@ -63,8 +63,7 @@ public interface Domain<S> {
      *   <li>{@code Assign(x, e)}: {@code x} holds the value of {@code e} evaluated
      *       <i>before</i> the step, and nothing else changes. So {@code post}'s
      *       constraint on {@code x} becomes a constraint on {@code e}, and {@code x}
-     *       itself is unconstrained before. Example: {@code x := x + 1} with
-     *       {@code post} x ∈ [0,10] gives x ∈ [-1,9].
+     *       itself is unconstrained before.
      *   <li>{@code Assume(c)}: nothing changes, but only states where {@code c} holds
      *       pass. The result is {@code post} restricted to {@code c}.
      *   <li>{@code Call(x, pag.probe.Rand.randInt(), [])}: {@code x} gets an arbitrary

@@ -303,9 +303,9 @@ policy (§7).
 **Reference domain** — a hand-written domain, known sound. Two so far:
 `ref-interval` (directory, `domain.json` id, `name()`, and package
 `pag.domains.ref.interval`), the fixture the engine is developed against; and
-`ref-sign` (`pag.domains.ref.sign`), the sign domain the generator prompt uses as
-its worked example, so a model is not shown the interval domain it is asked to
-write (plan Phase 10). The `ref-` prefix marks hand-written reference domains as
+`ref-sign` (`pag.domains.ref.sign`), a sign domain: a second reference, and the
+worked example of the information ladder's rung 3 (`experiments.md` E1). The
+first prompt shows no example at all (plan Phase 10). The `ref-` prefix marks hand-written reference domains as
 `mut-` marks mutants and `gen-` generated ones. A **fixture**: a
 known-good baseline to develop against and to seed mutants from, not something
 the system requires.

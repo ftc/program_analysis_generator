@@ -46,6 +46,26 @@ within the calibrated budget (Phase 8), and proves at least a set fraction of
 the rung's provable targets. Soundness is the gate; the proof fraction is the
 bar for "useful", set per rung once the reference domain's own fraction is known.
 
+### The information ladder: context before an attempt
+
+*Decided — Shawn, 2026-10-07.* The question is whether a model can come up with
+a solution, not implement one it is described. So every model starts with the
+least information that defines the task, and context is added only when it
+fails — one rung at a time, recorded with the attempt, so the answer includes
+*which* addition made the difference:
+
+| rung | adds | prompt |
+| --- | --- | --- |
+| 0 | the reply format, a general task (prove `reach` calls unreachable, soundly; what to track is the model's choice), and the contract | `generator-v1` |
+| 1 | which step shapes actually occur (the profile: assignments of constants, locals and `+ − *`; the six comparisons; `randInt`) | |
+| 2 | the domain named ("intervals") | |
+| 3 | a worked example of another domain (`ref-sign` and its tests) | |
+| 4 | worked transfer cases for the target domain (the README's six) | |
+
+Rungs 1–4 are written when rung 0's results call for them. Context added
+*before* an attempt is a different thing from the feedback given *after* one
+(below); both are recorded.
+
 ### Feedback, in increasing cost
 
 When a one-shot attempt is not acceptable, feedback is given in rounds, and the
