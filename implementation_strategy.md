@@ -180,8 +180,14 @@ than a planted one (Phase 8).
 
 **What is committed and what is not.** Reference, mutant, surviving and
 rejected domains are committed, since they are few and worth reviewing like
-code. Domains that fail to compile or load, and full attempt logs, stay in
-`results/<campaign>/` and are not committed: a campaign produces hundreds.
+code. **Every attempt is committed too**: `results/<campaign>/<attempt>/`'s
+`attempt.json` and the domain sources the model wrote (`domain/src`,
+`domain/test`), whether or not they compiled. Shawn's manual inspection refers
+to attempts by id, and a regenerated attempt would be a different sample, so the
+original must never be lost; a campaign run only fills in attempts that have no
+`attempt.json`, and never rewrites one. What a build or an evaluation produces
+from those sources (`domain/build/`, `work/`) is not committed. *Decided —
+Shawn, 2026-10-07*, reversing the earlier plan to keep attempt logs out of git.
 Moving to SQLite later changes the storage, not the schema, because both files
 use the `engine/results` codecs (§13).
 
@@ -2087,6 +2093,28 @@ all five, `ref-sign` only `Sign1`. *Loop probes added at Shawn's suggestion,
 2026-10-07.* Order matters in such probes: a test on `x` placed *after* `y = x + 1`
 reaches the assignment already constrained, so a plain forward check suffices
 and no narrowing is exercised; `Arith1` puts the test first.
+
+**An attempt, end to end** (`campaign`'s `Attempt`): ask the model; write the
+files its reply names under `results/<campaign>/<attempt>/domain/`; build with
+the template in two Gradle runs, `jar` then `test`, so a domain whose own tests
+fail is still evaluated and its failures become a column; evaluate on the smoke
+corpus; and write `attempt.json`. Every step that cannot run is recorded as not
+run — no reply, no files, no compile — and the record is written in every case,
+last, through a temporary file and an atomic move, so its presence means the
+attempt finished. That is what lets a campaign resume (§12).
+
+**A campaign's inputs are pinned** (crude Phase 10, `campaign generate`). A
+campaign is the unit of work with fixed inputs (§12), so its first run writes
+`results/<campaign>/campaign.json`: the agent configuration, the prompt's version
+and hash (which covers the contract it is assembled from), a hash of the corpus
+(`manifest.json` and the probe sources), and the profile. A later run of the
+same campaign refuses if any differ — start a new campaign instead — so two
+experiments' samples never mix under one name. The commit is not pinned:
+committing the attempts or the inspection notes moves `HEAD`, and resuming must
+still work; each attempt's envelope records its own commit. Suggested naming,
+one campaign per model: `e1-rung0-<model>`. *Decided — Shawn, 2026-10-07*; the
+module keeps the name `campaign`, the glossary's *Campaign* being the unit of
+work and the module "the campaign driver".
 
 **The prompt is versioned text, assembled.** Templates live in
 `campaign/prompts/<version>/` (`system.md`, `user.md`) with `{{slots}}` filled
