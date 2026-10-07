@@ -140,9 +140,15 @@ model's licence, before running**:
 | Google | Gemma 3 (up to 27B) | small, strong general models |
 | Microsoft | Phi-4 | small, trained heavily on reasoning |
 
-**Setup and first model.** Two machines: a dual RTX 3090 machine, with Ollama,
-vLLM and llama.cpp, serving the 27B model; and Shawn's Mac, whose Ollama holds
-the smaller models (the table below).
+**Setup and first model.** A dual RTX 3090 machine with Ollama, vLLM and
+llama.cpp. **Every model is served by llama.cpp**, as a **size ladder within one
+family, Qwen3.8**: comparing sizes of one family separates "smaller models cannot
+do this" from differences in training data or chat template between families.
+Which Qwen3.8 sizes, and at what quantization, is for the setup discussion;
+holding the quantization level constant across sizes keeps size the only thing
+that varies. One server for all also gives one progress source (llama.cpp's
+`/slots`) for `campaign status`. *Decided — Shawn, 2026-10-07*, replacing the
+plan to use the Ollama models on Shawn's Mac.
 The first model is Qwen3.8 27B at a 6-bit quantization, served by llama.cpp's
 OpenAI-compatible server at `http://localhost:8933/v1` (checked 2026-10-06 with
 `/v1/models`):
@@ -184,8 +190,9 @@ would likely outpace the setup quickly — so a few smaller models should be
 benchmarked beside it. **Open, to discuss before E3:** which smaller models,
 and at what sizes and quantizations.
 
-Installed now on Shawn's Mac (Ollama, `localhost:11434`, checked 2026-10-06 with `/api/tags`),
-already a ladder across three families:
+For the record, what was installed on Shawn's Mac (Ollama, `localhost:11434`,
+checked 2026-10-06 with `/api/tags`) — no longer the plan, since every model now
+runs on llama.cpp:
 
 | model (exact Ollama name) | parameters | quantization |
 | --- | --- | --- |
@@ -250,12 +257,14 @@ part of what it is told (plan Phase 10).
 An iteration or two on the experimental setup comes before rung 0 is run for
 real. Open questions:
 
-1. **Models.** Qwen3.8 27B on the RTX 3090 machine, plus the smaller models on
-   Shawn's Mac (E3's Ollama table). Which, and how many sizes?
+1. **Models.** A Qwen3.8 size ladder on llama.cpp, the 27B at the top (E3).
+   Which smaller sizes, and one quantization level for all?
 2. **Samples and sampling.** How many samples per model; temperature; whether to
    fix seeds where the server allows.
-3. **Reasoning.** Qwen3.x thinks before answering (`reasoning_content`): on or
-   off, and the token budget, which counts the thinking.
+3. **Reasoning and budgets.** Qwen3.x thinks before answering
+   (`reasoning_content`): on or off; the token budget, which counts the
+   thinking; and the client's timeout. The first real sample was still
+   generating after 20 minutes at about 28 tokens/s, with no cap set.
 4. **What a row means.** Which columns decide "acceptable", and the summary
    statistic across samples (any success in N, or the rate).
 5. **The inspection rubric.** Categories for "what it tracks" (constants, signs,
