@@ -1,0 +1,21 @@
+{
+  "agent": {
+    "baseUrl": "http://localhost:8933/v1",
+    "model": "/home/s/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K_XL.gguf",
+    "apiKeyEnv": null,
+    "temperature": 0.2,
+    "maxTokens": null,
+    "timeoutSeconds": 1800,
+    "retries": 3,
+    "source": {
+      "url": "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF",
+      "file": "Qwen3.8-27B-UD-Q6_K_XL.gguf",
+      "revision": null,
+      "sha256": null
+    }
+  },
+  "promptVersion": "generator-v1",
+  "promptSha256": "38656f7f9ac40d72e70dde7eccf4ad9b7773b76de670b5c0e77f32bf79a7ec28",
+  "corpusSha256": "0b6fff6eb059818d3bdf34f16ccdec9be3fa82140a171632b52548961a87b869",
+  "profile": "bigint-main-v1"
+}
