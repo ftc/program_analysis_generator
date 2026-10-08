@@ -256,7 +256,23 @@ rather than copied by hand.
 - **Manual inspection is a column the script never writes.** Shawn's judgment of
   each generated domain lives in a hand-edited file, `report/inspection.json`,
   keyed by attempt id; the script merges it in, so regenerating a table never
-  loses a note, and an attempt not yet inspected shows a blank.
+  loses a note, and an attempt not yet inspected shows a blank. Its shape, every
+  field optional:
+
+  ```json
+  { "attempts": {
+      "e1-rung0-qwen3.5-27b/attempt-001": {
+        "closestDomain": "intervals", "soundnessByEye": "looks sound",
+        "quality": "tests meaningful", "acceptable": true, "notes": "..." } } }
+  ```
+
+  `campaign report [--prefix e1-rung0-]` reads every campaign whose name starts
+  with the prefix, smallest model first (the size is read from the name), and
+  writes `report/tables/table1.tex`, `table2.tex`, and `prompt.txt` — the prompt
+  exactly as sent, taken from the records, for the appendix. Output is
+  deterministic, so regenerating unchanged results changes nothing in git; an
+  inspection naming an attempt that is not among the campaigns read is warned
+  of.
 
 ### Table 1 — one shot, rung 0, the smoke corpus
 
