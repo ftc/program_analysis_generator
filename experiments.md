@@ -274,7 +274,7 @@ One row per attempt; models grouped, smallest first.
 | proved | refutations among the four unreachable targets |
 | caught | sound so far: no reachable target refuted |
 | cost | prompt and completion tokens; wall-clock time |
-| inspection | Shawn's: what the domain tracks, and anything seen by eye |
+| inspection | Shawn's: closest existing domain, soundness by eye, quality, acceptable, notes (below) |
 
 The smoke corpus is never shown to a model; it is how a domain is judged, not
 part of what it is told (plan Phase 10).
@@ -319,13 +319,41 @@ real. Open questions:
    with no cap, and had not finished when the client's 30-minute timeout fired;
    a bug then retried it from scratch, and the run was stopped. Fixed: a timeout
    is no longer retried.
-4. **What a row means.** Which columns decide "acceptable", and the summary
-   statistic across samples (any success in N, or the rate).
-5. **The inspection rubric.** Categories for "what it tracks" (constants, signs,
-   intervals, something else, nothing coherent), and what to note by eye.
-6. **Fairness across models.** The same prompt for all; differences in chat
-   templates and quantization noted rather than controlled.
-7. **The report's shape.** Sections, and whether any figure is wanted yet.
+4. ~~**What a row means.**~~ *Decided — Shawn, 2026-10-08.* A row is one
+   attempt, judged at the first stage it fails: no reply, ran out of tokens, no
+   files, did not compile, did not load — or evaluated, with its cells and
+   *proved* count. **Acceptable has two bars, reported separately:**
+   - **mechanical** — passes the smoke tests: evaluated, no ✗ (not caught
+     unsound), and proves at least one of the five unreachable targets (Phase
+     10's done-when, per attempt);
+   - **inspection** — Shawn judges it acceptable (below).
+
+   **Unsound** is its own category, never folded into "failed". Per model, the
+   summary (Table 2) gives counts, never percentages, since five samples are few:
+   acceptable by each bar ("2/5 mechanical, 1/5 inspection"), the median *proved*
+   among mechanically acceptable attempts, and where the others stopped.
+5. ~~**The inspection rubric.**~~ *Decided — Shawn, 2026-10-08.* Per attempt, in
+   `report/inspection.json`, keyed by attempt id:
+   - **closest existing domain** — constants, signs, intervals, intervals with
+     widening, another (named), or none coherent;
+   - **soundness by eye** — looks sound, suspicious (where), or clearly unsound;
+   - **quality** — whether its own tests are meaningful or trivial, and anything
+     notable;
+   - **acceptable** — yes or no: the inspection bar;
+   - **notes** — free text.
+
+   The fixed fields are short lists, so they can be counted across the table.
+6. ~~**Fairness across models.**~~ *Decided — Shawn, 2026-10-08.* The same
+   prompt, settings, corpus and hardware for every model, guaranteed per
+   campaign by its pin. Each model's own chat template and thinking behaviour are
+   part of the model, noted rather than controlled. Time is reported per attempt
+   but never compared across sizes as a measure of quality.
+7. ~~**The report's shape.**~~ *Decided — Shawn, 2026-10-08.* (1) Setup: the
+   models, the run settings, the rung-0 prompt in full in an appendix, the
+   corpus. (2) Table 1: one row per attempt, grouped by model. (3) Table 2: per
+   model, acceptable by each bar, median *proved*, where the rest stopped.
+   (4) Observations, written by hand from the inspection notes. No figures yet;
+   acceptable against model size is the first, once the five sizes are run.
 
 ## Order
 
