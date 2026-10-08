@@ -24,25 +24,44 @@ Shawn runs the experiments; these are the steps, once per model size. Start with
 **one sample of a small size**, to see a real reply go through the whole
 pipeline before spending hours on the 27B.
 
-1. **Make the model.** Convert the official repository to a Q8 GGUF with
-   llama.cpp's converter and quantizer (models below). Note the repository's
-   **revision** (its commit on Hugging Face), and run `sha256sum` on the GGUF.
-   Put the llama.cpp commit used in the GGUF's file name.
-2. **Serve it.** On the RTX 3090 machine:
+1. **Make the model and serve it.** On the RTX 3090 machine, with the model's
+   `source` URL from the table below:
 
    ```
-   llama-server -m <the Q8 GGUF> -c 65536 -np 1 --port 8933
+   bash scripts/serve_model.sh https://huggingface.co/Qwen/Qwen3.5-<size>
    ```
 
-   plus the usual GPU flags (`--jinja` is on by default and is needed for the
-   thinking switch). Check that `curl -s http://localhost:8933/slots` shows **one
-   slot** with `n_ctx` of at least 65,536.
-3. **Write its config.** Copy `config/e1-rung0-qwen3.5.example.json` to
+   The script pins the repository's current **revision** (its commit on
+   Hugging Face), downloads it, converts it with llama.cpp's converter to a
+   BF16 GGUF and quantizes that to Q8_0, then deletes the download and the
+   BF16 file. The result is
+   `~/models/<model>-GGUF/<model>-Q8_0-llamacpp-<commit>.gguf`, named after
+   the llama.cpp commit that made it. Beside it, `<same>.source.json` holds the
+   config's `source` block: URL, file, revision and SHA-256. The script then
+   runs
+
+   ```
+   llama-server -m <the Q8 GGUF> -c 65536 -np 1 --port 8933 -ngl all
+   ```
+
+   (`--jinja` is on by default and is needed for the thinking switch;
+   `-ngl all` makes a model that does not fit fail instead of running partly
+   on the CPU). Arguments after the URL go to `llama-server`. If the GGUF
+   already exists, the script skips straight to serving. It refuses to run
+   when the llama.cpp checkout (`LLAMA_CPP`, default `~/software/llama.cpp`)
+   is not at the commit `llama-server --version` reports, so the converter
+   and the server always come from the same llama.cpp. Upgrade llama.cpp
+   before a ladder, not partway through it: every size should run on the
+   same server.
+
+   Check that `curl -s http://localhost:8933/slots` shows **one slot** with
+   `n_ctx` of at least 65,536.
+2. **Write its config.** Copy `config/e1-rung0-qwen3.5.example.json` to
    `config/e1-rung0-qwen3.5-<size>.json` and fill in every `<…>` placeholder:
    the model id (as `curl -s http://localhost:8933/v1/models` reports it), and
-   the `source` URL, file, revision and SHA-256. `campaign` refuses a config
-   that still has a placeholder.
-4. **Run it.**
+   the `source` block, printed by the script and saved in its `.source.json`.
+   `campaign` refuses a config that still has a placeholder.
+3. **Run it.**
 
    ```
    bash scripts/common.sh
@@ -52,7 +71,7 @@ pipeline before spending hours on the 27B.
    One campaign per model, named `e1-rung0-<model>`. Rerunning the same command
    only fills in samples that have no `attempt.json`, and never rewrites one;
    changing any setting means a new campaign name (the first run pins them).
-5. **Watch it**, in a second terminal:
+4. **Watch it**, in a second terminal:
 
    ```
    sbt "campaign/run status --campaign e1-rung0-qwen3.5-<size> --every 5"
@@ -61,11 +80,11 @@ pipeline before spending hours on the 27B.
    Progress, the live generation (tokens, rate, time before the timeout), the
    finished attempts, and warnings — above all, the same failure several times
    running, which points at the prompt or the reply format.
-6. **Inspect** each attempt's `results/<campaign>/attempt-NNN/` — `attempt.json`
+5. **Inspect** each attempt's `results/<campaign>/attempt-NNN/` — `attempt.json`
    (prompt, reply, reasoning, build log, results) and `domain/` (the model's
    code) — and record the judgment in `report/inspection.json`
    (*The inspection rubric*, below).
-7. **Write it up.**
+6. **Write it up.**
 
    ```
    sbt "campaign/run report"
