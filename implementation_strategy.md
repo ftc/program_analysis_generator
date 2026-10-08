@@ -1829,6 +1829,13 @@ rest:
    four hand-written mutants and one generated domain. *Done when* a kill rate
    is reported, however rough.
 4. **Phases 4.5, 6, 7, 9**, then the full versions of **8, 10, 11**.
+   Directly after the first one-shot table: a crude Phase 9 (the campaign's
+   build-test-evaluate step in a container), then the generator's first tools
+   (`compile_and_test`, then `analyze`), as their own campaigns (§16, item 24).
+   The first one-shot table itself runs without a container, the model's domain
+   and tests executing directly on Shawn's Mac: a domain plus JUnit tests,
+   compiled against `pag.api` alone, run briefly, every attempt recorded and
+   inspected. *Risk accepted — Shawn, 2026-10-08.*
    Also after the first experiment: **worklist ordering** (§7, *Worklist
    order*), judged by `Computed.iterations` on the fixtures.
 
@@ -2053,6 +2060,17 @@ before trusting it.
 *Done when:* a generator container can build a domain with networking off and
 cannot read `engine/core`; an adversary container can read a domain but not
 write it.
+
+**First, a crude version for the campaign's own step** (*Decided — Shawn,
+2026-10-08*): everything that touches model-written code — building, running the
+model's tests, `pag` on its domain, and later every tool call — runs in a
+container, before tools are added. Podman, which this Mac has (5.8.1, rootless,
+its Linux VM running with 8 CPUs and 20 GB): `--network none`; the attempt's
+directory mounted read-write and the repository read-only; CPU, memory and
+process limits beside the existing wall-clock kill; and an image with the JDK,
+the pinned Gradle distribution and its offline cache, JUnit and `pag`, so builds
+run `--offline` and cannot fetch anything. The compose file above is the full
+version, for when the agents themselves run contained.
 
 ### Phase 10 — the generator agent
 First code in `campaign/` (§12): generate → build → `pag analyze` on a smoke
@@ -2322,22 +2340,26 @@ framework, library, or the OS.
     copies for now; revisit before the corpus grows. For mutants, settled:
     reference plus patch, before the adversary sees one (Phase 8; *Decided —
     Shawn, 2026-10-06*). Generated domains remain full directories.
-24. **Tools for the agents.** *To discuss — raised by Shawn, 2026-10-08.* Should
-    the generator and the adversary be able to call tools — a shell (compile,
-    run their own tests, run `pag`), a searchable index of scientific papers on
-    abstract interpretation — and if so, built into our own loop or taken from an
-    existing agent framework such as smolagents
-    (https://github.com/huggingface/smolagents)? Points for the discussion:
-    - **Our loop**: the OpenAI-compatible API carries tool calls, and llama.cpp
-      supports them with `--jinja`, so the campaign driver could execute a small
-      set of tools itself, recorded like everything else; it stays in Scala (§12)
-      and the records stay ours. More to build for every tool.
-    - **A framework**: many tools and the agent loop come ready-made, but
-      smolagents is Python, which crosses §12's one-language decision, and its
-      records and retries would need fitting to ours (§13, durable attempts).
-    - **Shell access is code execution by a model**: it needs Phase 9's isolation
-      first, whichever way it is built.
-    - **For the experiments, a tool is information.** Compile-and-test tools are
-      E1's feedback rounds made self-service; a paper index is a rung of the
-      information ladder. Either changes what a result measures, so tools would
-      enter as their own, recorded experimental condition, not as a default.
+24. ~~**Tools for the agents.**~~ *Decided — Shawn, 2026-10-08.* Raised the same
+    day: should the generator and the adversary call tools — a shell, a
+    searchable index of papers — built into our own loop or taken from a
+    framework such as smolagents (https://github.com/huggingface/smolagents)?
+    - **Our own loop.** The OpenAI-compatible API carries tool calls (llama.cpp
+      supports them with `--jinja`); the campaign driver runs each call with
+      code it already has and records every call and result in `attempt.json`.
+      It stays in Scala (§12) and the records stay ours. If the tool plumbing
+      grows cumbersome, LangChain4j (JVM) is the library to bring in, not a
+      Python framework.
+    - **First tools:** `compile_and_test(files)` for the generator, then
+      `analyze(program, reach)` on programs it writes itself (never the smoke
+      corpus). A paper index is a later rung of the information ladder — a
+      project of its own (texts, extraction, search) — and a general shell waits
+      for Phase 9's isolation.
+    - **Tools are an experimental condition**, recorded as their own campaigns
+      with the tool set pinned in `campaign.json`, never a default: one shot and
+      one shot plus compile-and-test answer different questions.
+    - **After the first one-shot table**, which is the baseline tools are
+      compared against.
+    - **In a container** (Phase 9): every tool runs model-written code. So does
+      the one-shot pipeline already — Gradle runs the model's tests, `pag` runs
+      its domain — so the container covers that step, not only the tools.
