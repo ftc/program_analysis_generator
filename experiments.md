@@ -2,8 +2,7 @@
 
 The questions the first experiments are meant to answer, and how. The plan in
 `implementation_strategy.md` builds the machinery; this file says what to do
-with it. Added 2026-09-30 at Shawn's request; nothing here changes the engine
-work before Phase 10.
+with it. Added 2026-09-30 at Shawn's request.
 
 The overall question: **at what point does a small open-weight model stop being
 able to write a sound, useful abstract domain in one shot, and how much feedback
@@ -16,7 +15,171 @@ generation breaks, then measure what each kind of feedback buys.
 
 Raise the difficulty one rung at a time and record, for each rung and model,
 whether the model can produce an acceptable domain with no feedback, and if
-not, how much feedback it needs.
+not, how much feedback it needs. The first run is rung 0 of the information
+ladder, one shot, on the smoke corpus: Table 1.
+
+### Running E1, step by step
+
+Shawn runs the experiments; these are the steps, once per model size. Start with
+**one sample of a small size**, to see a real reply go through the whole
+pipeline before spending hours on the 27B.
+
+1. **Make the model.** Convert the official repository to a Q8 GGUF with
+   llama.cpp's converter and quantizer (models below). Note the repository's
+   **revision** (its commit on Hugging Face), and run `sha256sum` on the GGUF.
+   Put the llama.cpp commit used in the GGUF's file name.
+2. **Serve it.** On the RTX 3090 machine:
+
+   ```
+   llama-server -m <the Q8 GGUF> -c 65536 -np 1 --port 8933
+   ```
+
+   plus the usual GPU flags (`--jinja` is on by default and is needed for the
+   thinking switch). Check that `curl -s http://localhost:8933/slots` shows **one
+   slot** with `n_ctx` of at least 65,536.
+3. **Write its config.** Copy `config/e1-rung0-qwen3.5.example.json` to
+   `config/e1-rung0-qwen3.5-<size>.json` and fill in every `<…>` placeholder:
+   the model id (as `curl -s http://localhost:8933/v1/models` reports it), and
+   the `source` URL, file, revision and SHA-256. `campaign` refuses a config
+   that still has a placeholder.
+4. **Run it.**
+
+   ```
+   bash demo_scripts/common.sh
+   sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --campaign e1-rung0-qwen3.5-<size> --samples 5"
+   ```
+
+   One campaign per model, named `e1-rung0-<model>`. Rerunning the same command
+   only fills in samples that have no `attempt.json`, and never rewrites one;
+   changing any setting means a new campaign name (the first run pins them).
+5. **Watch it**, in a second terminal:
+
+   ```
+   sbt "campaign/run status --campaign e1-rung0-qwen3.5-<size> --every 5"
+   ```
+
+   Progress, the live generation (tokens, rate, time before the timeout), the
+   finished attempts, and warnings — above all, the same failure several times
+   running, which points at the prompt or the reply format.
+6. **Inspect** each attempt's `results/<campaign>/attempt-NNN/` — `attempt.json`
+   (prompt, reply, reasoning, build log, results) and `domain/` (the model's
+   code) — and record the judgment in `report/inspection.json`
+   (*The inspection rubric*, below).
+7. **Write it up.**
+
+   ```
+   sbt "campaign/run report"
+   (cd report && latexmk -lualatex -outdir=build report.tex)
+   ```
+
+   Then commit `results/`, `report/inspection.json` and `report/tables/`.
+
+The first one-shot table runs without a container: the model's domain and tests
+execute directly on Shawn's Mac. *Risk accepted — Shawn, 2026-10-08*; the
+container (a crude Phase 9) comes right after.
+
+### The first run: rung 0, one shot, the smoke corpus
+
+**The models: a Qwen3.5 size ladder.** *Decided — Shawn, 2026-10-07.* One family,
+so size is separated from differences in training data and chat template; all
+on llama.cpp; each a Q8 GGUF Shawn makes, so the quantization is the same for
+every size and each model keeps its own chat template (which carries the
+thinking switch):
+
+| model | source |
+| --- | --- |
+| Qwen3.5-0.8B | https://huggingface.co/Qwen/Qwen3.5-0.8B |
+| Qwen3.5-2B | https://huggingface.co/Qwen/Qwen3.5-2B |
+| Qwen3.5-4B | https://huggingface.co/Qwen/Qwen3.5-4B |
+| Qwen3.5-9B | https://huggingface.co/Qwen/Qwen3.5-9B |
+| Qwen3.5-27B | https://huggingface.co/Qwen/Qwen3.5-27B |
+
+About a 34× range in steps of 2–3×, so the size where one-shot generation breaks
+can be located. The 0.8B and 2B will probably mostly fail early; that is the
+floor, and they are cheap enough for extra samples. Qwen3.8 27B may be added
+later as a side point (a newer generation at the top size), depending on the
+results.
+
+**The run settings.** Chosen by Claude at Shawn's delegation, 2026-10-07, and
+written into the example config. Expected to change: every attempt records the
+settings it ran with, and a campaign pins them.
+
+| setting | value | why |
+| --- | --- | --- |
+| `temperature`, `topP`, `topK`, `minP`, `presencePenalty` | 0.6, 0.95, 20, 0.0, 0.0 | the 27B card's recommendation for coding in thinking mode; the same for every size |
+| `thinking` | `true`, explicit | how the models are meant to be used; thinking off is a later, cheaper variation |
+| `maxTokens` | 32,768, every size | the card's "most queries" length; one budget for all sizes. The pipeline check passed 47,000 without finishing, so expect some "ran out of tokens" — data, and the first setting to revisit (the card suggests 81,920 for complex problems) |
+| `timeoutSeconds` | 2,700 (45 minutes) | 32,768 tokens at about 28 tokens/s is about 20 minutes for the 27B, plus margin. A timeout is not retried |
+| `retries` | 3 | connection failures, 429 and 5xx only |
+| samples | 5 per size | a first table quickly; more for the cheap small sizes if noisy |
+| seed | unset | samples should differ; GPU arithmetic is not bit-reproducible anyway |
+| llama.cpp `-c` (server) | 65,536 | covers prompt plus budget, with a far smaller KV cache than the full 262,144 |
+| llama.cpp `-np` (server) | 1 | runs are one request at a time; extra slots only let other requests share the GPUs (noise in timings), and may divide `-c` between them. Other users wait; give them a second server on another port |
+| llama.cpp `--reasoning-budget` | unset | `maxTokens` caps thinking and answer together; a separate cap is a later variation |
+
+llama.cpp's server documentation confirms it accepts `chat_template_kwargs`
+(`{"enable_thinking": ...}`), `top_p`, `top_k`, `min_p`, `presence_penalty`,
+`max_tokens` and `seed` per request (read 2026-10-07).
+
+**From the Qwen3.5-27B model card** (read 2026-10-07): post-trained, Apache 2.0;
+thinking on by default, off per request with
+`chat_template_kwargs: {"enable_thinking": false}`; sampling for coding in
+thinking mode as above; output length 32,768 for most queries, 81,920 "for
+benchmarking on highly complex problems"; 262,144 tokens of context. Its summary
+mentions "Gated Delta Networks combined with sparse Mixture-of-Experts"; whether
+the 27B itself is dense was not settled, and the smaller sizes' cards were not
+read.
+
+**The prompt** is rung 0 of the information ladder (below): the reply format, a
+general task, and the contract — no domain named, no example, no worked case.
+
+**The smoke corpus** (`corpora/smoke/`, plan Phase 10) judges what a domain does
+and is never shown to a model: eight probes, five unreachable targets spread
+across what different domains can prove (constants, signs, intervals, narrowing
+through `+`, widening around a loop) and three reachable ones run with inputs
+that reach them, so a domain refuting one is caught unsound at once.
+
+**What a row means.** *Decided — Shawn, 2026-10-08.* A row is one attempt,
+judged at the first stage it fails — no reply, timed out, ran out of tokens, no
+files, did not compile, did not load — or evaluated, with its cells and the
+number of unreachable targets it proved. **Acceptable has two bars, reported
+separately:**
+
+- **mechanical** — passes the smoke tests: evaluated, no ✗ (not caught
+  unsound), and proves at least one of the five unreachable targets;
+- **inspection** — Shawn judges it acceptable (the rubric below).
+
+**Unsound** is its own category, never folded into "failed". Per model, the
+summary gives counts, never percentages, since five samples are few.
+
+**Fairness across models.** *Decided — Shawn, 2026-10-08.* The same prompt,
+settings, corpus and hardware for every model, guaranteed per campaign by its
+pin. Each model's chat template and thinking behaviour are part of the model,
+noted rather than controlled. Time is reported per attempt but never compared
+across sizes as a measure of quality.
+
+### The inspection rubric
+
+*Decided — Shawn, 2026-10-08.* Per attempt, in `report/inspection.json`, keyed
+by `"<campaign>/<attempt>"`, every field optional:
+
+- **closest existing domain** — constants, signs, intervals, intervals with
+  widening, another (named), or none coherent;
+- **soundness by eye** — looks sound, suspicious (where), or clearly unsound;
+- **quality** — whether its own tests are meaningful or trivial, and anything
+  notable;
+- **acceptable** — yes or no: the inspection bar;
+- **notes** — free text.
+
+```json
+{ "attempts": {
+    "e1-rung0-qwen3.5-27b/attempt-001": {
+      "closestDomain": "intervals", "soundnessByEye": "looks sound",
+      "quality": "tests meaningful", "acceptable": true, "notes": "..." } } }
+```
+
+The fixed fields are short lists, so they can be counted across the table. The
+report reads this file and never writes it.
 
 ### The rungs
 
@@ -36,15 +199,15 @@ rung and those below it.
 
 R0–R4 are within reach of the interval reference domain; R5 and R6 are where a
 relational domain becomes necessary, and where the reference fixture will need
-to follow (§16).
+to follow (§16). The smoke corpus touches R0, R1, R2 and R4 with one probe or
+two each.
 
-### What counts as acceptable
-
-A generated domain is **acceptable at a rung** when it compiles against
-`api.jar` alone, loads, passes the smoke test (Phase 6), survives the adversary
-within the calibrated budget (Phase 8), and proves at least a set fraction of
-the rung's provable targets. Soundness is the gate; the proof fraction is the
-bar for "useful", set per rung once the reference domain's own fraction is known.
+**Acceptable, eventually.** Beyond the first table's two bars, a domain is
+acceptable at a rung when it compiles against `api.jar` alone, loads, passes
+the smoke test (Phase 6), survives the adversary within the calibrated budget
+(Phase 8), and proves at least a set fraction of the rung's provable targets.
+Soundness is the gate; the proof fraction is the bar for "useful", set per rung
+once the reference domain's own fraction is known.
 
 ### The information ladder: context before an attempt
 
@@ -64,7 +227,9 @@ fails — one rung at a time, recorded with the attempt, so the answer includes
 
 Rungs 1–4 are written when rung 0's results call for them. Context added
 *before* an attempt is a different thing from the feedback given *after* one
-(below); both are recorded.
+(below); both are recorded. Tools for the agents (`compile_and_test`, then
+`analyze`) are a further condition, each its own campaign, after the first
+table (plan §16, item 24).
 
 ### Feedback, in increasing cost
 
@@ -86,14 +251,15 @@ domain generated piece by piece — state type, then `top`/`bottom`/`isBottom`,
 then `entails`/`join`/`widen`, then `transfer` — to find *which part* fails
 first, rather than only *that* the whole thing failed.
 
-### What to record
+### What is recorded
 
-For every (model, rung, attempt): the prompt and its version, temperature and
-sample number, each round's feedback kind and size, the outcome after each
-round (build, load, smoke, adversary verdict, proof count), wall-clock and token
-cost. Several samples per cell, since one sample says little about a sampled
-model. The records are `domain.json` and `run.json` (§3) plus the campaign's
-attempt log.
+Every attempt writes `results/<campaign>/<attempt>/attempt.json`, committed with
+the domain sources the model wrote: the envelope (commit, dirty flag, profile),
+the settings and the model's `source`, the server's own report of its model,
+**the full messages sent** and **the full reply** (with its reasoning and token
+usage), the files read from it, the build and test logs, every target's result,
+and the summary row. A campaign's `campaign.json` pins its inputs. Feedback
+rounds, when they come, add each round's kind and outcome.
 
 ### What the answer looks like
 
@@ -125,14 +291,15 @@ own beyond varying the budget.
 
 ## E3 — Which models
 
-E1 run across several open-weight models, at a few sizes, to separate "small
-models cannot do this" from "this model cannot do this". Candidates, by
-family; **versions and sizes change quickly, so check what is current, and each
+E1 run across models at several sizes, to separate "small models cannot do
+this" from "this model cannot do this". The first choice is the **Qwen3.5 size
+ladder** (E1, *The first run*); other families come later. Candidates, by family
+— **versions and sizes change quickly, so check what is current, and each
 model's licence, before running**:
 
 | family | candidates to consider | why |
 | --- | --- | --- |
-| Qwen | Qwen2.5-Coder (7B, 14B, 32B); Qwen3 and Qwen3-Coder, including the small mixture-of-experts sizes | the planned default; a size ladder within one family |
+| Qwen | the Qwen3.5 ladder (chosen); Qwen3.8 27B (a newer generation at the top size); Qwen2.5-Coder | a size ladder within one family |
 | DeepSeek | DeepSeek-Coder-V2-Lite; the R1 distilled models | strong code models; distills test whether reasoning-style training helps |
 | OpenAI | gpt-oss-20b, gpt-oss-120b | open-weight reasoning models at two sizes |
 | Mistral | Devstral, Codestral | code-specialised; check licences |
@@ -140,148 +307,54 @@ model's licence, before running**:
 | Google | Gemma 3 (up to 27B) | small, strong general models |
 | Microsoft | Phi-4 | small, trained heavily on reasoning |
 
-**The models: a Qwen3.5 size ladder.** *Decided — Shawn, 2026-10-07.* Every
-model is served by llama.cpp on a dual RTX 3090 machine, as a size ladder
-within one family, which separates "smaller models cannot do this" from
-differences in training data or chat template between families:
-
-| model | source |
-| --- | --- |
-| Qwen3.5-0.8B | https://huggingface.co/Qwen/Qwen3.5-0.8B |
-| Qwen3.5-2B | https://huggingface.co/Qwen/Qwen3.5-2B |
-| Qwen3.5-4B | https://huggingface.co/Qwen/Qwen3.5-4B |
-| Qwen3.5-9B | https://huggingface.co/Qwen/Qwen3.5-9B |
-| Qwen3.5-27B | https://huggingface.co/Qwen/Qwen3.5-27B |
-
-About a 34× range in steps of 2–3×, so the size where one-shot generation
-breaks can be located. **Shawn makes his own Q8 GGUFs** of each, with llama.cpp's
-converter and quantizer, from the official repositories: one quantization level
-for every size, so size is the only thing that varies, and each model keeps its
-own chat template (which carries the thinking switch). Each model's `source`
-records the repository, its **revision** (commit), the GGUF file name, **the
-SHA-256 of the GGUF produced**, and — until there is a field for it — the
-llama.cpp commit used, in the file name. Qwen3.8 27B (below) may be added later
-as a side point, a newer generation at the top size, depending on the results.
-The 0.8B and 2B will probably mostly fail early (no usable files, or no
-compile); that is the floor, and they are cheap enough for extra samples.
-
-**From the Qwen3.5-27B model card** (read 2026-10-07): post-trained, Apache 2.0;
-**thinking on by default**, turned off per request with
-`chat_template_kwargs: {"enable_thinking": false}`; recommended sampling in
-thinking mode for coding: temperature 0.6, top_p 0.95, top_k 20, min_p 0,
-presence_penalty 0; recommended output length 32,768 tokens for most queries and
-81,920 "for benchmarking on highly complex problems"; 262,144 tokens of context.
-The card's summary also mentions "Gated Delta Networks combined with sparse
-Mixture-of-Experts"; whether the 27B itself is dense was not settled. The
-smaller sizes' cards were not read.
-
-**The first model actually run** was Qwen3.8 27B, for the pipeline check
-(campaign `phase10-check-qwen3.8-27b`), at a 6-bit quantization, served by
-llama.cpp's OpenAI-compatible server at `http://localhost:8933/v1` (checked
-2026-10-06 with `/v1/models`):
-
-| field | as the server reports it |
-| --- | --- |
-| model id (send as `"model"`) | `/home/s/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K_XL.gguf` |
-| parameters | 27,320,697,856 |
-| file size | 25,913,155,584 bytes |
-| context | 262,144 tokens (`n_ctx`, equal to `n_ctx_train`) |
-| quantization | `UD-Q6_K_XL` by file name (Unsloth dynamic); the server's `ftype` field says `Q4_K - Small` |
-| capabilities | `completion`, `multimodal` |
-
-Source: `https://huggingface.co/unsloth/Qwen3.8-27B-GGUF`, file
-`Qwen3.8-27B-UD-Q6_K_XL.gguf` (from Shawn's shell history on the serving
-machine). Revision and SHA-256 not yet recorded.
-
-The two quantization labels disagree. The size — about 7.6 bits per weight —
-fits the file name's 6-bit mix with some layers kept wider, not a 4-bit model,
-so `ftype` is likely a nominal label from the file header; recorded as reported.
-Each attempt records the model id, so a different file is a different model.
-
 **Identifying a model.** A Hugging Face repository URL is a pointer, not an
 identity: one repository holds many quantization files, and repositories are
 re-uploaded under the same name (for chat-template or tokenizer fixes, say). So
 each model's config carries a `source` (plan §10): the URL and the **file** say
-where to get it, the **revision** (the repository commit) pins the upload, and
-the file's **SHA-256** says which bytes it was — the one identifier that holds
-wherever the file lives and whatever it is called, and which matches the hash
-Hugging Face shows for the file. Compute it once on the serving machine
-(`sha256sum <file>`). The model is not the whole configuration: the chat
-template, context size, server sampling defaults and server version also change
+where to get it, the **revision** pins the upload, and the file's **SHA-256**
+says which bytes it was — the one identifier that holds wherever the file lives
+and whatever it is called. The model is not the whole configuration: the chat
+template, context size, server defaults and server version also change
 behaviour, which is why each attempt also records the request parameters and
 the server's own report. A fuller provenance scheme is being worked on
 separately by a coworker of Shawn's; these fields are a placeholder it can
-replace. The goal is to
-see how the system behaves across levels of model capability — frontier models
-would likely outpace the setup quickly — so a few smaller models should be
-benchmarked beside it. **Open, to discuss before E3:** which smaller models,
-and at what sizes and quantizations.
-
-For the record, what was installed on Shawn's Mac (Ollama, `localhost:11434`,
-checked 2026-10-06 with `/api/tags`) — no longer the plan, since every model now
-runs on llama.cpp:
-
-| model (exact Ollama name) | parameters | quantization |
-| --- | --- | --- |
-| `llama3.2:3b` | 3.2B | Q4_K_M |
-| `gemma3:latest` | 4.3B | Q4_K_M |
-| `qwen2.5-coder:14b` | 14.8B | Q4_K_M |
-
-The 27B model is not among them; it is served by llama.cpp on port 8933
-(above). Open WebUI on `localhost:3000` is a chat front end over these servers,
-not an endpoint the campaign uses.
+replace.
 
 Run the generator and the adversary as **different** models (§10); E3 should
 include a few cross-pairings, since a weak adversary would make every generator
-look sound.
-
-A frontier model as the generator, run once at the top rung, is a useful
-ceiling: it says whether a rung is hard because the task is hard or because the
-model is small.
+look sound. A frontier model as the generator, run once at the top rung, is a
+useful ceiling: it says whether a rung is hard because the task is hard or
+because the model is small — though frontier models would likely outpace the
+setup quickly, which is why the ladder is of small models.
 
 ---
 
 ## The report
 
 *Decided — Shawn, 2026-10-07.* Results are written up as they come, in a LaTeX
-report kept in the repository, with tables generated from the attempt records
-rather than copied by hand.
+report kept in the repository (`report/report.tex`), with tables generated from
+the attempt records rather than copied by hand. Its outline (*decided — Shawn,
+2026-10-08*): setup (models, settings, corpus, the prompt in full in an
+appendix), Table 1, Table 2, and observations written by hand from the
+inspection notes. No figures yet; acceptable against model size is the first,
+once the five sizes are run.
 
-- **`report/`** — the LaTeX source (`report.tex`), built with LuaLaTeX:
-  `cd report && latexmk -lualatex -outdir=build report.tex` (output in
-  `report/build/`, not committed). LuaLaTeX and DejaVu Sans Mono because the
-  prompt appendix quotes the contract, whose Javadoc has σ′, ⊥ and ↦. It
-  includes generated files from `report/tables/` when they exist and says how to
-  make them when not, so it builds before any results; each inclusion is logged
-  (`pag-report: included …`), which the build test checks.
-- **`campaign report`** — reads `results/<campaign>/` and writes the tables.
-  Scala, in the campaign module (one language, plan §12), reading the records
-  with the same codecs that wrote them. Rerunnable at any time; it only ever
-  overwrites `report/tables/`.
-- **Manual inspection is a column the script never writes.** Shawn's judgment of
-  each generated domain lives in a hand-edited file, `report/inspection.json`,
-  keyed by attempt id; the script merges it in, so regenerating a table never
-  loses a note, and an attempt not yet inspected shows a blank. Its shape, every
-  field optional:
-
-  ```json
-  { "attempts": {
-      "e1-rung0-qwen3.5-27b/attempt-001": {
-        "closestDomain": "intervals", "soundnessByEye": "looks sound",
-        "quality": "tests meaningful", "acceptable": true, "notes": "..." } } }
-  ```
-
-  `campaign report [--prefix e1-rung0-]` reads every campaign whose name starts
-  with the prefix, smallest model first (the size is read from the name), and
-  writes `report/tables/table1.tex`, `table2.tex`, `settings.tex` (the settings
-  each campaign actually ran with, and its model's revision and SHA-256, read
-  from its records), `corpus.tex` (from the corpus manifest), and `prompt.txt` —
-  the prompt exactly as sent, from the records, for the appendix. So the setup
-  section cannot disagree with what ran. Captions live in `report.tex`; the
-  generated files hold only the tables. Output is
-  deterministic, so regenerating unchanged results changes nothing in git; an
-  inspection naming an attempt that is not among the campaigns read is warned
-  of.
+- **`campaign report [--prefix e1-rung0-]`** reads every campaign whose name
+  starts with the prefix, smallest model first (the size is read from the name),
+  and writes into `report/tables/`: `table1.tex`, `table2.tex`, `settings.tex`
+  (the settings each campaign actually ran with, and its model's revision and
+  SHA-256, from its records), `corpus.tex` (from the manifest), and
+  `prompt.txt` (the prompt exactly as sent, from the records). So the setup
+  section cannot disagree with what ran. Output is deterministic, so
+  regenerating unchanged results changes nothing in git; an inspection naming no
+  attempt read is warned of. The generated files hold only the tables; captions
+  live in `report.tex`.
+- **Building**: `cd report && latexmk -lualatex -outdir=build report.tex`
+  (output in `report/build/`, not committed). LuaLaTeX and DejaVu Sans Mono
+  because the prompt appendix quotes the contract, whose Javadoc has σ′, ⊥ and
+  ↦. Missing tables show as a note saying how to make them, so the report builds
+  before any results; each inclusion is logged (`pag-report: included …`), which
+  the build test checks.
 
 ### Table 1 — one shot, rung 0, the smoke corpus
 
@@ -289,100 +362,56 @@ One row per attempt; models grouped, smallest first.
 
 | column | meaning |
 | --- | --- |
-| model | as recorded: name, parameters, quantization |
-| sample | which of the N samples for that model |
-| files | source files read from the reply (0: no usable reply) |
-| builds | compiled by the Gradle template |
-| own tests | its own JUnit tests pass (how many) |
-| loads | `pag` found exactly one domain class and constructed it |
-| one column per target | R refuted, A alarm, ✗ refuted a reachable target (unsound), I inconclusive — did not converge (iteration limit or deadline), E domain failure (threw or returned null), H hung (killed at the wall-clock bound), – not run |
-| proved | refutations among the four unreachable targets |
-| caught | sound so far: no reachable target refuted |
-| cost | prompt and completion tokens; wall-clock time |
-| inspection | Shawn's: closest existing domain, soundness by eye, quality, acceptable, notes (below) |
+| Model | the campaign's model, from its name |
+| Sample | which of the N samples |
+| Stopped at | where it stopped: no reply, timed out, ran out of tokens, no files in the reply, did not compile, did not load — or evaluated |
+| Files | source files read from the reply |
+| Built | compiled by the Gradle template |
+| Tests | its own JUnit tests passing, out of those run |
+| Loads | `pag` found exactly one domain class and constructed it |
+| one column per target | R refuted, A alarm, × refuted a reachable target (unsound), I did not converge (iteration limit or deadline), E domain failure (threw or returned null), H hung (killed at the wall-clock bound) |
+| Proved | refutations among the five unreachable targets |
+| Tokens | completion tokens, thinking included |
+| Time | the attempt's wall-clock time |
+| Closest domain, By eye, Accept | Shawn's inspection |
 
-The smoke corpus is never shown to a model; it is how a domain is judged, not
-part of what it is told (plan Phase 10).
+### Table 2 — per model
 
-### The setup, to discuss before the first real run
+Attempts; acceptable by each bar ("2/5" mechanical; accepted out of those
+inspected); unsound attempts; the median *proved* among the mechanically
+acceptable; and how many stopped at each stage.
 
-An iteration or two on the experimental setup comes before rung 0 is run for
-real. Open questions:
+---
 
-1. ~~**Models.**~~ *Decided:* the Qwen3.5 ladder, 0.8B to 27B, as Q8 GGUFs Shawn
-   makes, on llama.cpp (E3).
-   **The run settings** — chosen by Claude at Shawn's delegation, 2026-10-07,
-   recorded here and in `config/e1-rung0-qwen3.5.example.json` (copy it once
-   per size and fill in the placeholders; `campaign` refuses a config that still
-   has any). Expected to change: every attempt records the settings it ran with,
-   and a campaign pins them, so changing one means a new campaign.
+## Record
 
-   | setting | value | why |
-   | --- | --- | --- |
-   | `temperature`, `topP`, `topK`, `minP`, `presencePenalty` | 0.6, 0.95, 20, 0.0, 0.0 | the 27B card's recommendation for coding in thinking mode; the same for every size, so size is the only variable |
-   | `thinking` | `true`, explicit | how the models are meant to be used; recorded per campaign; thinking off is a later, cheaper variation |
-   | `maxTokens` | 32,768, every size | the card's "most queries" length; one budget for all sizes keeps them comparable. The pipeline check passed 47,000 without finishing, so expect some "ran out of tokens" at first — that is data, and the budget is the first setting to revisit (the card suggests 81,920 for complex problems) |
-   | `timeoutSeconds` | 2,700 (45 minutes) | 32,768 tokens at about 28 tokens/s is about 20 minutes for the 27B; the rest is margin for a busy server. A timeout is not retried |
-   | `retries` | 3 | for connection failures, 429 and 5xx only |
-   | samples | 5 per size | a first table quickly; more for the cheap small sizes if their results are noisy |
-   | seed | unset | sampling varies between samples by design; GPU arithmetic is not bit-reproducible anyway |
-   | llama.cpp context (`-c`, a server setting) | 65,536 | covers prompt plus budget with room to spare, and a far smaller KV cache than the full 262,144; a server setting, so note it with the model |
-   | llama.cpp parallel slots (`-np`, a server setting) | 1 | runs are one request at a time, so extra slots only let other requests share the GPUs with an attempt, adding noise to its timings; and with several slots llama.cpp may divide `-c` between them (unless `--kv-unified`), leaving too little context per request. Other users of the server wait instead; use a second server on another port for them. Check: `/slots` shows one slot with `n_ctx` ≥ 65,536 |
-   | llama.cpp `--reasoning-budget` | unset | the request's `maxTokens` caps thinking and answer together; a separate thinking cap is a later variation |
+Kept for the history of how the setup was reached.
 
-   llama.cpp's server documentation confirms it accepts `chat_template_kwargs`
-   (`{"enable_thinking": ...}`), `top_p`, `top_k`, `min_p`, `presence_penalty`,
-   `max_tokens` and `seed` per request (read 2026-10-07). A reply stopped at the
-   budget (`finish_reason: "length"`) is its own outcome, "ran out of tokens", in
-   the record, `campaign status` and Table 1.
-2. **Samples and sampling.** How many samples per model; temperature; whether to
-   fix seeds where the server allows.
-3. **Reasoning and budgets.** Qwen3.x thinks before answering
-   (`reasoning_content`): on or off; the token budget, which counts the
-   thinking; and the client's timeout. The first real sample (Qwen3.8 27B,
-   2026-10-07) generated over 47,000 tokens in 30 minutes, about 28 tokens/s,
-   with no cap, and had not finished when the client's 30-minute timeout fired;
-   a bug then retried it from scratch, and the run was stopped. Fixed: a timeout
-   is no longer retried.
-4. ~~**What a row means.**~~ *Decided — Shawn, 2026-10-08.* A row is one
-   attempt, judged at the first stage it fails: no reply, ran out of tokens, no
-   files, did not compile, did not load — or evaluated, with its cells and
-   *proved* count. **Acceptable has two bars, reported separately:**
-   - **mechanical** — passes the smoke tests: evaluated, no ✗ (not caught
-     unsound), and proves at least one of the five unreachable targets (Phase
-     10's done-when, per attempt);
-   - **inspection** — Shawn judges it acceptable (below).
+**The pipeline check** (2026-10-07), before the models were chosen: campaign
+`phase10-check-qwen3.8-27b`, Qwen3.8 27B served by llama.cpp at
+`http://localhost:8933/v1`, one sample with default settings and no token cap.
+It generated over 47,000 tokens in 30 minutes, about 28 tokens/s, and had not
+finished when the client's 30-minute timeout fired; a bug then retried it from
+scratch, and the run was stopped. Fixed since: a timeout is not retried. It also
+showed that llama.cpp cancels a generation when its client disconnects. The
+model, as the server reported it (2026-10-06, `/v1/models`): id
+`/home/s/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K_XL.gguf`; 27,320,697,856
+parameters; 25,913,155,584 bytes; context 262,144; capabilities `completion`,
+`multimodal`; quantization `UD-Q6_K_XL` by file name, though the server's
+`ftype` field said `Q4_K - Small` — the size, about 7.6 bits per weight, fits the
+file name. Source `https://huggingface.co/unsloth/Qwen3.8-27B-GGUF`, from
+Shawn's shell history; revision and SHA-256 not recorded.
 
-   **Unsound** is its own category, never folded into "failed". Per model, the
-   summary (Table 2) gives counts, never percentages, since five samples are few:
-   acceptable by each bar ("2/5 mechanical, 1/5 inspection"), the median *proved*
-   among mechanically acceptable attempts, and where the others stopped.
-5. ~~**The inspection rubric.**~~ *Decided — Shawn, 2026-10-08.* Per attempt, in
-   `report/inspection.json`, keyed by attempt id:
-   - **closest existing domain** — constants, signs, intervals, intervals with
-     widening, another (named), or none coherent;
-   - **soundness by eye** — looks sound, suspicious (where), or clearly unsound;
-   - **quality** — whether its own tests are meaningful or trivial, and anything
-     notable;
-   - **acceptable** — yes or no: the inspection bar;
-   - **notes** — free text.
+**Installed on Shawn's Mac** (Ollama, `localhost:11434`, 2026-10-06), considered
+and dropped once every model moved to llama.cpp: `llama3.2:3b` (3.2B),
+`gemma3:latest` (4.3B), `qwen2.5-coder:14b` (14.8B), all Q4_K_M. Open WebUI on
+`localhost:3000` is a chat front end, not an endpoint the campaign uses.
 
-   The fixed fields are short lists, so they can be counted across the table.
-6. ~~**Fairness across models.**~~ *Decided — Shawn, 2026-10-08.* The same
-   prompt, settings, corpus and hardware for every model, guaranteed per
-   campaign by its pin. Each model's own chat template and thinking behaviour are
-   part of the model, noted rather than controlled. Time is reported per attempt
-   but never compared across sizes as a measure of quality.
-7. ~~**The report's shape.**~~ *Decided — Shawn, 2026-10-08.* (1) Setup: the
-   models, the run settings, the rung-0 prompt in full in an appendix, the
-   corpus. (2) Table 1: one row per attempt, grouped by model. (3) Table 2: per
-   model, acceptable by each bar, median *proved*, where the rest stopped.
-   (4) Observations, written by hand from the inspection notes. No figures yet;
-   acceptable against model size is the first, once the five sizes are run.
+---
 
 ## Order
 
-E1 starts at crude Phase 10 with R0–R1 and a hand-written handful of probes per
-rung, then grows with the scoring corpus (Phase 7). E2 needs the adversary
-(crude Phases 8 and 11). E3 is E1 repeated per model once E1's procedure is
-stable.
+E1 starts at crude Phase 10 with rung 0, one shot, on the smoke corpus (Table 1),
+then grows with the scoring corpus (Phase 7) and the rungs. E2 needs the
+adversary (crude Phases 8 and 11). E3 is E1 repeated per model once E1's
+procedure is stable.
