@@ -1703,7 +1703,7 @@ subprocesses and exit codes.
 **A module of the main build, separate as a process.** `campaign/` is an sbt
 module beside the engine's, so one `sbt test` covers both, and a build check
 (like the Soot boundary, §5.5) fails if any engine module but `results` reaches
-its classpath. It runs `pag` through the launcher that `demo_scripts/common.sh`
+its classpath. It runs `pag` through the launcher that `scripts/common.sh`
 builds, never by linking. *Decided — Shawn, 2026-10-06.*
 
 ## 13. Serialization

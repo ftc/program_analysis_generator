@@ -105,5 +105,5 @@ class CampaignSuite extends munit.FunSuite:
 
   test("the setup check points at common.sh when the build is missing"):
     val empty = Files.createTempDirectory("repo")
-    try assert(Main.locate(empty).left.exists(_.contains("bash demo_scripts/common.sh")))
+    try assert(Main.locate(empty).left.exists(_.contains("bash scripts/common.sh")))
     finally Files.delete(empty)

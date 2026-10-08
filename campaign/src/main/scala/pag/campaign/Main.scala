@@ -122,10 +122,10 @@ object Main:
           s"${s.cells.mkString(" ")}, proved ${s.proved}${if s.unsound then ", UNSOUND" else ""}"
       println(f"${r.attempt}  $what  (${r.elapsedMs / 1000}%d s)")
 
-  /** What a run needs from the build; `bash demo_scripts/common.sh` makes all of it. */
+  /** What a run needs from the build; `bash scripts/common.sh` makes all of it. */
   def locate(repo: Path): Either[String, Tools] =
-    val hint = "run `bash demo_scripts/common.sh` first"
-    val launcher = repo.resolve("demo_scripts/out/pag")
+    val hint = "run `bash scripts/common.sh` first"
+    val launcher = repo.resolve("scripts/out/pag")
     val probeLib = repo.resolve("engine/probe-lib/target/classes")
     val api = Option(repo.resolve("engine/api/target")).filter(Files.isDirectory(_)).flatMap { dir =>
       Using.resource(Files.list(dir))(_.iterator.asScala.find(_.getFileName.toString.matches("pag-api-.*\\.jar")))

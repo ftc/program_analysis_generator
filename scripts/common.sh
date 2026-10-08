@@ -1,11 +1,11 @@
 # Shared setup: builds what pag needs, defines `pag` and `compile_probe`, and
-# writes demo_scripts/out/pag, a launcher the campaign uses. The demo scripts
-# source it; run it directly (`bash demo_scripts/common.sh`) to set up the
+# writes scripts/out/pag, a launcher the campaign uses. The demo scripts
+# source it; run it directly (`bash scripts/common.sh`) to set up the
 # campaign. Stops at the first unexpected result.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT="$ROOT/demo_scripts/out"
+OUT="$ROOT/scripts/out"
 mkdir -p "$OUT"
 
 echo "== building pag, the api jar and probe-lib (sbt)"
@@ -25,11 +25,11 @@ echo "== building the reference interval domain (Gradle template)"
 DOMAIN_JAR="$ROOT/domains/ref-interval/build/libs/ref-interval.jar"
 [ -f "$DOMAIN_JAR" ] || { echo "no domain jar at $DOMAIN_JAR" >&2; exit 1; }
 
-# compile_probe NAME: compiles demo_scripts/examples/NAME.java into $OUT/NAME and prints that directory.
+# compile_probe NAME: compiles scripts/examples/NAME.java into $OUT/NAME and prints that directory.
 compile_probe() {
   local dir="$OUT/$1"
   mkdir -p "$dir"
-  javac -g --release 21 -proc:none -cp "$PROBE_LIB" -d "$dir" "$ROOT/demo_scripts/examples/$1.java"
+  javac -g --release 21 -proc:none -cp "$PROBE_LIB" -d "$dir" "$ROOT/scripts/examples/$1.java"
   echo "$dir"
 }
 
@@ -41,7 +41,7 @@ pag() { java -cp "$PAG_CP" pag.cli.Main "$@"; }
 # at a stale classpath.
 cat > "$OUT/pag" <<LAUNCHER
 #!/usr/bin/env bash
-# Written by demo_scripts/common.sh; rerun \`bash demo_scripts/common.sh\` to refresh.
+# Written by scripts/common.sh; rerun \`bash scripts/common.sh\` to refresh.
 exec java -cp "$PAG_CP" pag.cli.Main "\$@"
 LAUNCHER
 chmod +x "$OUT/pag"

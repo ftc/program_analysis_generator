@@ -45,7 +45,7 @@ pipeline before spending hours on the 27B.
 4. **Run it.**
 
    ```
-   bash demo_scripts/common.sh
+   bash scripts/common.sh
    sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --campaign e1-rung0-qwen3.5-<size> --samples 5"
    ```
 
@@ -80,11 +80,12 @@ container (a crude Phase 9) comes right after.
 
 ### The first run: rung 0, one shot, the smoke corpus
 
-**The models: a Qwen3.5 size ladder.** *Decided — Shawn, 2026-10-07.* One family,
-so size is separated from differences in training data and chat template; all
-on llama.cpp; each a Q8 GGUF Shawn makes, so the quantization is the same for
-every size and each model keeps its own chat template (which carries the
-thinking switch):
+**The models: a Qwen3.5 size ladder, plus Qwen3.8 27B.** *Decided — Shawn,
+2026-10-07; Qwen3.8 27B added 2026-10-08.* One family for the ladder, so size is
+separated from differences in training data and chat template; all on
+llama.cpp; each a Q8 GGUF Shawn makes from the official `Qwen/` repository, so
+the quantization is the same for every model and each keeps its own chat
+template (which carries the thinking switch):
 
 | model        | source                                   |
 |--------------|------------------------------------------|
@@ -95,11 +96,14 @@ thinking switch):
 | Qwen3.5-27B  | https://huggingface.co/Qwen/Qwen3.5-27B  |
 | Qwen3.8-27B  | https://huggingface.co/Qwen/Qwen3.8-27B  |
 
-About a 34× range in steps of 2–3×, so the size where one-shot generation breaks
-can be located. The 0.8B and 2B will probably mostly fail early; that is the
-floor, and they are cheap enough for extra samples. Qwen3.8 27B may be added
-later as a side point (a newer generation at the top size), depending on the
-results.
+The Qwen3.5 sizes span about 34× in steps of 2–3×, so the size where one-shot
+generation breaks can be located. The 0.8B and 2B will probably mostly fail
+early; that is the floor, and they are cheap enough for extra samples.
+**Qwen3.8 27B is part of the first run** as a second point at the top size: a
+newer generation at the same size as Qwen3.5-27B, so the two 27B rows separate
+a generation's gain from size. It too is a Q8 GGUF Shawn makes from the official
+`Qwen/Qwen3.8-27B` — not the Unsloth `UD-Q6_K_XL` file the pipeline check used
+(*Record*, below), so its results are not comparable with that run's.
 
 **The run settings.** Chosen by Claude at Shawn's delegation, 2026-10-07, and
 written into the example config. Expected to change: every attempt records the
@@ -300,7 +304,7 @@ model's licence, before running**:
 
 | family    | candidates to consider                                                                       | why                                                                      |
 |-----------|----------------------------------------------------------------------------------------------|--------------------------------------------------------------------------|
-| Qwen      | the Qwen3.5 ladder (chosen); Qwen3.8 27B (a newer generation at the top size); Qwen2.5-Coder | a size ladder within one family                                          |
+| Qwen      | the Qwen3.5 ladder and Qwen3.8 27B (chosen); Qwen2.5-Coder                                  | a size ladder within one family                                          |
 | DeepSeek  | DeepSeek-Coder-V2-Lite; the R1 distilled models                                              | strong code models; distills test whether reasoning-style training helps |
 | OpenAI    | gpt-oss-20b, gpt-oss-120b                                                                    | open-weight reasoning models at two sizes                                |
 | Mistral   | Devstral, Codestral                                                                          | code-specialised; check licences                                         |

@@ -17,8 +17,8 @@ project/project/
 domains/build-template/.gradle/
 domains/*/build/
 
-# demo_scripts build output
-demo_scripts/out/
+# scripts output (compiled examples, the pag launcher)
+scripts/out/
 
 # campaign attempts: attempt.json and the domain's sources are committed (§3);
 # what a build or an evaluation produces from them is not
