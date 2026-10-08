@@ -2322,3 +2322,22 @@ framework, library, or the OS.
     copies for now; revisit before the corpus grows. For mutants, settled:
     reference plus patch, before the adversary sees one (Phase 8; *Decided —
     Shawn, 2026-10-06*). Generated domains remain full directories.
+24. **Tools for the agents.** *To discuss — raised by Shawn, 2026-10-08.* Should
+    the generator and the adversary be able to call tools — a shell (compile,
+    run their own tests, run `pag`), a searchable index of scientific papers on
+    abstract interpretation — and if so, built into our own loop or taken from an
+    existing agent framework such as smolagents
+    (https://github.com/huggingface/smolagents)? Points for the discussion:
+    - **Our loop**: the OpenAI-compatible API carries tool calls, and llama.cpp
+      supports them with `--jinja`, so the campaign driver could execute a small
+      set of tools itself, recorded like everything else; it stays in Scala (§12)
+      and the records stay ours. More to build for every tool.
+    - **A framework**: many tools and the agent loop come ready-made, but
+      smolagents is Python, which crosses §12's one-language decision, and its
+      records and retries would need fitting to ours (§13, durable attempts).
+    - **Shell access is code execution by a model**: it needs Phase 9's isolation
+      first, whichever way it is built.
+    - **For the experiments, a tool is information.** Compile-and-test tools are
+      E1's feedback rounds made self-service; a paper index is a rung of the
+      information ladder. Either changes what a result measures, so tools would
+      enter as their own, recorded experimental condition, not as a default.

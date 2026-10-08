@@ -247,8 +247,13 @@ model is small.
 report kept in the repository, with tables generated from the attempt records
 rather than copied by hand.
 
-- **`report/`** — the LaTeX source (`report.tex`), built with `latexmk`. It
-  `\input`s generated tables from `report/tables/`.
+- **`report/`** — the LaTeX source (`report.tex`), built with LuaLaTeX:
+  `cd report && latexmk -lualatex -outdir=build report.tex` (output in
+  `report/build/`, not committed). LuaLaTeX and DejaVu Sans Mono because the
+  prompt appendix quotes the contract, whose Javadoc has σ′, ⊥ and ↦. It
+  includes generated files from `report/tables/` when they exist and says how to
+  make them when not, so it builds before any results; each inclusion is logged
+  (`pag-report: included …`), which the build test checks.
 - **`campaign report`** — reads `results/<campaign>/` and writes the tables.
   Scala, in the campaign module (one language, plan §12), reading the records
   with the same codecs that wrote them. Rerunnable at any time; it only ever
@@ -268,8 +273,12 @@ rather than copied by hand.
 
   `campaign report [--prefix e1-rung0-]` reads every campaign whose name starts
   with the prefix, smallest model first (the size is read from the name), and
-  writes `report/tables/table1.tex`, `table2.tex`, and `prompt.txt` — the prompt
-  exactly as sent, taken from the records, for the appendix. Output is
+  writes `report/tables/table1.tex`, `table2.tex`, `settings.tex` (the settings
+  each campaign actually ran with, and its model's revision and SHA-256, read
+  from its records), `corpus.tex` (from the corpus manifest), and `prompt.txt` —
+  the prompt exactly as sent, from the records, for the appendix. So the setup
+  section cannot disagree with what ran. Captions live in `report.tex`; the
+  generated files hold only the tables. Output is
   deterministic, so regenerating unchanged results changes nothing in git; an
   inspection naming an attempt that is not among the campaigns read is warned
   of.

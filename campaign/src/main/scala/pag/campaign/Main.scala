@@ -57,13 +57,14 @@ object Main:
       case Some(a) if a.command == "report" =>
         val outcome = Repo.root().flatMap { repo =>
           val out = a.out.getOrElse(repo.resolve("report/tables"))
-          Report.write(repo.resolve("results"), a.prefix, repo.resolve("report/inspection.json"), out).map(w => (out, w))
+          Report.write(repo.resolve("results"), a.prefix, repo.resolve("report/inspection.json"),
+            repo.resolve("corpora/smoke"), out).map(w => (out, w))
         }
         outcome match
           case Left(e) => System.err.println(s"campaign: $e"); sys.exit(1)
           case Right((out, warnings)) =>
             warnings.foreach(w => System.err.println(s"campaign: warning: $w"))
-            println(s"wrote table1.tex, table2.tex and prompt.txt in $out")
+            println(s"wrote table1.tex, table2.tex, settings.tex, corpus.tex and prompt.txt in $out")
       case Some(a) if a.command == "status" =>
         Repo.root() match
           case Left(e)     => System.err.println(s"campaign: $e"); sys.exit(1)

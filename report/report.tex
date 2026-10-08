@@ -1,0 +1,83 @@
+% The experimental report (experiments.md, "The report").
+% Build:  cd report && latexmk -lualatex -outdir=build report.tex
+% Tables: sbt "campaign/run report" writes tables/*.tex and tables/prompt.txt from
+%         the attempt records; never edit those by hand. Shawn's inspection lives
+%         in inspection.json, which the report reads and never writes.
+\documentclass[11pt]{article}
+\usepackage{fontspec}
+\setmonofont{DejaVu Sans Mono}[Scale=MatchLowercase] % covers the contract's σ′, ⊥, ↦
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{booktabs,graphicx,pdflscape,fvextra}
+\usepackage[hidelinks]{hyperref}
+
+% A generated file, or a note saying how to make it. Each inclusion is logged, so
+% a build can be checked for showing real tables rather than placeholders.
+\newcommand{\generated}[2]{\IfFileExists{tables/#1}{\typeout{pag-report: included #1}#2}%
+  {\emph{Not generated yet: run \texttt{sbt "campaign/run report"}.}}}
+
+\title{One-shot abstract domains from small models\\\large E1, rung 0: the Qwen3.5 size ladder}
+\author{Shawn Meier}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Question}
+% TODO: at what model size can a small open-weight model write a sound, useful
+% backward abstract domain in one shot, from the contract alone?
+
+\section{Setup}
+% TODO: the models (Qwen3.5 0.8B to 27B, own Q8 GGUFs, llama.cpp -c 65536 -np 1);
+% the prompt (rung 0 of the information ladder: the task in general terms and the
+% contract; Appendix~\ref{app:prompt}); the smoke corpus, never shown to a model;
+% one shot, no feedback.
+
+\begin{table}[ht]
+  \centering
+  \caption{The settings each campaign ran with, from its records. Sampling as
+    the Qwen3.5-27B model card recommends for coding in thinking mode;
+    ``default'' is the server's own.}
+  \label{tab:settings}
+  \resizebox{\linewidth}{!}{\generated{settings.tex}{\input{tables/settings.tex}}}
+\end{table}
+
+\begin{table}[ht]
+  \centering
+  \caption{The smoke corpus: one \texttt{reach} target per probe, with its true
+    answer. Reachable targets are run with inputs that reach them, so a domain
+    refuting one is caught unsound.}
+  \label{tab:corpus}
+  \small\generated{corpus.tex}{\input{tables/corpus.tex}}
+\end{table}
+
+\section{Results}
+
+\begin{landscape}
+\begin{table}[p]
+  \centering
+  \caption{One row per attempt. Cells: R refuted, A alarm, $\times$ refuted a
+    reachable target (unsound), I did not converge, E domain failure, H hung.
+    The last three columns are Shawn's inspection.}
+  \label{tab:attempts}
+  \resizebox{\linewidth}{!}{\generated{table1.tex}{\input{tables/table1.tex}}}
+\end{table}
+\end{landscape}
+
+\begin{table}[ht]
+  \centering
+  \caption{Per model. Mechanical: evaluated, not unsound, proves at least one
+    target. Inspection: accepted out of those inspected. Median proved: among
+    the mechanically acceptable. The rest: where attempts stopped.}
+  \label{tab:models}
+  \resizebox{\linewidth}{!}{\generated{table2.tex}{\input{tables/table2.tex}}}
+\end{table}
+
+\section{Observations}
+% TODO: written by hand, from the inspection notes.
+
+\appendix
+\section{The prompt}\label{app:prompt}
+Exactly as sent, from the attempt records.
+\generated{prompt.txt}{\VerbatimInput[fontsize=\scriptsize,breaklines,breakanywhere]{tables/prompt.txt}}
+
+\end{document}

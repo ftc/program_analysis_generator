@@ -24,3 +24,6 @@ demo_scripts/out/
 # what a build or an evaluation produces from them is not
 results/**/domain/build/
 results/**/work/
+
+# the report's LaTeX build output
+report/build/
