@@ -10,7 +10,8 @@ import scopt.OParser
 object Main:
 
   final case class Args(command: String = "", config: Option[Path] = None, campaign: Option[String] = None,
-      samples: Int = 1, prompt: String = "generator-v1", every: Option[Int] = None)
+      samples: Int = 1, prompt: String = "generator-v1", every: Option[Int] = None, prefix: String = "e1-rung0-",
+      out: Option[Path] = None)
 
   private val parser: OParser[Unit, Args] =
     val b = OParser.builder[Args]
@@ -38,12 +39,31 @@ object Main:
           opt[Int]("every").valueName("SECONDS").action((n, a) => a.copy(every = Some(n)))
             .text("refresh every SECONDS until interrupted (Ctrl-C)")
         ),
+      cmd("report")
+        .action((_, a) => a.copy(command = "report"))
+        .text("write Tables 1 and 2 and the prompt into report/tables/ from the campaigns' records")
+        .children(
+          opt[String]("prefix").valueName("<prefix>").action((p, a) => a.copy(prefix = p))
+            .text("the campaigns to include: names starting with this (default e1-rung0-)"),
+          opt[Path]("out").valueName("<dir>").action((p, a) => a.copy(out = Some(p)))
+            .text("where the tables go (default report/tables)")
+        ),
       checkConfig(a => if a.command.isEmpty then failure("no command given") else success)
     )
 
   def main(args: Array[String]): Unit =
     OParser.parse(parser, args, Args()) match
       case None => sys.exit(1)
+      case Some(a) if a.command == "report" =>
+        val outcome = Repo.root().flatMap { repo =>
+          val out = a.out.getOrElse(repo.resolve("report/tables"))
+          Report.write(repo.resolve("results"), a.prefix, repo.resolve("report/inspection.json"), out).map(w => (out, w))
+        }
+        outcome match
+          case Left(e) => System.err.println(s"campaign: $e"); sys.exit(1)
+          case Right((out, warnings)) =>
+            warnings.foreach(w => System.err.println(s"campaign: warning: $w"))
+            println(s"wrote table1.tex, table2.tex and prompt.txt in $out")
       case Some(a) if a.command == "status" =>
         Repo.root() match
           case Left(e)     => System.err.println(s"campaign: $e"); sys.exit(1)
