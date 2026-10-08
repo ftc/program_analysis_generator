@@ -56,7 +56,7 @@ object Evaluate:
   /** The wall-clock kill per target, comfortably after pag's own deadline. */
   val Timeout: FiniteDuration = 30.seconds
 
-  /** `pag` is the command that runs pag, e.g. the launcher `demo_scripts/common.sh` writes. */
+  /** `pag` is the command that runs pag, e.g. the launcher `scripts/common.sh` writes. */
   def run(
       pag: List[String],
       domainJar: Path,
