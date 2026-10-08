@@ -147,4 +147,4 @@ EOF
 esac
 
 echo "== serving on port $PORT; check: curl -s http://localhost:$PORT/slots"
-exec llama-server -m "$GGUF" -c 65536 -np 1 --port "$PORT" -ngl all "$@"
+exec llama-server -m "$GGUF" -c 65536 -np 1 --port "$PORT" -ngl all "$@" --host 0.0.0.0
