@@ -64,11 +64,15 @@ missing — but the attempt in progress would be lost.
 
    Check that `curl -s http://localhost:8933/slots` shows **one slot** with
    `n_ctx` of at least 65,536.
-2. **Write its config.** Copy `config/e1-rung0-qwen3.5.example.json` to
-   `config/e1-rung0-qwen3.5-<size>.json` and fill in every `<…>` placeholder:
-   the model id (as `curl -s http://localhost:8933/v1/models` reports it), and
-   the `source` block, printed by the script and saved in its `.source.json`.
-   `campaign` refuses a config that still has a placeholder.
+2. **Check its config.** Before serving, the script writes
+   `config/e1-rung0-qwen3.5-<size>.json`, copied from
+   `config/e1-rung0-qwen3.5.example.json` if it does not exist yet, with the
+   model id (the GGUF's path, which llama-server reports at
+   `curl -s http://localhost:8933/v1/models` when no `--alias` is given) and
+   the `source` block from its `.source.json`. An existing config keeps its
+   other fields; the script says so on stderr when it replaces a filled-in
+   model or source. Check that the id matches `/v1/models`. `campaign`
+   refuses a config that still has a placeholder.
 3. **Run it**, in a `tmux` window (`tmux new -s e1`; detach with Ctrl-b d,
    reattach with `tmux attach -t e1`):
 

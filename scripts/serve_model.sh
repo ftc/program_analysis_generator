@@ -15,6 +15,10 @@
 # taking the revision from the pin file written before the download, so the
 # record never names a revision the GGUF was not made from.
 #
+# For a Qwen/Qwen3.5-<size> repository it then writes the model id and the
+# source block into config/e1-rung0-qwen3.5-<size>.json (step 2), copying the
+# example config first if that file does not exist yet.
+#
 # The converter must come from the same llama.cpp commit as llama-server, so
 # the commit in the file name is the one that made and serves it. Set
 # LLAMA_CPP to the checkout (default ~/software/llama.cpp).
@@ -29,6 +33,7 @@ case "$REPO" in
 esac
 NAME="${REPO#*/}"
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODELS="$HOME/models"
 LLAMA_CPP="${LLAMA_CPP:-$HOME/software/llama.cpp}"
 PORT=8933
@@ -110,7 +115,36 @@ else
   rm -rf "$DOWNLOAD" "$BF16" "$PIN"
 fi
 
-echo "== source block for config/e1-rung0-*.json ($SOURCE):"
+echo "== source block ($SOURCE):"
 cat "$SOURCE"
+
+# For a Qwen3.5 size, write the model id and source block into its E1 config,
+# config/e1-rung0-qwen3.5-<size>.json: an existing config keeps its other
+# fields; a missing one starts from the example. llama-server reports the -m
+# path as the model id when no --alias is given.
+case "$REPO" in
+  Qwen/Qwen3.5-*)
+    CONFIG="$ROOT/config/e1-rung0-qwen3.5-${NAME#Qwen3.5-}.json"
+    python3 - "$CONFIG" "$ROOT/config/e1-rung0-qwen3.5.example.json" "$GGUF" "$SOURCE" > "$CONFIG.part" <<'EOF'
+import json, os, sys
+config, example, model, source = sys.argv[1:]
+with open(config if os.path.exists(config) else example) as f:
+    c = json.load(f)
+with open(source) as f:
+    s = json.load(f)
+g = c["agents"]["generator"]
+for key, old, new in [("model", g.get("model"), model), ("source", g.get("source"), s)]:
+    if old is not None and old != new and "<" not in json.dumps(old):
+        print(f"replacing {key}: {json.dumps(old)}", file=sys.stderr)
+g["model"] = model
+g["source"] = s
+print(json.dumps(c, indent=2))
+EOF
+    mv "$CONFIG.part" "$CONFIG"
+    echo "== wrote model and source into $CONFIG"
+    ;;
+  *) echo "== not a Qwen/Qwen3.5 repository; write its config by hand" ;;
+esac
+
 echo "== serving on port $PORT; check: curl -s http://localhost:$PORT/slots"
 exec llama-server -m "$GGUF" -c 65536 -np 1 --port "$PORT" -ngl all "$@"
