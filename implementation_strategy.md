@@ -1833,9 +1833,10 @@ rest:
    build-test-evaluate step in a container), then the generator's first tools
    (`compile_and_test`, then `analyze`), as their own campaigns (§16, item 24).
    The first one-shot table itself runs without a container, the model's domain
-   and tests executing directly on Shawn's Mac: a domain plus JUnit tests,
-   compiled against `pag.api` alone, run briefly, every attempt recorded and
-   inspected. *Risk accepted — Shawn, 2026-10-08.*
+   and tests executing directly on the Linux machine the experiments run on (a
+   desktop PC only Shawn uses): a domain plus JUnit tests, compiled against
+   `pag.api` alone, run briefly, every attempt recorded and inspected. *Risk
+   accepted — Shawn, 2026-10-08.*
    Also after the first experiment: **worklist ordering** (§7, *Worklist
    order*), judged by `Computed.iterations` on the fixtures.
 
@@ -2064,8 +2065,10 @@ write it.
 **First, a crude version for the campaign's own step** (*Decided — Shawn,
 2026-10-08*): everything that touches model-written code — building, running the
 model's tests, `pag` on its domain, and later every tool call — runs in a
-container, before tools are added. Podman, which this Mac has (5.8.1, rootless,
-its Linux VM running with 8 CPUs and 20 GB): `--network none`; the attempt's
+container, before tools are added. Podman (or Docker) on the Linux GPU server,
+where the experiments run (*Shawn, 2026-10-08*), natively, with no VM. (Shawn's
+Mac also has Podman 5.8.1, rootless, in a VM with 8 CPUs and 20 GB, but the Mac
+no longer runs campaigns.) The container gets `--network none`; the attempt's
 directory mounted read-write and the repository read-only; CPU, memory and
 process limits beside the existing wall-clock kill; and an image with the JDK,
 the pinned Gradle distribution and its offline cache, JUnit and `pag`, so builds
