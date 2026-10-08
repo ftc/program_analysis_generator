@@ -93,6 +93,8 @@ object Main:
       val s = r.summary
       val what =
         if r.reply.isEmpty then s"no reply: ${r.failure.fold("?")(_.message)}"
+        else if StatusView.outcome(r) == "ran out of tokens" then
+          s"ran out of tokens at ${r.agent.maxTokens.fold("the server's limit")(_.toString)}"
         else if s.files == 0 then "no files in the reply"
         else if !s.builds then s"${s.files} files, did not compile"
         else s"${s.files} files, built, tests ${s.testsRun - s.testsFailed}/${s.testsRun}, " +

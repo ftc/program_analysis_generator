@@ -41,7 +41,7 @@ class StatusSuite extends munit.FunSuite:
 
   def evaluated(id: String, cells: List[String], proved: Int, unsound: Boolean = false, ms: Long = 600000): AttemptRecord =
     record.copy(attempt = id, elapsedMs = ms,
-      summary = Summary(4, builds = true, 10, 0, loads = true, cells, proved, unsound))
+      summary = Summary(outOfTokens = false, 4, builds = true, 10, 0, loads = true, cells, proved, unsound))
 
   def status(attempt: Option[String], stage: String, stageFrom: Long, attemptFrom: Long = 0): Status =
     Status("c", 5, attempt, stage, at(stageFrom).toString, attempt.map(_ => at(attemptFrom).toString), 1800,
@@ -83,6 +83,13 @@ class StatusSuite extends munit.FunSuite:
     assert(s.contains("R A"), s)
     assert(s.contains("no files in the reply ×3"), s)
     assert(s.contains("the last 3 attempts all failed the same way (no files in the reply)"), s)
+
+  test("a reply cut off at the token budget is 'ran out of tokens', not a missing file or a compile error"):
+    val cut = record.copy(attempt = "attempt-001",
+      reply = record.reply.map(_.copy(finishReason = Some("length"))),
+      summary = record.summary.copy(outOfTokens = true))
+    assertEquals(StatusView.outcome(cut), "ran out of tokens")
+    assert(screen(None, List(cut), Right(Nil), Nil, at(0)).contains("ran out of tokens ×1"))
 
   test("an unsound attempt and a killed pag are flagged"):
     val s = screen(None, List(evaluated("attempt-001", List("✗", "H"), 1, unsound = true)), Right(Nil), Nil, at(0))

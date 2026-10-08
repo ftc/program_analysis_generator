@@ -87,6 +87,13 @@ class AttemptSuite extends munit.FunSuite:
         assert(r.build.exists(_.compileLog.contains("error: illegal start of expression")), r.build.map(_.compileLog))
     }
 
+  test("a reply stopped at the token budget is recorded as out of tokens"):
+    attempt(200 -> completion("```java src/pag/domains/gen/D.java\npackage pag.domains.gen; class D {", finishReason = "length")) {
+      (r, _) =>
+        assertEquals((r.summary.outOfTokens, r.reply.flatMap(_.finishReason)), (true, Some("length")))
+        assertEquals(StatusView.outcome(r), "ran out of tokens")
+    }
+
   test("a reply with no files: nothing built, and the reply is still kept"):
     attempt(200 -> completion("I am not sure how to do this.")) { (r, _) =>
       assertEquals((r.summary.files, r.build), (0, None))

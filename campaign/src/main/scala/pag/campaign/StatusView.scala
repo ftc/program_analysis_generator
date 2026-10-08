@@ -140,6 +140,7 @@ object StatusView:
   /** What happened to an attempt, in a few words; "evaluated" when it reached the corpus. */
   def outcome(r: AttemptRecord): String =
     if r.reply.isEmpty then r.failure.fold("no reply")(f => if f.message.contains("not retried") then "timed out" else "no reply")
+    else if r.summary.outOfTokens && !(r.summary.builds && r.summary.loads) then "ran out of tokens"
     else if r.summary.files == 0 then "no files in the reply"
     else if !r.summary.builds then "did not compile"
     else if !r.summary.loads then "did not load"

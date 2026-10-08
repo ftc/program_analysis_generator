@@ -1,0 +1,23 @@
+{
+  "agents": {
+    "generator": {
+      "baseUrl": "http://localhost:8933/v1",
+      "model": "<the model id llama.cpp reports at /v1/models: the path of your Q8 GGUF>",
+      "temperature": 0.6,
+      "topP": 0.95,
+      "topK": 20,
+      "minP": 0.0,
+      "presencePenalty": 0.0,
+      "thinking": true,
+      "maxTokens": 32768,
+      "timeoutSeconds": 2700,
+      "retries": 3,
+      "source": {
+        "url": "<https://huggingface.co/Qwen/Qwen3.5-<size>>",
+        "file": "<your Q8 GGUF's file name, with the llama.cpp commit used>",
+        "revision": "<the repository's commit on Hugging Face>",
+        "sha256": "<sha256sum of the GGUF>"
+      }
+    }
+  }
+}

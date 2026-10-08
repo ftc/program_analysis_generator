@@ -49,7 +49,8 @@ final class ChatClient(
   private val base: String = agent.baseUrl.stripSuffix("/")
 
   def chat(messages: List[ChatMessage]): Either[ChatFailure, ChatReply] =
-    val body = Json.encode(ChatClient.Request(agent.model, messages, agent.temperature, agent.maxTokens)).toUtf8String
+    val body = Json.encode(ChatClient.Request(agent.model, messages, agent.temperature, agent.maxTokens, agent.topP,
+      agent.topK, agent.minP, agent.presencePenalty, agent.thinking.map(t => Map("enable_thinking" -> t)))).toUtf8String
     val request = authorized(HttpRequest.newBuilder(URI.create(s"$base/chat/completions")))
       .timeout(Duration.ofSeconds(agent.timeoutSeconds.toLong))
       .header("Content-Type", "application/json")
@@ -97,15 +98,21 @@ final class ChatClient(
 
 object ChatClient:
 
-  /** The request body. Field names are the API's, hence `max_tokens`. Its default
-    * of None makes Borer leave it out entirely rather than send null, which not
-    * every server accepts.
+  /** The request body. Field names are the API's, hence `max_tokens`. Optional
+    * fields default to None, which makes Borer leave them out entirely rather than
+    * send null, which not every server accepts: an unset field means the server's
+    * own default.
     */
   final case class Request(
       model: String,
       messages: List[ChatMessage],
       temperature: Double,
-      @key("max_tokens") maxTokens: Option[Int] = None
+      @key("max_tokens") maxTokens: Option[Int] = None,
+      @key("top_p") topP: Option[Double] = None,
+      @key("top_k") topK: Option[Int] = None,
+      @key("min_p") minP: Option[Double] = None,
+      @key("presence_penalty") presencePenalty: Option[Double] = None,
+      @key("chat_template_kwargs") chatTemplateKwargs: Option[Map[String, Boolean]] = None
   )
 
   given Codec[ChatMessage] = deriveCodec[ChatMessage]
