@@ -24,7 +24,15 @@ Shawn runs the experiments; these are the steps, once per model size. Start with
 **one sample of a small size**, to see a real reply go through the whole
 pipeline before spending hours on the 27B.
 
-1. **Make the model and serve it.** On the RTX 3090 machine, with the model's
+**Everything runs on the Linux GPU server** (*Decided — Shawn, 2026-10-08*): the
+model server, `campaign`, the builds and the report, from a clone of this
+repository there. Set it up once as in `README.md`, *Setup on a new machine*,
+including step 4 (git, tmux, LaTeX). **Run campaigns inside `tmux`** (or
+`screen`): a campaign takes hours, and an SSH disconnect would kill a plain
+shell's sbt. Finished attempts survive that — a rerun fills in only what is
+missing — but the attempt in progress would be lost.
+
+1. **Make the model and serve it.** On the server, with the model's
    `source` URL from the table below:
 
    ```
@@ -61,7 +69,8 @@ pipeline before spending hours on the 27B.
    the model id (as `curl -s http://localhost:8933/v1/models` reports it), and
    the `source` block, printed by the script and saved in its `.source.json`.
    `campaign` refuses a config that still has a placeholder.
-3. **Run it.**
+3. **Run it**, in a `tmux` window (`tmux new -s e1`; detach with Ctrl-b d,
+   reattach with `tmux attach -t e1`):
 
    ```
    bash scripts/common.sh
@@ -71,7 +80,7 @@ pipeline before spending hours on the 27B.
    One campaign per model, named `e1-rung0-<model>`. Rerunning the same command
    only fills in samples that have no `attempt.json`, and never rewrites one;
    changing any setting means a new campaign name (the first run pins them).
-4. **Watch it**, in a second terminal:
+4. **Watch it**, in a second `tmux` window (Ctrl-b c):
 
    ```
    sbt "campaign/run status --campaign e1-rung0-qwen3.5-<size> --every 5"
@@ -91,11 +100,15 @@ pipeline before spending hours on the 27B.
    (cd report && latexmk -lualatex -outdir=build report.tex)
    ```
 
-   Then commit `results/`, `report/inspection.json` and `report/tables/`.
+   Then commit `results/`, `report/inspection.json` and `report/tables/` on the
+   server and push. Inspecting can happen anywhere after pulling, as long as
+   `inspection.json` is committed back.
 
 The first one-shot table runs without a container: the model's domain and tests
-execute directly on Shawn's Mac. *Risk accepted — Shawn, 2026-10-08*; the
-container (a crude Phase 9) comes right after.
+execute directly on the Linux machine — a desktop PC that only Shawn uses, which
+also holds the models. *Risk accepted — Shawn, 2026-10-08* (first for his Mac,
+then again for this machine); the container (a crude Phase 9) comes right
+after.
 
 ### The first run: rung 0, one shot, the smoke corpus
 

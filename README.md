@@ -593,7 +593,29 @@ Then confirm the entry point runs:
 sbt cli/run   # prints the usage line and exits with code 1
 ```
 
-### 4. Editor setup (optional)
+### 4. For running experiments (optional)
+
+Running campaigns and building the report (`experiments.md`) also needs:
+
+```sh
+# Debian / Ubuntu
+sudo apt install git tmux latexmk texlive-luatex texlive-latex-recommended \
+                 texlive-latex-extra fonts-dejavu-core
+```
+
+Package names vary between releases; check that the report's packages and font
+are found:
+
+```sh
+kpsewhich fontspec.sty fvextra.sty pdflscape.sty booktabs.sty   # four paths
+fc-list | grep -c "DejaVu Sans Mono"                            # not 0
+```
+
+The first `sbt test` (and the first `bash scripts/common.sh`) also downloads the
+pinned Gradle distribution and JUnit for the domain build template, so it needs
+network access once; later builds run from the cache.
+
+### 5. Editor setup (optional)
 
 - **VS Code**: install the [Metals](https://marketplace.visualstudio.com/items?itemName=scalameta.metals)
   extension, open this directory, and accept the "Import build" prompt.
