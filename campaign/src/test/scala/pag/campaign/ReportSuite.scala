@@ -29,6 +29,7 @@ class ReportSuite extends munit.FunSuite:
     }
 
   val probes: List[String] = List("Const1", "Const2", "Sign1")
+  val corpus: Path = repo.resolve("corpora/smoke")
 
   /** An evaluated attempt with these cells (over three targets). */
   def evaluated(n: Int, cells: List[String]): AttemptRecord =
@@ -100,13 +101,45 @@ class ReportSuite extends munit.FunSuite:
       Files.write(inspectionFile, Json.encode(withStray).toByteArray)
       val before = Files.readAllBytes(inspectionFile)
       val out = dir.resolve("tables")
-      val warnings = Report.write(dir, "e1-rung0-", inspectionFile, out).fold(e => fail(e), identity)
+      val warnings = Report.write(dir, "e1-rung0-", inspectionFile, corpus, out).fold(e => fail(e), identity)
       assertEquals(warnings, List("inspection.json names e1-rung0-gone/attempt-001, which is not among the campaigns read"))
-      val first = List("table1.tex", "table2.tex", "prompt.txt").map(f => Files.readString(out.resolve(f)))
-      Report.write(dir, "e1-rung0-", inspectionFile, out)
-      assertEquals(List("table1.tex", "table2.tex", "prompt.txt").map(f => Files.readString(out.resolve(f))), first)
+      val files = List("table1.tex", "table2.tex", "settings.tex", "corpus.tex", "prompt.txt")
+      val first = files.map(f => Files.readString(out.resolve(f)))
+      Report.write(dir, "e1-rung0-", inspectionFile, corpus, out)
+      assertEquals(files.map(f => Files.readString(out.resolve(f))), first)
       assert(java.util.Arrays.equals(Files.readAllBytes(inspectionFile), before), "the inspection file was written")
-      assert(first(2).startsWith("=== system ===\n") && first(2).contains("=== user ===\n# Task"), first(2))
+      assert(first(4).startsWith("=== system ===\n") && first(4).contains("=== user ===\n# Task"), first(4))
+    }
+
+  test("the settings table is read from the records, and the corpus table from the manifest"):
+    withResults(campaigns) { dir =>
+      val s = Report.settings(Report.campaigns(dir, "e1-rung0-"))
+      assert(s.contains("qwen3.5-27b & 0.2 & default & default & default & default & default & default & 1800 s"), s)
+      val c = Report.corpusTable(Corpus.read(corpus).fold(e => fail(e), identity))
+      assert(c.contains("Loop2 & 4 & yes & 2 & nothing: reachable"), c)
+      assert(c.contains("Const2 & 0 & yes & no input"), c)
+    }
+
+  test("the report builds with LuaLaTeX from generated tables, unsound marks and the prompt's Unicode included"):
+    val latexmk = sys.env.getOrElse("PATH", "").split(java.io.File.pathSeparator).map(Paths.get(_).resolve("latexmk"))
+      .exists(Files.isExecutable(_))
+    assume(latexmk, "latexmk is not installed; the report's build is not checked here")
+    withResults(campaigns) { dir =>
+      import Report.given
+      val report = Files.createDirectories(dir.resolve("report"))
+      Files.copy(repo.resolve("report/report.tex"), report.resolve("report.tex"))
+      Files.write(report.resolve("inspection.json"), Json.encode(inspections).toByteArray)
+      Report.write(dir, "e1-rung0-", report.resolve("inspection.json"), corpus, report.resolve("tables"))
+        .fold(e => fail(e), identity)
+      val p = Processes.run(List("latexmk", "-lualatex", "-outdir=build", "-interaction=nonstopmode",
+        "-halt-on-error", s"-cd", report.resolve("report.tex").toString), scala.concurrent.duration.DurationInt(3).minutes)
+      assertEquals(p.exitCode, Some(0), p.stdout.takeRight(3000))
+      assert(Files.size(report.resolve("build/report.pdf")) > 0)
+      val log = Files.readString(report.resolve("build/report.log"))
+      for f <- List("settings.tex", "corpus.tex", "table1.tex", "table2.tex", "prompt.txt") do
+        assert(log.contains(s"pag-report: included $f"), s"the build did not include $f, so the report shows a placeholder")
+      assert(!log.contains("Missing character"), "a character the fonts lack: " +
+        log.linesIterator.filter(_.contains("Missing character")).take(5).mkString("\n"))
     }
 
   test("no inspection file yet: blanks, not an error"):
