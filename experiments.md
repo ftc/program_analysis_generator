@@ -86,13 +86,14 @@ on llama.cpp; each a Q8 GGUF Shawn makes, so the quantization is the same for
 every size and each model keeps its own chat template (which carries the
 thinking switch):
 
-| model | source |
-| --- | --- |
+| model        | source                                   |
+|--------------|------------------------------------------|
 | Qwen3.5-0.8B | https://huggingface.co/Qwen/Qwen3.5-0.8B |
-| Qwen3.5-2B | https://huggingface.co/Qwen/Qwen3.5-2B |
-| Qwen3.5-4B | https://huggingface.co/Qwen/Qwen3.5-4B |
-| Qwen3.5-9B | https://huggingface.co/Qwen/Qwen3.5-9B |
-| Qwen3.5-27B | https://huggingface.co/Qwen/Qwen3.5-27B |
+| Qwen3.5-2B   | https://huggingface.co/Qwen/Qwen3.5-2B   |
+| Qwen3.5-4B   | https://huggingface.co/Qwen/Qwen3.5-4B   |
+| Qwen3.5-9B   | https://huggingface.co/Qwen/Qwen3.5-9B   |
+| Qwen3.5-27B  | https://huggingface.co/Qwen/Qwen3.5-27B  |
+| Qwen3.8-27B  | https://huggingface.co/Qwen/Qwen3.8-27B  |
 
 About a 34× range in steps of 2–3×, so the size where one-shot generation breaks
 can be located. The 0.8B and 2B will probably mostly fail early; that is the
@@ -104,18 +105,18 @@ results.
 written into the example config. Expected to change: every attempt records the
 settings it ran with, and a campaign pins them.
 
-| setting | value | why |
-| --- | --- | --- |
-| `temperature`, `topP`, `topK`, `minP`, `presencePenalty` | 0.6, 0.95, 20, 0.0, 0.0 | the 27B card's recommendation for coding in thinking mode; the same for every size |
-| `thinking` | `true`, explicit | how the models are meant to be used; thinking off is a later, cheaper variation |
-| `maxTokens` | 32,768, every size | the card's "most queries" length; one budget for all sizes. The pipeline check passed 47,000 without finishing, so expect some "ran out of tokens" — data, and the first setting to revisit (the card suggests 81,920 for complex problems) |
-| `timeoutSeconds` | 2,700 (45 minutes) | 32,768 tokens at about 28 tokens/s is about 20 minutes for the 27B, plus margin. A timeout is not retried |
-| `retries` | 3 | connection failures, 429 and 5xx only |
-| samples | 5 per size | a first table quickly; more for the cheap small sizes if noisy |
-| seed | unset | samples should differ; GPU arithmetic is not bit-reproducible anyway |
-| llama.cpp `-c` (server) | 65,536 | covers prompt plus budget, with a far smaller KV cache than the full 262,144 |
-| llama.cpp `-np` (server) | 1 | runs are one request at a time; extra slots only let other requests share the GPUs (noise in timings), and may divide `-c` between them. Other users wait; give them a second server on another port |
-| llama.cpp `--reasoning-budget` | unset | `maxTokens` caps thinking and answer together; a separate cap is a later variation |
+| setting                                                  | value                   | why                                                                                                                                                                                                                                         |
+|----------------------------------------------------------|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `temperature`, `topP`, `topK`, `minP`, `presencePenalty` | 0.6, 0.95, 20, 0.0, 0.0 | the 27B card's recommendation for coding in thinking mode; the same for every size                                                                                                                                                          |
+| `thinking`                                               | `true`, explicit        | how the models are meant to be used; thinking off is a later, cheaper variation                                                                                                                                                             |
+| `maxTokens`                                              | 32,768, every size      | the card's "most queries" length; one budget for all sizes. The pipeline check passed 47,000 without finishing, so expect some "ran out of tokens" — data, and the first setting to revisit (the card suggests 81,920 for complex problems) |
+| `timeoutSeconds`                                         | 2,700 (45 minutes)      | 32,768 tokens at about 28 tokens/s is about 20 minutes for the 27B, plus margin. A timeout is not retried                                                                                                                                   |
+| `retries`                                                | 3                       | connection failures, 429 and 5xx only                                                                                                                                                                                                       |
+| samples                                                  | 5 per size              | a first table quickly; more for the cheap small sizes if noisy                                                                                                                                                                              |
+| seed                                                     | unset                   | samples should differ; GPU arithmetic is not bit-reproducible anyway                                                                                                                                                                        |
+| llama.cpp `-c` (server)                                  | 65,536                  | covers prompt plus budget, with a far smaller KV cache than the full 262,144                                                                                                                                                                |
+| llama.cpp `-np` (server)                                 | 1                       | runs are one request at a time; extra slots only let other requests share the GPUs (noise in timings), and may divide `-c` between them. Other users wait; give them a second server on another port                                        |
+| llama.cpp `--reasoning-budget`                           | unset                   | `maxTokens` caps thinking and answer together; a separate cap is a later variation                                                                                                                                                          |
 
 llama.cpp's server documentation confirms it accepts `chat_template_kwargs`
 (`{"enable_thinking": ...}`), `top_p`, `top_k`, `min_p`, `presence_penalty`,
@@ -187,15 +188,15 @@ Each rung is a slice of the scoring corpus (Phase 7) whose targets need one
 more piece of reasoning than the rung below. A domain is judged only on its own
 rung and those below it.
 
-| rung | programs | what a domain needs to prove the targets |
-| --- | --- | --- |
-| R0 | straight-line constants; targets guarded by comparisons of constants | constants, and `assume` on them |
-| R1 | one input, one branch on a literal | intervals and backward `assume` (needs constant substitution, §5.7) |
-| R2 | `+` and `-` on inputs before the branch | backward transfer through addition and subtraction |
-| R3 | `*`, `negate` | sign reasoning; multiplication across zero |
-| R4 | loops with a counter | widening, and a loop invariant at the head |
-| R5 | two inputs related to each other (`x < y`, then `y < x`) | a relational domain (zones or better, §16) |
-| R6 | nested loops, accumulators | relational reasoning and widening together |
+| rung | programs                                                             | what a domain needs to prove the targets                            |
+|------|----------------------------------------------------------------------|---------------------------------------------------------------------|
+| R0   | straight-line constants; targets guarded by comparisons of constants | constants, and `assume` on them                                     |
+| R1   | one input, one branch on a literal                                   | intervals and backward `assume` (needs constant substitution, §5.7) |
+| R2   | `+` and `-` on inputs before the branch                              | backward transfer through addition and subtraction                  |
+| R3   | `*`, `negate`                                                        | sign reasoning; multiplication across zero                          |
+| R4   | loops with a counter                                                 | widening, and a loop invariant at the head                          |
+| R5   | two inputs related to each other (`x < y`, then `y < x`)             | a relational domain (zones or better, §16)                          |
+| R6   | nested loops, accumulators                                           | relational reasoning and widening together                          |
 
 R0–R4 are within reach of the interval reference domain; R5 and R6 are where a
 relational domain becomes necessary, and where the reference fixture will need
@@ -217,13 +218,13 @@ least information that defines the task, and context is added only when it
 fails — one rung at a time, recorded with the attempt, so the answer includes
 *which* addition made the difference:
 
-| rung | adds | prompt |
-| --- | --- | --- |
-| 0 | the reply format, a general task (prove `reach` calls unreachable, soundly; what to track is the model's choice), and the contract | `generator-v1` |
-| 1 | which step shapes actually occur (the profile: assignments of constants, locals and `+ − *`; the six comparisons; `randInt`) | |
-| 2 | the domain named ("intervals") | |
-| 3 | a worked example of another domain (`ref-sign` and its tests) | |
-| 4 | worked transfer cases for the target domain (the README's six) | |
+| rung | adds                                                                                                                               | prompt         |
+|------|------------------------------------------------------------------------------------------------------------------------------------|----------------|
+| 0    | the reply format, a general task (prove `reach` calls unreachable, soundly; what to track is the model's choice), and the contract | `generator-v1` |
+| 1    | which step shapes actually occur (the profile: assignments of constants, locals and `+ − *`; the six comparisons; `randInt`)       |                |
+| 2    | the domain named ("intervals")                                                                                                     |                |
+| 3    | a worked example of another domain (`ref-sign` and its tests)                                                                      |                |
+| 4    | worked transfer cases for the target domain (the README's six)                                                                     |                |
 
 Rungs 1–4 are written when rung 0's results call for them. Context added
 *before* an attempt is a different thing from the feedback given *after* one
@@ -297,15 +298,15 @@ ladder** (E1, *The first run*); other families come later. Candidates, by family
 — **versions and sizes change quickly, so check what is current, and each
 model's licence, before running**:
 
-| family | candidates to consider | why |
-| --- | --- | --- |
-| Qwen | the Qwen3.5 ladder (chosen); Qwen3.8 27B (a newer generation at the top size); Qwen2.5-Coder | a size ladder within one family |
-| DeepSeek | DeepSeek-Coder-V2-Lite; the R1 distilled models | strong code models; distills test whether reasoning-style training helps |
-| OpenAI | gpt-oss-20b, gpt-oss-120b | open-weight reasoning models at two sizes |
-| Mistral | Devstral, Codestral | code-specialised; check licences |
-| Meta | Llama 3.x (8B, 70B) | widely used baseline |
-| Google | Gemma 3 (up to 27B) | small, strong general models |
-| Microsoft | Phi-4 | small, trained heavily on reasoning |
+| family    | candidates to consider                                                                       | why                                                                      |
+|-----------|----------------------------------------------------------------------------------------------|--------------------------------------------------------------------------|
+| Qwen      | the Qwen3.5 ladder (chosen); Qwen3.8 27B (a newer generation at the top size); Qwen2.5-Coder | a size ladder within one family                                          |
+| DeepSeek  | DeepSeek-Coder-V2-Lite; the R1 distilled models                                              | strong code models; distills test whether reasoning-style training helps |
+| OpenAI    | gpt-oss-20b, gpt-oss-120b                                                                    | open-weight reasoning models at two sizes                                |
+| Mistral   | Devstral, Codestral                                                                          | code-specialised; check licences                                         |
+| Meta      | Llama 3.x (8B, 70B)                                                                          | widely used baseline                                                     |
+| Google    | Gemma 3 (up to 27B)                                                                          | small, strong general models                                             |
+| Microsoft | Phi-4                                                                                        | small, trained heavily on reasoning                                      |
 
 **Identifying a model.** A Hugging Face repository URL is a pointer, not an
 identity: one repository holds many quantization files, and repositories are
@@ -360,20 +361,20 @@ once the five sizes are run.
 
 One row per attempt; models grouped, smallest first.
 
-| column | meaning |
-| --- | --- |
-| Model | the campaign's model, from its name |
-| Sample | which of the N samples |
-| Stopped at | where it stopped: no reply, timed out, ran out of tokens, no files in the reply, did not compile, did not load — or evaluated |
-| Files | source files read from the reply |
-| Built | compiled by the Gradle template |
-| Tests | its own JUnit tests passing, out of those run |
-| Loads | `pag` found exactly one domain class and constructed it |
-| one column per target | R refuted, A alarm, × refuted a reachable target (unsound), I did not converge (iteration limit or deadline), E domain failure (threw or returned null), H hung (killed at the wall-clock bound) |
-| Proved | refutations among the five unreachable targets |
-| Tokens | completion tokens, thinking included |
-| Time | the attempt's wall-clock time |
-| Closest domain, By eye, Accept | Shawn's inspection |
+| column                         | meaning                                                                                                                                                                                          |
+|--------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Model                          | the campaign's model, from its name                                                                                                                                                              |
+| Sample                         | which of the N samples                                                                                                                                                                           |
+| Stopped at                     | where it stopped: no reply, timed out, ran out of tokens, no files in the reply, did not compile, did not load — or evaluated                                                                    |
+| Files                          | source files read from the reply                                                                                                                                                                 |
+| Built                          | compiled by the Gradle template                                                                                                                                                                  |
+| Tests                          | its own JUnit tests passing, out of those run                                                                                                                                                    |
+| Loads                          | `pag` found exactly one domain class and constructed it                                                                                                                                          |
+| one column per target          | R refuted, A alarm, × refuted a reachable target (unsound), I did not converge (iteration limit or deadline), E domain failure (threw or returned null), H hung (killed at the wall-clock bound) |
+| Proved                         | refutations among the five unreachable targets                                                                                                                                                   |
+| Tokens                         | completion tokens, thinking included                                                                                                                                                             |
+| Time                           | the attempt's wall-clock time                                                                                                                                                                    |
+| Closest domain, By eye, Accept | Shawn's inspection                                                                                                                                                                               |
 
 ### Table 2 — per model
 
