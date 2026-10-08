@@ -9,7 +9,11 @@
 # and the download and BF16 intermediate deleted. The result lands in
 #   ~/models/<name>-GGUF/<name>-Q8_0-llamacpp-<commit>.gguf
 # beside <same>.source.json: the config's `source` block (url, file, revision,
-# sha256). If the GGUF already exists, it skips straight to serving.
+# sha256). If the GGUF and its record already exist, it skips straight to
+# serving. If the GGUF exists but its record does not (a run stopped while
+# hashing), it hashes the GGUF and writes the record without reconverting,
+# taking the revision from the pin file written before the download, so the
+# record never names a revision the GGUF was not made from.
 #
 # The converter must come from the same llama.cpp commit as llama-server, so
 # the commit in the file name is the one that made and serves it. Set
@@ -42,16 +46,53 @@ OUTDIR="$MODELS/$NAME-GGUF"
 FILE="$NAME-Q8_0-llamacpp-$COMMIT.gguf"
 GGUF="$OUTDIR/$FILE"
 SOURCE="${GGUF%.gguf}.source.json"
+PIN="$OUTDIR/.${FILE%.gguf}.revision" # the revision being converted, written before downloading
+BF16="$OUTDIR/.$NAME-BF16.gguf"
+
+# Hashes the GGUF and writes its record; written whole, then renamed, so a
+# partial record never counts as done.
+write_source() {
+  echo "== sha256"
+  local sha256
+  sha256="$(sha256sum "$GGUF" | cut -d' ' -f1)"
+  python3 - "$URL" "$FILE" "$1" "$sha256" > "$SOURCE.part" <<'EOF'
+import json, sys
+url, file, revision, sha256 = sys.argv[1:]
+print(json.dumps({"url": url, "file": file, "revision": revision, "sha256": sha256}, indent=2))
+EOF
+  mv "$SOURCE.part" "$SOURCE"
+}
 
 if [ -f "$GGUF" ] && [ -f "$SOURCE" ]; then
   echo "== $GGUF exists; skipping conversion"
+elif [ -f "$GGUF" ]; then
+  # Converted, but stopped before its record was written: hash it, do not reconvert.
+  if [ -f "$PIN" ]; then
+    REVISION="$(cat "$PIN")"
+  else
+    # A GGUF from before the pin file existed: the leftover download folder's name holds the revision.
+    shopt -s nullglob
+    LEFT=("$MODELS"/.download-"$NAME"-*/)
+    shopt -u nullglob
+    if [ "${#LEFT[@]}" -eq 1 ]; then
+      REVISION="${LEFT[0]%/}"; REVISION="${REVISION##*-}"
+    else
+      echo "$GGUF exists without its record, and the revision it was made from is unknown;" >&2
+      echo "delete it and rerun to convert afresh" >&2
+      exit 1
+    fi
+  fi
+  echo "== $GGUF exists without its record; recording it (revision $REVISION)"
+  write_source "$REVISION"
+  echo "== deleting the download and the BF16 intermediate"
+  rm -rf "$MODELS"/.download-"$NAME"-* "$BF16" "$PIN"
 else
   # Pin the revision first, so the download and the record agree.
   REVISION="$(curl -fsS "https://huggingface.co/api/models/$REPO" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')"
   DOWNLOAD="$MODELS/.download-$NAME-$REVISION"
-  BF16="$OUTDIR/.$NAME-BF16.gguf"
   mkdir -p "$OUTDIR"
+  echo "$REVISION" > "$PIN"
 
   echo "== downloading $REPO at $REVISION"
   huggingface-cli download "$REPO" --revision "$REVISION" --local-dir "$DOWNLOAD"
@@ -63,16 +104,10 @@ else
   llama-quantize "$BF16" "$GGUF.part" Q8_0
   mv "$GGUF.part" "$GGUF"
 
-  echo "== sha256"
-  SHA256="$(sha256sum "$GGUF" | cut -d' ' -f1)"
-  python3 - "$URL" "$FILE" "$REVISION" "$SHA256" > "$SOURCE" <<'EOF'
-import json, sys
-url, file, revision, sha256 = sys.argv[1:]
-print(json.dumps({"url": url, "file": file, "revision": revision, "sha256": sha256}, indent=2))
-EOF
+  write_source "$REVISION"
 
   echo "== deleting the download and the BF16 intermediate"
-  rm -rf "$DOWNLOAD" "$BF16"
+  rm -rf "$DOWNLOAD" "$BF16" "$PIN"
 fi
 
 echo "== source block for config/e1-rung0-*.json ($SOURCE):"
