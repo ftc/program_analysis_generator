@@ -286,22 +286,30 @@ real. Open questions:
 
 1. ~~**Models.**~~ *Decided:* the Qwen3.5 ladder, 0.8B to 27B, as Q8 GGUFs Shawn
    makes, on llama.cpp (E3).
-   **Proposals for the rest, from the model card** (not yet decided):
-   - sampling as the card recommends for coding in thinking mode — temperature
-     0.6, top_p 0.95, top_k 20, min_p 0, presence_penalty 0 — the same for every
-     size; the client sends only `temperature` today, so `AgentConfig` gains the
-     other four;
-   - an explicit `maxTokens`: the card's 32,768 to start, or 81,920 for the
-     27B; a reply cut off there (`finish_reason: "length"`) becomes its own
-     outcome, "ran out of tokens", in the record, `campaign status` and Table 1;
-   - a timeout covering the budget: 81,920 tokens at about 28 tokens/s is about
-     49 minutes, so an hour or more for the 27B;
-   - thinking on for the main runs, as the models are meant to be used, set
-     explicitly per campaign; thinking off as a cheaper variation later (check
-     that llama.cpp passes `chat_template_kwargs` through first);
-   - five samples per size to start; more for the cheap small sizes;
-   - a llama.cpp context of about 64k–96k rather than the full 262k, which covers
-     the output budget with a smaller KV cache.
+   **The run settings** — chosen by Claude at Shawn's delegation, 2026-10-07,
+   recorded here and in `config/e1-rung0-qwen3.5.example.json` (copy it once
+   per size and fill in the placeholders; `campaign` refuses a config that still
+   has any). Expected to change: every attempt records the settings it ran with,
+   and a campaign pins them, so changing one means a new campaign.
+
+   | setting | value | why |
+   | --- | --- | --- |
+   | `temperature`, `topP`, `topK`, `minP`, `presencePenalty` | 0.6, 0.95, 20, 0.0, 0.0 | the 27B card's recommendation for coding in thinking mode; the same for every size, so size is the only variable |
+   | `thinking` | `true`, explicit | how the models are meant to be used; recorded per campaign; thinking off is a later, cheaper variation |
+   | `maxTokens` | 32,768, every size | the card's "most queries" length; one budget for all sizes keeps them comparable. The pipeline check passed 47,000 without finishing, so expect some "ran out of tokens" at first — that is data, and the budget is the first setting to revisit (the card suggests 81,920 for complex problems) |
+   | `timeoutSeconds` | 2,700 (45 minutes) | 32,768 tokens at about 28 tokens/s is about 20 minutes for the 27B; the rest is margin for a busy server. A timeout is not retried |
+   | `retries` | 3 | for connection failures, 429 and 5xx only |
+   | samples | 5 per size | a first table quickly; more for the cheap small sizes if their results are noisy |
+   | seed | unset | sampling varies between samples by design; GPU arithmetic is not bit-reproducible anyway |
+   | llama.cpp context (`-c`, a server setting) | 65,536 | covers prompt plus budget with room to spare, and a far smaller KV cache than the full 262,144; a server setting, so note it with the model |
+   | llama.cpp parallel slots (`-np`, a server setting) | 1 | runs are one request at a time, so extra slots only let other requests share the GPUs with an attempt, adding noise to its timings; and with several slots llama.cpp may divide `-c` between them (unless `--kv-unified`), leaving too little context per request. Other users of the server wait instead; use a second server on another port for them. Check: `/slots` shows one slot with `n_ctx` ≥ 65,536 |
+   | llama.cpp `--reasoning-budget` | unset | the request's `maxTokens` caps thinking and answer together; a separate thinking cap is a later variation |
+
+   llama.cpp's server documentation confirms it accepts `chat_template_kwargs`
+   (`{"enable_thinking": ...}`), `top_p`, `top_k`, `min_p`, `presence_penalty`,
+   `max_tokens` and `seed` per request (read 2026-10-07). A reply stopped at the
+   budget (`finish_reason: "length"`) is its own outcome, "ran out of tokens", in
+   the record, `campaign status` and Table 1.
 2. **Samples and sampling.** How many samples per model; temperature; whether to
    fix seeds where the server allows.
 3. **Reasoning and budgets.** Qwen3.x thinks before answering

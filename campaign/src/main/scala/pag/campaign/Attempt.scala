@@ -60,6 +60,7 @@ object Attempt:
         b.elapsedMs)),
       targets,
       Summary(
+        chat.toOption.exists(_.finishReason.contains("length")),
         written.fold(0)(_.size),
         build.exists(_.jar.isDefined),
         build.fold(0)(_.testsRun),

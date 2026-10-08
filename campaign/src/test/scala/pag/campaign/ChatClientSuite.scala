@@ -26,6 +26,16 @@ class ChatClientSuite extends munit.FunSuite:
         """{"model":"m.gguf","messages":[{"role":"system","content":"be brief"},{"role":"user","content":"hi"}],"temperature":0.3}""")
     }
 
+  test("the sampling settings and the thinking switch are sent under the API's names when set"):
+    withServer(200 -> completion("ok")) { s =>
+      val agent = AgentConfig(s.baseUrl, "m", temperature = 0.6, topP = Some(0.95), topK = Some(20), minP = Some(0.0),
+        presencePenalty = Some(0.0), thinking = Some(true), maxTokens = Some(32768))
+      ChatClient(agent).chat(List(ChatMessage("user", "hi")))
+      assertEquals(s.received.head.body,
+        """{"model":"m","messages":[{"role":"user","content":"hi"}],"temperature":0.6,"max_tokens":32768,""" +
+          """"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"chat_template_kwargs":{"enable_thinking":true}}""")
+    }
+
   test("max_tokens is sent under the API's name when set"):
     withServer(200 -> completion("ok")) { s =>
       ChatClient(AgentConfig(s.baseUrl, "m", maxTokens = Some(500))).chat(hello)

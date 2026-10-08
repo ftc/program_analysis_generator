@@ -37,6 +37,11 @@ final case class AgentRecord(
     model: String,
     apiKeyEnv: Option[String],
     temperature: Double,
+    topP: Option[Double],
+    topK: Option[Int],
+    minP: Option[Double],
+    presencePenalty: Option[Double],
+    thinking: Option[Boolean],
     maxTokens: Option[Int],
     timeoutSeconds: Int,
     retries: Int,
@@ -47,7 +52,8 @@ final case class SourceRecord(url: Option[String], file: Option[String], revisio
 
 object AgentRecord:
   def of(a: AgentConfig): AgentRecord =
-    AgentRecord(a.baseUrl, a.model, a.apiKeyEnv, a.temperature, a.maxTokens, a.timeoutSeconds, a.retries,
+    AgentRecord(a.baseUrl, a.model, a.apiKeyEnv, a.temperature, a.topP, a.topK, a.minP, a.presencePenalty, a.thinking,
+      a.maxTokens, a.timeoutSeconds, a.retries,
       SourceRecord(a.source.url, a.source.file, a.source.revision, a.source.sha256))
 
 /** The full messages sent, not just their identity (implementation_strategy.md Phase 10). */
@@ -80,6 +86,7 @@ final case class TargetRecord(
 
 /** Table 1's row, before inspection (experiments.md). */
 final case class Summary(
+    outOfTokens: Boolean, // the reply stopped at the token budget (finish_reason "length")
     files: Int,
     builds: Boolean,
     testsRun: Int,

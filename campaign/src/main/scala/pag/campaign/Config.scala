@@ -25,7 +25,12 @@ final case class AgentConfig(
     model: String,
     apiKeyEnv: Option[String] = None,
     temperature: Double = 0.2,
-    maxTokens: Option[Int] = None,
+    topP: Option[Double] = None, // the sampling fields llama.cpp accepts; unset means the server's default
+    topK: Option[Int] = None,
+    minP: Option[Double] = None,
+    presencePenalty: Option[Double] = None,
+    thinking: Option[Boolean] = None, // sent as chat_template_kwargs.enable_thinking; unset: the template's default
+    maxTokens: Option[Int] = None, // counts the thinking too
     timeoutSeconds: Int = 1800, // one answer from a local 27B model can take many minutes
     retries: Int = 3, // after the first try, for connection failures, 429 and 5xx
     source: ModelSource = ModelSource()
@@ -47,4 +52,13 @@ object CampaignConfig:
 
   def read(file: Path): Either[String, CampaignConfig] =
     if !Files.isRegularFile(file) then Left(s"no config file at $file")
-    else parse(Files.readString(file)).left.map(e => s"$file: $e")
+    else
+      val text = Files.readString(file)
+      val placeholders = Placeholder.findAllMatchIn(text).map(_.group(0)).toList
+      if placeholders.nonEmpty then
+        Left(s"$file still has placeholders to fill in: ${placeholders.mkString(", ")} " +
+          "(a campaign pins its config on the first run, so it must not start with one)")
+      else parse(text).left.map(e => s"$file: $e")
+
+  /** A string value that is still an example's `<...>` placeholder. */
+  private val Placeholder = "\"<[^\"]*>\"".r
