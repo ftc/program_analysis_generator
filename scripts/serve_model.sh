@@ -1,5 +1,5 @@
 # Makes a Q8_0 GGUF from an official Hugging Face repository and serves it with
-# llama-server, as in experiments.md, "Running E1, step by step", steps 1-2.
+# llama-server, as in experiments.md, "Running E1, step by step", step 1.
 #
 #   bash scripts/serve_model.sh <hf-url> [extra llama-server args...]
 #   bash scripts/serve_model.sh https://huggingface.co/Qwen/Qwen3.5-0.8B
