@@ -1,0 +1,23 @@
+{
+  "agents": {
+    "generator": {
+      "baseUrl": "http://localhost:8933/v1",
+      "model": "/home/s/models/Qwen3.5-9B-GGUF/Qwen3.5-9B-Q8_0-llamacpp-de7fa0a3c.gguf",
+      "temperature": 0.6,
+      "topP": 0.95,
+      "topK": 20,
+      "minP": 0.0,
+      "presencePenalty": 0.0,
+      "thinking": true,
+      "maxTokens": 32768,
+      "timeoutSeconds": 2700,
+      "retries": 3,
+      "source": {
+        "url": "https://huggingface.co/Qwen/Qwen3.5-9B",
+        "file": "Qwen3.5-9B-Q8_0-llamacpp-de7fa0a3c.gguf",
+        "revision": "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+        "sha256": "2f055709ac8b9440b7f4c1f6effe26cc4edc407936ffe7109dd645cb1fc419e6"
+      }
+    }
+  }
+}
