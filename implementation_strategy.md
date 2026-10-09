@@ -2372,3 +2372,50 @@ framework, library, or the OS.
     - **In a container** (Phase 9): every tool runs model-written code. So does
       the one-shot pipeline already — Gradle runs the model's tests, `pag` runs
       its domain — so the container covers that step, not only the tools.
+25. **[decide] Build feedback, the next E1 campaign.** *Agreed — Shawn,
+    2026-10-09:* before the one-shot table is filled for every size, run rung 0
+    again with feedback kind 1 (`experiments.md`, Feedback: the compiler's
+    errors). Why: the 9B one-shot campaign failed to compile 5 times out of 5,
+    but from small Java mistakes rather than a misunderstood task. Every attempt
+    declared its state class inside the domain class and named it in the
+    `implements` clause, where it is out of scope. Every attempt also used
+    `Assign`, `Assume` and `Call` unqualified after `import pag.api.*`, which
+    does not import types nested in `Step`. Both were reproduced with plain
+    `javac` 21, so the harness is not at fault. A hand-fixed copy of attempt 4's
+    domain compiled after four small edits. Proposed, not yet approved:
+    - **`--feedback-rounds N`** on `campaign generate`, default 0 (one shot,
+      unchanged), pinned in `campaign.json`. When a build fails, the errors go
+      back in a new user message and the model replies again, until the build
+      passes or the rounds run out; whatever builds last is evaluated as now.
+      Unlike the `compile_and_test` tool (item 24), the harness decides when to
+      compile, not the model.
+    - **Earlier assistant turns are sent without their reasoning.** The
+      Qwen3.5-9B model card says: "the historical model output should only
+      include the final output part and does not need to include the thinking
+      content", and frameworks that bypass the chat template must do this
+      themselves.
+    - **Every round is recorded:** the reply, the files, the build log, and the
+      feedback sent. `AttemptRecord` gains fields with defaults, so the
+      committed one-shot records still decode, and the report gains a "rounds
+      used" column.
+
+    Open:
+    1. **How many rounds?** Suggested: 3.
+    2. **What triggers feedback?** Suggested: javac errors only, in the domain or
+       its tests. The alternatives add the domain's own failing JUnit tests, or a
+       reply with no files in it; those would be other kinds of feedback, so
+       they would be run as their own campaigns.
+    3. **What does a correction reply hold?** Suggested: every file again,
+       complete, with the domain rebuilt from that reply alone, so that one
+       reply is one domain. The alternative is to merge the changed files over
+       the previous round's.
+    4. **What does the feedback message say?** Suggested: only the javac errors
+       (file:line, the message, the caret lines), with paths relative to the
+       domain directory, capped near 8 KB with a note when cut, plus one fixed
+       sentence asking for all files again, complete and corrected. It would be
+       a versioned template in `campaign/prompts/feedback-build-v1/`.
+    5. **What are the campaigns called?** `e1-rung0-build3-<model>` also matches
+       the one-shot report prefix `e1-rung0-`. Either rename the one-shot
+       campaigns to `e1-rung0-oneshot-<model>` (a `git mv` of the 0.8B and 9B
+       directories), or give the feedback campaigns a stem of their own, such
+       as `e1fb-rung0-<model>`.
