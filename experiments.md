@@ -438,7 +438,8 @@ acceptable; and how many stopped at each stage.
 
 ## Record
 
-Kept for the history of how the setup was reached.
+Kept for the history of how the setup was reached. What the runs have shown,
+as opposed to how they were set up, is in `findings.md`.
 
 **The pipeline check** (2026-10-07), before the models were chosen: campaign
 `phase10-check-qwen3.8-27b`, Qwen3.8 27B served by llama.cpp at
