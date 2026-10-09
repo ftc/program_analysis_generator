@@ -1,0 +1,11 @@
+{
+  "campaign": "e1-rung0-qwen3.5-27B",
+  "samplesRequested": 5,
+  "attempt": null,
+  "stage": "finished",
+  "stageStartedAt": "2026-10-09T16:45:37.039862872Z",
+  "attemptStartedAt": null,
+  "timeoutSeconds": 2700,
+  "updatedAt": "2026-10-09T16:45:37.039878712Z",
+  "running": false
+}
