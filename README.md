@@ -595,7 +595,9 @@ sbt cli/run   # prints the usage line and exits with code 1
 
 ### 4. For running experiments (optional)
 
-Running campaigns and building the report (`experiments.md`) also needs:
+E1 runs entirely on the Linux GPU server (`experiments.md`, *Running E1, step
+by step*), so steps 4 and 5 are for that machine. Running campaigns and
+building the report also needs:
 
 ```sh
 # Debian / Ubuntu
@@ -615,7 +617,41 @@ The first `sbt test` (and the first `bash scripts/common.sh`) also downloads the
 pinned Gradle distribution and JUnit for the domain build template, so it needs
 network access once; later builds run from the cache.
 
-### 5. Editor setup (optional)
+### 5. For serving models (optional)
+
+`scripts/serve_model.sh` makes each model's GGUF and serves it. It needs:
+
+- **llama.cpp, built with CUDA**, checked out at `~/software/llama.cpp` (or
+  set `LLAMA_CPP` to the checkout). Following llama.cpp's `docs/build.md`:
+
+  ```sh
+  git clone https://github.com/ggml-org/llama.cpp ~/software/llama.cpp
+  cd ~/software/llama.cpp
+  cmake -B build -DGGML_CUDA=ON
+  cmake --build build --config Release
+  ```
+
+  Put the directory holding the built binaries on the `PATH`, so that
+  `llama-server` and `llama-quantize` are found. The script refuses to run
+  unless the checkout is at the commit `llama-server --version` reports, so
+  rebuild after every `git pull`.
+- **Python 3 with the converter's packages**, for `convert_hf_to_gguf.py`:
+
+  ```sh
+  pip install -r ~/software/llama.cpp/requirements/requirements-convert_hf_to_gguf.txt
+  ```
+
+- **`huggingface-cli`**, which downloads the model: `pip install huggingface_hub`.
+- **`curl`** and **`sha256sum`**, standard on Linux.
+
+Check:
+
+```sh
+command -v llama-server llama-quantize huggingface-cli python3 curl sha256sum   # six paths
+llama-server --version    # prints the commit
+```
+
+### 6. Editor setup (optional)
 
 - **VS Code**: install the [Metals](https://marketplace.visualstudio.com/items?itemName=scalameta.metals)
   extension, open this directory, and accept the "Import build" prompt.

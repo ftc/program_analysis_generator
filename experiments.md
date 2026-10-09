@@ -27,7 +27,8 @@ pipeline before spending hours on the 27B.
 **Everything runs on the Linux GPU server** (*Decided — Shawn, 2026-10-08*): the
 model server, `campaign`, the builds and the report, from a clone of this
 repository there. Set it up once as in `README.md`, *Setup on a new machine*,
-including step 4 (git, tmux, LaTeX). **Run campaigns inside `tmux`** (or
+including steps 4 and 5 (git, tmux, LaTeX; llama.cpp and the model-download
+tools). **Run campaigns inside `tmux`** (or
 `screen`): a campaign takes hours, and an SSH disconnect would kill a plain
 shell's sbt. Finished attempts survive that — a rerun fills in only what is
 missing — but the attempt in progress would be lost.
