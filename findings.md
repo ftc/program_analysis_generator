@@ -147,3 +147,93 @@ corpus.
   for every size. Its open questions are still to be decided.
 - Keep the one-shot campaigns for the remaining sizes. They are the baseline the
   feedback campaign is measured against.
+
+---
+
+## 2026-10-09 (later) — E1, rung 0, one shot: Qwen3.5-27B
+
+**Revises** the caveat in the entry above that "necessary" holds only for 9B and
+below. It also holds for Qwen3.5-27B: 4 of 5 attempts did not compile. The one
+that did was evaluated, was sound on the smoke corpus, and proved nothing.
+
+**Claim.** At 27B, the model uses the contract much better than 9B. It
+qualified `Step.Assign`, `Step.Assume` and `Step.Call` in all five samples,
+which 9B never did. Its build errors are fewer (1–9 per attempt, against 4–20
+at 9B) and each has one or two causes. One shot still almost never builds, so
+build feedback is needed here too. The first evaluated domain shows that
+getting past the build is not the end of it: compiling is not proving.
+
+**Status of the evidence.** Campaign `e1-rung0-qwen3.5-27B`, committed in
+`92580fb`. Same prompt, corpus, profile and settings as the entry above (the
+`campaign.json` pins match). Model `Qwen/Qwen3.5-27B` revision `fc05daec…`,
+Q8_0 GGUF sha256 `d084885a…`. Harness commit `42fe7e2`, recorded as **dirty**.
+The report has not been run; the rows were read from each `attempt.json`.
+
+### Results
+
+| sample | stopped at      | domain                      | files | javac errors | completion tokens | reply time |
+|--------|-----------------|-----------------------------|-------|--------------|-------------------|------------|
+| 1      | did not compile | intervals                   | 2     | 1            | 9,506             | 344 s      |
+| 2      | did not compile | linear constraints          | 2     | 3            | 4,506             | 163 s      |
+| 3      | evaluated       | constants and equalities    | 2     | 0 (2 in its test) | 4,850        | 175 s      |
+| 4      | did not compile | intervals                   | 2     | 6            | 11,919            | 431 s      |
+| 5      | did not compile | intervals                   | 2     | 9            | 9,559             | 346 s      |
+
+All five finished normally (`finishReason: stop`). 0 of 5 mechanically
+acceptable, 0 unsound, 0 inspected. "domain" is read from the class name and
+its state, not from Shawn's inspection.
+
+### The build errors
+
+| error                                                                       | samples |
+|-----------------------------------------------------------------------------|---------|
+| state class declared inside the domain class, named unqualified in `implements Domain<…>` | 1, 5    |
+| `name()` called on `LVal` instead of `LVal.Local`, after `instanceof LVal`  | 5       |
+| record components read as fields (`assign.target`, `assign.source`)         | 2       |
+| its own record constructed with the wrong arguments                         | 2       |
+| `const`, a reserved word, used as a pattern variable name; one mistake, two places, 6 errors | 4       |
+| `Map` used in the test without importing it                                 | 3 (test only) |
+
+Sample 1's only error is the state-class scoping mistake. Samples 2, 3 and 4
+qualified their state class (`Domain<LinearConstraintDomain.State>`, and so
+on), which avoids it.
+
+### The evaluated domain (sample 3)
+
+`EqualityDomain` tracks variables known to equal a constant, and variables
+known to equal each other. Its main source compiled and loaded. Its test file
+did not compile because of the missing `java.util.Map` import, so none of its
+tests ran.
+
+On the smoke corpus it raised an alarm on all eight targets: 0 of 5
+unreachable targets proved, no reachable target refuted, every run
+`Consistent`. So it is sound here and useless here. A constants domain should
+be able to prove `Const1`, and this one did not. Why was not investigated.
+
+### What this changes in the entry above
+
+- **The prompt explanation is weaker.** The entry above suggested the prompt's
+  nested `Step` types might explain 9B's most common error. 27B read the same
+  prompt and got them right five times out of five, so that error depends on
+  the model at least as much as on the prompt. A prompt fix could still help
+  the smaller sizes.
+- **The scoping of the domain's own state class persists at 27B** (2 of 5). It
+  is the one error common to 9B and 27B.
+
+### A gap in what is recorded
+
+Sample 3's `summary` says `builds: true, testsRun: 0, testsFailed: 0`. The test
+compile failure is only in `build.testLog`. So in Table 1 its *Tests* cell will
+read as no tests run rather than as tests that did not compile, and the
+summary cannot tell those apart. Not fixed here; whether to record it is a
+question for Shawn.
+
+### What follows
+
+- Unchanged from the entry above: build feedback (item 25) next. 27B is now
+  a third data point for it, and the most likely size to get past the build in
+  a round or two.
+- The evaluated domain is the first one that `pag` judged. That it proved
+  nothing, though sound, is the first sign of the second question: what it
+  takes for a domain that builds to prove anything (feedback kinds 2–5 in
+  `experiments.md`).
