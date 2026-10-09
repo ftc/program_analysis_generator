@@ -2455,3 +2455,20 @@ framework, library, or the OS.
       present both read `testsRun: 0` (`findings.md`, the 27B entry). The tests
       still do not trigger feedback or count toward either bar. Whether they
       should is a later campaign's question.
+    - **The wording of the message** is in `errors.md` in
+      `feedback-build-v1/`. Its two slots are `{{stage}}` and `{{errors}}`.
+    - **A compile that fails without javac errors is retried,** up to 3 tries
+      of 2 minutes each, the limit for each Gradle call. Successful builds so
+      far took 0.4–4 s. If the last try hit the time limit, the feedback is
+      `timeout.md` in the same directory: the compiler took more than 2
+      minutes, on each of 3 tries. If it failed some other way, such as Gradle
+      not starting, it is a harness problem rather than the model's. In that
+      case no feedback is sent, and the attempt stops at "did not compile"
+      with the failure recorded. The retry is in `Build.run`, so one-shot
+      campaigns get it too. None of the 15 one-shot attempts so far had a
+      compile fail without javac errors, so none would have come out
+      differently.
+
+    Built in this order, one change each: the feedback messages; build
+    retries; the pin and record fields; the loop in latest-only mode, with its
+    flags; the report's "rounds used" column; full-history mode.
