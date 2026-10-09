@@ -68,6 +68,21 @@ class StatusSuite extends munit.FunSuite:
     assert(s.contains(s"${262144 - 7524 - 47086} tokens of context left"), s)
     assert(s.contains("warnings  none"), s)
 
+  test("a new generation starting resets the rate: never negative, measured from the restart"):
+    // attempt 002 ended at 32,768 tokens; attempt 003 started, and 20 s later is at 445
+    val history = List(Reading(at(0), 30000), Reading(at(30), 32768), Reading(at(40), 100), Reading(at(60), 445))
+    val restarted = Right(List(Slot(0, busy = true, 445, 2673, 65536)))
+    val s = screen(Some(status(Some("attempt-003"), "asking the model", 40)), Nil, restarted, history, at(60))
+    val rateLine = s.linesIterator.find(_.contains("tokens/s")).getOrElse(fail(s"no rate shown:\n$s"))
+    assert(!rateLine.contains(" -"), rateLine)
+    assert(s.contains("445 tokens generated,  17 tokens/s over the last minute"), s) // (445 - 100) / 20 s
+
+  test("no stall is reported across a restart: the new generation is moving"):
+    val history = List(Reading(at(0), 32768), Reading(at(70), 32768), Reading(at(80), 50), Reading(at(140), 900))
+    val s = screen(Some(status(Some("attempt-002"), "asking the model", 75)), Nil,
+      Right(List(Slot(0, busy = true, 900, 2673, 65536))), history, at(140))
+    assert(!s.contains("stalled"), s)
+
   test("warnings: a stalled generation, one near its timeout, another busy slot"):
     val stalled = List(Reading(at(0), 47086), Reading(at(90), 47086))
     val twoBusy = Slots.parse(slotsJson).map(ss => ss.map(sl => if sl.id == 0 then sl.copy(busy = true) else sl))

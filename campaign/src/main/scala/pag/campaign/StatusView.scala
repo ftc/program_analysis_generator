@@ -88,15 +88,20 @@ object StatusView:
       case Right(_) if busy.isEmpty => (List("model     no slot generating"), Nil)
       case Right(_) =>
         val s = busy.maxBy(_.decoded)
-        val recent = history.filter(r => Duration.between(r.at, now).getSeconds <= 60)
+        // a drop in the count means a new generation began (the next attempt), so the
+        // rate and the stall check use only the readings since the last drop
+        val thisGeneration = history.zip(history.drop(1)).lastIndexWhere((a, b) => b.decoded < a.decoded) match
+          case -1 => history
+          case i  => history.drop(i + 1)
+        val recent = thisGeneration.filter(r => Duration.between(r.at, now).getSeconds <= 60)
         val rate = (recent.headOption, recent.lastOption) match
           case (Some(a), Some(b)) if Duration.between(a.at, b.at).toMillis > 0 =>
             Some((b.decoded - a.decoded) * 1000.0 / Duration.between(a.at, b.at).toMillis)
           case _ => None
         // stalled: the count has not changed for StallSeconds, over a history at least that long
-        val lastChangeAt = history.zip(history.drop(1)).collect { case (a, b) if b.decoded != a.decoded => b.at }
-          .lastOption.orElse(history.headOption.map(_.at))
-        val stalled = history.headOption.exists(h => Duration.between(h.at, now).getSeconds >= StallSeconds) &&
+        val lastChangeAt = thisGeneration.zip(thisGeneration.drop(1)).collect { case (a, b) if b.decoded != a.decoded => b.at }
+          .lastOption.orElse(thisGeneration.headOption.map(_.at))
+        val stalled = thisGeneration.headOption.exists(h => Duration.between(h.at, now).getSeconds >= StallSeconds) &&
           lastChangeAt.exists(t => Duration.between(t, now).getSeconds >= StallSeconds)
         val timeoutLeft = current.filter(_ => asking).map((st, _) =>
           st.timeoutSeconds - Duration.between(Instant.parse(st.stageStartedAt), now).getSeconds)
