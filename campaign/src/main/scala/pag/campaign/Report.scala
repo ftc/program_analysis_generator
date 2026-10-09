@@ -93,7 +93,7 @@ object Report:
         val s = r.summary
         val i = ins.attempts.getOrElse(s"${c.name}/${r.attempt}", Inspection())
         val before = List(c.model, r.sample.toString, StatusView.outcome(r), s.files.toString, yes(s.builds),
-          if s.builds then s"${s.testsRun - s.testsFailed}/${s.testsRun}" else "", yes(s.loads))
+          tests(s), yes(s.loads))
         val cells = probes.map(p => r.targets.find(_.probe == p).fold("")(t => cell(t.cell)))
         val after = List(if s.loads then s.proved.toString else "",
           r.reply.flatMap(_.completionTokens).fold("")(_.toString), minutes(r.elapsedMs),
@@ -160,4 +160,10 @@ object Report:
   /** A target's cell as LaTeX: the unsound mark is a math ×, the others plain letters. */
   private def cell(c: String): String = if c == "✗" then "$\\times$" else escape(c)
   private def yes(b: Boolean): String = if b then "yes" else "no"
+
+  /** Table 1's Tests cell: passing out of run, or that the tests did not compile. Blank if the domain did not build. */
+  def tests(s: Summary): String =
+    if !s.builds then ""
+    else if s.testsCompiled.contains(false) then "did not compile"
+    else s"${s.testsRun - s.testsFailed}/${s.testsRun}"
   private def minutes(ms: Long): String = f"${ms / 60000.0}%.1f min"

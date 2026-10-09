@@ -13,6 +13,12 @@ import pag.campaign.ChatClient.given // ChatMessage's codec, defined once
   * values: Borer leaves a field equal to its default out of the encoding, so a
   * record could silently lose it. Config types (`AgentConfig`) have defaults for
   * convenience, which is why the agent is copied into `AgentRecord` here.
+  *
+  * One exception, for fields added after records were committed: an
+  * `Option` defaulting to `None`, meaning "not recorded". Borer fails to decode a
+  * missing field unless it has a default, and leaves out only a value equal to
+  * the default, so what is dropped is `None`, which decodes back the same
+  * (borer-derivation 1.18.0, `MapBasedCodecs`). *Decided — Shawn, 2026-10-09.*
   */
 final case class AttemptRecord(
     envelope: Envelope,
@@ -68,7 +74,8 @@ final case class BuildRecord(
     testFailures: Int,
     testErrors: Int,
     testLog: String,
-    elapsedMs: Long
+    elapsedMs: Long,
+    testsCompiled: Option[Boolean] = None // added 2026-10-09; None: not tried, or recorded before then
 )
 
 final case class TargetRecord(
@@ -94,7 +101,8 @@ final case class Summary(
     loads: Boolean,
     cells: List[String], // one per target, in corpus order
     proved: Int,
-    unsound: Boolean
+    unsound: Boolean,
+    testsCompiled: Option[Boolean] = None // added 2026-10-09; None: not tried, or recorded before then
 )
 
 object AttemptRecord:

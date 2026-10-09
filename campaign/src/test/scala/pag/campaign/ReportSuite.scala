@@ -150,3 +150,18 @@ class ReportSuite extends munit.FunSuite:
   test("escaping LaTeX's special characters"):
     assertEquals(Report.escape("a_b & 50% #1 $x {y} ~ ^ \\"),
       "a\\_b \\& 50\\% \\#1 \\$x \\{y\\} \\textasciitilde{} \\textasciicircum{} \\textbackslash{}")
+
+  test("the Tests cell: passing out of run, did not compile, or blank when the domain did not build"):
+    val built = Summary(false, 2, builds = true, 4, 1, loads = true, Nil, 0, false)
+    assertEquals(Report.tests(built.copy(testsCompiled = Some(true))), "3/4")
+    assertEquals(Report.tests(built.copy(testsRun = 0, testsFailed = 0, testsCompiled = Some(false))), "did not compile")
+    assertEquals(Report.tests(built), "3/4", "a record from before testsCompiled was recorded")
+    assertEquals(Report.tests(built.copy(builds = false)), "")
+
+  test("Table 1 shows tests that did not compile"):
+    val r = evaluated(1, List("A", "A", "A"))
+    val noCompile = r.copy(summary = r.summary.copy(testsRun = 0, testsFailed = 0, testsCompiled = Some(false)))
+    withResults(Map("e1-rung0-qwen3.5-27b" -> List(noCompile))) { dir =>
+      val t = Report.table1(Report.campaigns(dir, "e1-rung0-"), inspections)
+      assert(t.contains("qwen3.5-27b & 1 & evaluated & 4 & yes & did not compile & yes & A & A & A & 0 &"), t)
+    }

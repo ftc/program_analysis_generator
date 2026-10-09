@@ -112,3 +112,41 @@ class AttemptSuite extends munit.FunSuite:
       assertEquals(r.failure.map(_.status), Some(Some(500)))
       assert(Files.isRegularFile(dir.resolve("attempt.json")))
     }
+
+  // Whether the domain's own tests compiled (implementation_strategy.md §16, item 25: recorded honestly).
+
+  val brokenTest: (String, String) = "test/pag/domains/gen/BrokenTest.java" ->
+    "package pag.domains.gen;\nclass BrokenTest {\n  @org.junit.jupiter.api.Test void t() { Map.of(); }\n}"
+
+  test("tests that compile: recorded as compiled, in the build and the summary"):
+    attempt(200 -> completion(reply(intervalReply))) { (r, _) =>
+      assertEquals((r.build.flatMap(_.testsCompiled), r.summary.testsCompiled), (Some(true), Some(true)))
+      assert(r.summary.testsRun > 0)
+    }
+
+  test("tests that do not compile: the domain is still evaluated, and the tests are recorded as not compiling"):
+    attempt(200 -> completion(reply(intervalReply + brokenTest))) { (r, _) =>
+      assertEquals((r.summary.builds, r.summary.loads, r.summary.proved), (true, true, 5))
+      assertEquals((r.summary.testsCompiled, r.summary.testsRun, r.summary.testsFailed), (Some(false), 0, 0))
+      assert(r.build.exists(_.testLog.contains("BrokenTest.java:3: error: cannot find symbol")), r.build.map(_.testLog))
+      assertEquals(Report.tests(r.summary), "did not compile")
+    }
+
+  test("no test files: the tests compile, none run, and the cell reads 0/0"):
+    attempt(200 -> completion(reply(intervalReply.filter((p, _) => p.startsWith("src/"))))) { (r, _) =>
+      assertEquals((r.summary.builds, r.summary.testsCompiled, r.summary.testsRun), (true, Some(true), 0))
+      assertEquals(Report.tests(r.summary), "0/0")
+    }
+
+  test("a domain that does not compile: its tests are not tried"):
+    attempt(200 -> completion(reply(Map("src/pag/domains/gen/D.java" -> "package pag.domains.gen; class D { int x = ; }")))) {
+      (r, _) =>
+        assertEquals((r.build.map(_.testsCompiled), r.summary.testsCompiled), (Some(None), None))
+    }
+
+  test("tests that did not compile survive attempt.json: written out, and decoded the same"):
+    attempt(200 -> completion(reply(intervalReply + brokenTest))) { (r, dir) =>
+      val json = Files.readString(dir.resolve("attempt.json"))
+      assertEquals("\"testsCompiled\":\\s*false".r.findAllMatchIn(json).size, 2, "once in build, once in summary")
+      assertEquals(Attempt.read(dir.resolve("attempt.json")), Right(r))
+    }

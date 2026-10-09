@@ -57,7 +57,7 @@ object Attempt:
       parsed.map(p => FilesRecord(written.getOrElse(Nil), p.ignoredBlocks,
         p.problems ++ evaluation.flatMap(_.left.toOption).map(e => s"evaluation: $e"))),
       build.map(b => BuildRecord(b.jar.isDefined, b.compileLog, b.testsRun, b.testFailures, b.testErrors, b.testLog,
-        b.elapsedMs)),
+        b.elapsedMs, b.testsCompiled)),
       targets,
       Summary(
         chat.toOption.exists(_.finishReason.contains("length")),
@@ -68,7 +68,8 @@ object Attempt:
         targets.exists(_.check.isDefined), // pag printed a result only if it loaded the domain
         targets.map(_.cell),
         proved,
-        unsound
+        unsound,
+        build.flatMap(_.testsCompiled)
       )
     )
     stage("writing the record")

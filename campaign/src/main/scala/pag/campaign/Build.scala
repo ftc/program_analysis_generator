@@ -12,15 +12,18 @@ final case class BuildResult(
     testsRun: Int,
     testFailures: Int, // failed assertions
     testErrors: Int, // tests that threw
-    testLog: String,
-    elapsedMs: Long
+    testLog: String, // the test compile's log if it failed, else the test run's
+    elapsedMs: Long,
+    testsCompiled: Option[Boolean] // None: not tried, because the domain did not compile
 )
 
 /** Builds a domain with the fixed Gradle template (implementation_strategy.md §3,
-  * "How domains are built"). Two Gradle runs, deliberately: `jar` compiles and
-  * packages, then `test` runs the domain's own tests. A domain whose tests fail is
-  * still evaluated — the smoke corpus is what judges it, and its failed tests are
-  * a column of their own (experiments.md, Table 1).
+  * "How domains are built"). Three Gradle runs, deliberately: `jar` compiles and
+  * packages, `testClasses` compiles the domain's own tests, and `test` runs them.
+  * The middle run's exit code is what tells tests that did not compile from no
+  * tests at all. A domain whose tests fail, or do not compile, is still
+  * evaluated — the smoke corpus is what judges it, and its tests are a column of
+  * their own (experiments.md, Table 1).
   */
 object Build:
 
@@ -33,10 +36,13 @@ object Build:
     val compile = Processes.run(gradle :+ "jar", timeout)
     val jar = domainDir.resolve(s"build/libs/${domainDir.getFileName}.jar")
     val compiled = compile.exitCode.contains(0) && Files.isRegularFile(jar)
-    val test = if compiled then { stage("running its tests"); Some(Processes.run(gradle :+ "test", timeout)) } else None
-    val (run, failures, errors) = if compiled then junitCounts(domainDir.resolve("build/test-results/test")) else (0, 0, 0)
-    BuildResult(Option.when(compiled)(jar), log(compile), run, failures, errors, test.fold("")(log),
-      System.currentTimeMillis() - started)
+    val testCompile = Option.when(compiled) { stage("compiling its tests"); Processes.run(gradle :+ "testClasses", timeout) }
+    val testsCompiled = testCompile.map(_.exitCode.contains(0))
+    val test = Option.when(testsCompiled.contains(true)) { stage("running its tests"); Processes.run(gradle :+ "test", timeout) }
+    val (run, failures, errors) =
+      if test.isDefined then junitCounts(domainDir.resolve("build/test-results/test")) else (0, 0, 0)
+    BuildResult(Option.when(compiled)(jar), log(compile), run, failures, errors, test.orElse(testCompile).fold("")(log),
+      System.currentTimeMillis() - started, testsCompiled)
 
   private def log(p: ProcessResult): String =
     val ending = if p.timedOut then "(killed at the time limit)" else s"(exit ${p.exitCode.getOrElse("?")})"
