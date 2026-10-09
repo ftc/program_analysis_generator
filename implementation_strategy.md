@@ -2372,7 +2372,7 @@ framework, library, or the OS.
     - **In a container** (Phase 9): every tool runs model-written code. So does
       the one-shot pipeline already — Gradle runs the model's tests, `pag` runs
       its domain — so the container covers that step, not only the tools.
-25. **[decide] Build feedback, the next E1 campaign.** *Agreed — Shawn,
+25. **Build feedback, the next E1 campaign.** *Agreed — Shawn,
     2026-10-09:* before the one-shot table is filled for every size, run rung 0
     again with feedback kind 1 (`experiments.md`, Feedback: the compiler's
     errors). Why: the 9B one-shot campaign failed to compile 5 times out of 5,
@@ -2382,7 +2382,8 @@ framework, library, or the OS.
     `Assign`, `Assume` and `Call` unqualified after `import pag.api.*`, which
     does not import types nested in `Step`. Both were reproduced with plain
     `javac` 21, so the harness is not at fault. A hand-fixed copy of attempt 4's
-    domain compiled after four small edits. Proposed, not yet approved:
+    domain compiled after four small edits. Proposed, and approved with the
+    decisions below:
     - **`--feedback-rounds N`** on `campaign generate`, default 0 (one shot,
       unchanged), pinned in `campaign.json`. When a build fails, the errors go
       back in a new user message and the model replies again, until the build
@@ -2399,23 +2400,58 @@ framework, library, or the OS.
       committed one-shot records still decode, and the report gains a "rounds
       used" column.
 
-    Open:
-    1. **How many rounds?** Suggested: 3.
-    2. **What triggers feedback?** Suggested: javac errors only, in the domain or
-       its tests. The alternatives add the domain's own failing JUnit tests, or a
-       reply with no files in it; those would be other kinds of feedback, so
-       they would be run as their own campaigns.
-    3. **What does a correction reply hold?** Suggested: every file again,
-       complete, with the domain rebuilt from that reply alone, so that one
-       reply is one domain. The alternative is to merge the changed files over
-       the previous round's.
-    4. **What does the feedback message say?** Suggested: only the javac errors
-       (file:line, the message, the caret lines), with paths relative to the
-       domain directory, capped near 8 KB with a note when cut, plus one fixed
-       sentence asking for all files again, complete and corrected. It would be
-       a versioned template in `campaign/prompts/feedback-build-v1/`.
-    5. **What are the campaigns called?** `e1-rung0-build3-<model>` also matches
-       the one-shot report prefix `e1-rung0-`. Either rename the one-shot
-       campaigns to `e1-rung0-oneshot-<model>` (a `git mv` of the 0.8B and 9B
-       directories), or give the feedback campaigns a stem of their own, such
-       as `e1fb-rung0-<model>`.
+    The one-shot results behind this item, for 0.8B, 9B and 27B, are in
+    `findings.md`.
+
+    *Decided — Shawn, 2026-10-09:*
+    - **What a round sends is configurable.** It is pinned in `campaign.json`
+      like the round count, set by a flag on `campaign generate`, and defaults
+      to *latest only*. In that mode each round sends the original messages,
+      the latest reply without its reasoning, and that reply's feedback. The
+      alternative mode is *full history*: every earlier reply, each without its
+      reasoning, and every earlier feedback message. The first feedback
+      campaign uses latest only. Why: the server runs with `-c 65536` and
+      `maxTokens` is 32,768, so a prompt must stay under about 32,700 tokens.
+      Full history passes that in about four rounds at 9B's reply length
+      (4–6k tokens a reply, plus up to about 2.5k of feedback). Latest only
+      stays near 10k tokens whatever the round count. Because a correction
+      reply holds every file (below), the latest reply always holds the whole
+      domain. In full-history mode, an over-long prompt has to be recorded as
+      its own failure, not sent.
+    - **Only errors compiling the domain trigger feedback** (open question 2).
+      A test file that does not compile is recorded but not fed back.
+      Feedback on test errors, on failing JUnit tests, or on a reply with no
+      files would be other kinds of feedback, so each would be its own campaign.
+      **The domain evaluated is from the last round whose domain compiled,**
+      not necessarily the last round. This replaces "whatever builds last" in
+      the first bullet above. Why: 27B sample 3's domain compiled while its
+      test file did not, and a correction should not be able to throw away a
+      domain that had built.
+    - **A correction reply holds every file again, complete** (open question
+      3). The domain is rebuilt from that reply alone, so one reply is one
+      domain.
+    - **The feedback campaigns have a stem of their own,**
+      `e1fb-rung0-<model>` (open question 5). The one-shot campaigns keep their
+      names, so the names in `findings.md` stay valid.
+
+    - **3 rounds,** for the first campaign. `--feedback-rounds` still defaults
+      to 0, so a campaign without it stays one shot (open question 1).
+    - **The feedback message** (open question 4) holds the javac errors and
+      nothing else: file:line, the message, the caret lines. Paths are
+      relative to the domain directory. The text is capped near 8 KB, with a
+      note when cut. It ends with one fixed sentence asking for all files
+      again, complete and corrected. It is a versioned template in
+      `campaign/prompts/feedback-build-v1/`.
+      - **Each error is sent once.** Gradle prints every javac error twice, in
+        javac's output and again in its failure summary.
+      - **The stage is named through a placeholder** in the template. For now
+        it is always "compiling the domain", the only stage that triggers
+        feedback. Other stages can fill it later without a new template shape.
+    - **The flag is `--feedback-history latest|full`,** default `latest`.
+    - **The model's own JUnit tests stay in the prompt and are recorded
+      honestly.** `generator-v2` is unchanged, so the feedback campaigns
+      differ from the one-shot baseline only in the feedback. A test file that
+      does not compile is recorded as that, distinct from "no tests run". At
+      present both read `testsRun: 0` (`findings.md`, the 27B entry). The tests
+      still do not trigger feedback or count toward either bar. Whether they
+      should is a later campaign's question.

@@ -368,6 +368,15 @@ shot, and how much feedback each rung needs.
 **One-shot** — a domain generated with no feedback at all: the prompt in, a
 domain out, judged as is. The baseline E1 measures feedback against.
 
+**Feedback round** — after an attempt's reply fails a check, one more exchange:
+the harness sends what failed back to the model, and the model replies again.
+The first kind is build feedback, the domain's javac errors
+(`implementation_strategy.md` §16, item 25). **Latest only** and **full
+history** are the two ways a round can send the conversation so far. Latest
+only sends the original messages, the latest reply and its feedback. Full
+history sends every earlier reply and every earlier feedback message. In both,
+replies are sent without their reasoning.
+
 **Kill rate** — fraction of seeded mutants an adversary breaks within a budget.
 The number that makes "the adversary found nothing" mean anything.
 
