@@ -376,7 +376,8 @@ adversary with a reasonable budget finds a reaching run. Not a theorem.
 
 **Campaign** — one run of the outer loop over a set of domains, with a fixed
 profile, api version, corpora and agent configs. The unit that makes results
-comparable; everything produced records which campaign produced it.
+comparable; everything produced records which campaign produced it. Rerunning a
+campaign with any of those inputs changed replaces it whole.
 
 **Campaign driver** — the codebase in `campaign/` that runs the loop. Separate
 from the engine on purpose: it drives `pag` by subprocess and exit code, so a

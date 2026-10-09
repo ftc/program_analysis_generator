@@ -47,7 +47,31 @@ class ReplySuite extends munit.FunSuite:
     assertEquals(r.files.keySet, Set("src/A.java"))
     assertEquals(r.problems, List("an unclosed code block at line 4")) // the first block is lines 1-3
 
-  test("the system prompt's own example block parses as a file"):
+  test("a path on the block's first line is read too, bare or as a comment, and not kept in the file"):
+    val bare = fence + "java\nsrc/pag/domains/gen/A.java\npackage pag.domains.gen;\nclass A {}\n" + fence
+    val comment = fence + "java\n// test/pag/domains/gen/ATest.java\nclass ATest {}\n" + fence
+    val r = Reply.files(bare + "\n" + comment)
+    assertEquals(r.files, Map(
+      "src/pag/domains/gen/A.java" -> "package pag.domains.gen;\nclass A {}",
+      "test/pag/domains/gen/ATest.java" -> "class ATest {}"))
+    assertEquals((r.ignoredBlocks, r.problems), (0, Nil))
+
+  test("a first line that only mentions a file is code, not a path"):
+    val r = Reply.files(fence + "java\n// see Example.java for how\nclass X {}\n" + fence)
+    assertEquals((r.files, r.ignoredBlocks), (Map.empty[String, String], 1))
+
+  test("an unsafe path on the first line is refused like any other"):
+    val r = Reply.files(fence + "java\n../escape.java\nclass X {}\n" + fence)
+    assertEquals((r.files, r.problems), (Map.empty[String, String], List("refused path: ../escape.java")))
+
+  test("generator-v2's example names no class, and parses once the placeholder is filled in"):
+    val repo = Repo.root().fold(e => throw IllegalStateException(e), identity)
+    val system = Files.readString(repo.resolve("campaign/prompts/generator-v2/system.md"))
+    assert(!system.contains("Example.java"), "v2 gives no example class name")
+    assertEquals(Reply.files(system.replace("<YourDomain>", "IntervalDomain")).files.keySet,
+      Set("src/pag/domains/gen/IntervalDomain.java"))
+
+  test("the system prompt's own example block parses as a file (generator-v1)"):
     val repo = Repo.root().fold(e => throw IllegalStateException(e), identity)
     val system = Files.readString(repo.resolve("campaign/prompts/generator-v1/system.md"))
     assertEquals(Reply.files(system).files.keySet, Set("src/pag/domains/gen/Example.java"))

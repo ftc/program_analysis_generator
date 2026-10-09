@@ -1,6 +1,8 @@
 package pag.campaign
 
 import java.nio.file.{Files, Path}
+import scala.jdk.CollectionConverters.*
+import scala.util.Using
 import io.bullet.borer.{Codec, Json}
 import io.bullet.borer.derivation.MapBasedCodecs.*
 
@@ -23,8 +25,10 @@ enum SampleOutcome:
   case Kept(attempt: String) // attempt.json already there: never rewritten
 
 /** Running a campaign's samples (implementation_strategy.md Phase 10): pin its
-  * inputs on the first run and refuse to continue under different ones; run only
-  * the samples that have no `attempt.json`, and never rewrite one.
+  * inputs on the first run; under the same inputs, run only the samples that have
+  * no `attempt.json` and never rewrite one; under different inputs, delete the
+  * campaign's directory and start afresh, so two experiments' samples never mix.
+  * The deleted attempts live on in git history once committed.
   */
 object Campaign:
 
@@ -33,13 +37,16 @@ object Campaign:
     deriveCodec[CampaignPin]
 
   def generate(name: String, samples: Int, agent: AgentConfig, client: ChatClient, prompt: Prompt, tools: Tools,
-      results: Path, progress: SampleOutcome => Unit = _ => ()): Either[String, List[SampleOutcome]] =
+      results: Path, progress: SampleOutcome => Unit = _ => (), notice: String => Unit = _ => ()
+  ): Either[String, List[SampleOutcome]] =
     val dir = results.resolve(name)
     for
-      _ <- Either.cond(name.matches("[A-Za-z0-9._-]+"), (), s"campaign name '$name': use letters, digits, '.', '_' and '-'")
+      // "." and ".." would name results/ itself or its parent, which a changed input then deletes
+      _ <- Either.cond(name.matches("[A-Za-z0-9._-]+") && !name.matches("\\.+"), (),
+        s"campaign name '$name': use letters, digits, '.', '_' and '-'")
       _ <- Either.cond(samples > 0, (), s"--samples must be positive, not $samples")
       corpusHash <- corpusSha256(tools.corpus)
-      _ <- pin(dir, CampaignPin(AgentRecord.of(agent), prompt.version, prompt.sha256, corpusHash, Attempt.Profile))
+      _ <- pin(dir, CampaignPin(AgentRecord.of(agent), prompt.version, prompt.sha256, corpusHash, Attempt.Profile), notice)
     yield
       val status = StatusReporter(dir, name, samples, agent.timeoutSeconds)
       val outcomes = (1 to samples).toList.map { sample =>
@@ -55,13 +62,16 @@ object Campaign:
       status.finished()
       outcomes
 
-  /** Writes the pin on a campaign's first run; afterwards, the same pin or a refusal naming what changed. */
-  private def pin(dir: Path, current: CampaignPin): Either[String, Unit] =
+  /** Writes the pin on a campaign's first run. Afterwards, the same pin keeps
+    * the directory; a different one deletes it, says what changed, and pins afresh.
+    * An unreadable pin is an error: deleting what cannot be read is a guess.
+    */
+  private def pin(dir: Path, current: CampaignPin, notice: String => Unit): Either[String, Unit] =
     val file = dir.resolve("campaign.json")
-    if !Files.exists(file) then
+    def write(): Unit =
       Files.createDirectories(dir)
       Files.write(file, Json.encode(current).withPrettyRendering(2).toByteArray)
-      Right(())
+    if !Files.exists(file) then Right(write())
     else
       Json.decode(Files.readAllBytes(file)).to[CampaignPin].valueEither.left.map(e => s"$file: ${e.getMessage}")
         .flatMap { pinned =>
@@ -72,10 +82,17 @@ object Campaign:
             Option.when(pinned.corpusSha256 != current.corpusSha256)("the corpus"),
             Option.when(pinned.profile != current.profile)("the profile")
           ).flatten
-          Either.cond(changed.isEmpty, (),
-            s"campaign ${dir.getFileName} was run with different inputs (${changed.mkString(", ")} changed); " +
-              "start a new campaign rather than mix two experiments' samples")
+          if changed.nonEmpty then
+            notice(s"campaign ${dir.getFileName} was run with different inputs (${changed.mkString(", ")} changed); " +
+              s"deleting $dir and starting afresh")
+            deleteTree(dir)
+            write()
+          Right(())
         }
+
+  /** Deletes a directory and everything under it; symbolic links are deleted, not followed. */
+  private def deleteTree(dir: Path): Unit =
+    Using.resource(Files.walk(dir))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
 
   /** A campaign's pinned inputs, if it has been run. */
   def pinned(dir: Path): Option[CampaignPin] =
