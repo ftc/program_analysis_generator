@@ -190,7 +190,7 @@ files, did not compile, did not load — or evaluated, with its cells and the
 number of unreachable targets it proved. **Acceptable has two bars, reported
 separately:**
 
-- **mechanical** — passes the smoke tests: evaluated, no ✗ (not caught
+- **mechanical** — passes the smoke corpus: evaluated, no ✗ (not caught
   unsound), and proves at least one of the five unreachable targets;
 - **inspection** — Shawn judges it acceptable (the rubric below).
 
