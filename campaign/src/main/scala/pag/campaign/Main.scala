@@ -10,7 +10,7 @@ import scopt.OParser
 object Main:
 
   final case class Args(command: String = "", config: Option[Path] = None, campaign: Option[String] = None,
-      samples: Int = 1, prompt: String = "generator-v1", every: Option[Int] = None, prefix: String = "e1-rung0-",
+      samples: Int = 1, prompt: String = "generator-v2", every: Option[Int] = None, prefix: String = "e1-rung0-",
       out: Option[Path] = None)
 
   private val parser: OParser[Unit, Args] =
@@ -25,11 +25,11 @@ object Main:
           opt[Path]("config").required().valueName("<file>").action((p, a) => a.copy(config = Some(p)))
             .text("the campaign config (JSON, implementation_strategy.md §10)"),
           opt[String]("campaign").required().valueName("<name>").action((n, a) => a.copy(campaign = Some(n)))
-            .text("results/<name>/; one campaign per model, e.g. e1-rung0-<model>"),
+            .text("results/<name>/, e.g. e1-rung0-<model>; changed inputs delete it and start afresh"),
           opt[Int]("samples").valueName("N").action((n, a) => a.copy(samples = n))
             .text("how many attempts the campaign should hold (default 1); existing ones are kept"),
           opt[String]("prompt").valueName("<version>").action((v, a) => a.copy(prompt = v))
-            .text("campaign/prompts/<version>/ (default generator-v1)")
+            .text("campaign/prompts/<version>/ (default generator-v2)")
         ),
       cmd("status")
         .action((_, a) => a.copy(command = "status"))
@@ -77,7 +77,7 @@ object Main:
           prompt <- Prompt.assemble(repo, a.prompt)
           agent = config.agents.generator
           done <- Campaign.generate(a.campaign.get, a.samples, agent, ChatClient(agent), prompt, tools,
-            repo.resolve("results"), report)
+            repo.resolve("results"), report, println)
         yield done
         outcome match
           case Left(message) => System.err.println(s"campaign: $message"); sys.exit(1)

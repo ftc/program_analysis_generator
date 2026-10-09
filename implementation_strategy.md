@@ -184,8 +184,9 @@ code. **Every attempt is committed too**: `results/<campaign>/<attempt>/`'s
 `attempt.json` and the domain sources the model wrote (`domain/src`,
 `domain/test`), whether or not they compiled. Shawn's manual inspection refers
 to attempts by id, and a regenerated attempt would be a different sample, so the
-original must never be lost; a campaign run only fills in attempts that have no
-`attempt.json`, and never rewrites one. What a build or an evaluation produces
+original must never be lost; a campaign run under unchanged inputs only fills
+in attempts that have no `attempt.json`, and never rewrites one (under changed
+inputs the whole campaign is replaced, below; git history keeps the old one). What a build or an evaluation produces
 from those sources (`domain/build/`, `work/`) is not committed. *Decided —
 Shawn, 2026-10-07*, reversing the earlier plan to keep attempt logs out of git.
 Moving to SQLite later changes the storage, not the schema, because both files
@@ -2145,8 +2146,12 @@ campaign is the unit of work with fixed inputs (§12), so its first run writes
 `results/<campaign>/campaign.json`: the agent configuration, the prompt's version
 and hash (which covers the contract it is assembled from), a hash of the corpus
 (`manifest.json` and the probe sources), and the profile. A later run of the
-same campaign refuses if any differ — start a new campaign instead — so two
-experiments' samples never mix under one name. The commit is not pinned:
+same campaign with any of them changed deletes `results/<campaign>/` and starts
+afresh, printing what changed, so two experiments' samples never mix under one
+name; the old attempts survive in git history once committed. *Decided — Shawn,
+2026-10-08*, replacing the earlier refusal, which forced a new name for every
+rerun and left superseded campaigns where the report would read them. An
+unreadable `campaign.json` is still an error: nothing is deleted on a guess. The commit is not pinned:
 committing the attempts or the inspection notes moves `HEAD`, and resuming must
 still work; each attempt's envelope records its own commit. Suggested naming,
 one campaign per model: `e1-rung0-<model>`. *Decided — Shawn, 2026-10-07*; the
@@ -2166,7 +2171,8 @@ messages, for grouping attempts that saw the identical prompt and spotting
 drift. At about 28 KB a prompt, inlining costs little; storing each distinct
 prompt once under its hash is the change to make if it ever does.
 *Decided — Shawn, 2026-10-07.* The reply's files are
-read from fenced blocks naming their path; a path that could write outside the
+read from fenced blocks naming their path, after the fence or alone on the
+block's first line (`experiments.md`, The information ladder); a path that could write outside the
 attempt's `src/` and `test/` is refused, since the files come from a model.
 This is E1's first data point (`experiments.md`): rung R0–R1, one shot, one
 model; the attempt records must already carry what E1 needs (prompt version,

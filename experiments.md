@@ -81,9 +81,13 @@ missing — but the attempt in progress would be lost.
    sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --campaign e1-rung0-qwen3.5-<size> --samples 5"
    ```
 
-   One campaign per model, named `e1-rung0-<model>`. Rerunning the same command
-   only fills in samples that have no `attempt.json`, and never rewrites one;
-   changing any setting means a new campaign name (the first run pins them).
+   One campaign per model, named `e1-rung0-<model>`; `generate` uses the
+   current prompt, `generator-v2`, unless `--prompt` says otherwise. The first
+   run pins the campaign's inputs (settings, prompt, corpus, profile). Rerunning
+   with the same inputs only fills in samples that have no `attempt.json`, and
+   never rewrites one; rerunning with any input changed deletes
+   `results/<campaign>/` and starts afresh, saying so — commit the old attempts
+   first if they are worth keeping, since git history is then their only copy.
 4. **Watch it**, in a second `tmux` window (Ctrl-b c):
 
    ```
@@ -260,11 +264,18 @@ fails — one rung at a time, recorded with the attempt, so the answer includes
 
 | rung | adds                                                                                                                               | prompt         |
 |------|------------------------------------------------------------------------------------------------------------------------------------|----------------|
-| 0    | the reply format, a general task (prove `reach` calls unreachable, soundly; what to track is the model's choice), and the contract | `generator-v1` |
+| 0    | the reply format, a general task (prove `reach` calls unreachable, soundly; what to track is the model's choice), and the contract | `generator-v2` |
 | 1    | which step shapes actually occur (the profile: assignments of constants, locals and `+ − *`; the six comparisons; `randInt`)       |                |
 | 2    | the domain named ("intervals")                                                                                                     |                |
 | 3    | a worked example of another domain (`ref-sign` and its tests)                                                                      |                |
 | 4    | worked transfer cases for the target domain (the README's six)                                                                     |                |
+
+Rung 0 was first `generator-v1`, whose reply-format example named its file
+`Example.java`; the first 0.8B campaign fixated on that name (see Record), so
+`generator-v2` gives a placeholder, `<YourDomain>.java`, and is otherwise the
+same. The reply parser also accepts the path on a block's first line (bare or
+as a `//` comment) as well as after the fence: a reply in that form is a
+format slip, not a failed task. *Decided — Shawn, 2026-10-08.*
 
 Rungs 1–4 are written when rung 0's results call for them. Context added
 *before* an attempt is a different thing from the feedback given *after* one
@@ -442,6 +453,17 @@ parameters; 25,913,155,584 bytes; context 262,144; capabilities `completion`,
 `ftype` field said `Q4_K - Small` — the size, about 7.6 bits per weight, fits the
 file name. Source `https://huggingface.co/unsloth/Qwen3.8-27B-GGUF`, from
 Shawn's shell history; revision and SHA-256 not recorded.
+
+**The first 0.8B campaign** (2026-10-08): `e1-rung0-qwen3.5-0.8B`, prompt
+`generator-v1`, the settings of the first run. All five samples ran out of
+tokens (32,768, about 97 s each), each in a loop. Samples 1, 2 and 5 looped in
+the reasoning, rereading the format instructions and returning to
+`src/pag/domains/gen/Example.java`, the example's file name; samples 3 and 4
+looped in the answer, repeating a line (`abstract boolean entails(S a, S b);`,
+`}`). Sample 3 put its path on the line after the fence, which the parser then
+refused. Two changes followed: `generator-v2` (a placeholder file name) and the
+lenient parser (The information ladder). Rerunning the campaign under
+`generator-v2` replaces it; the v1 attempts are in git history.
 
 **Installed on Shawn's Mac** (Ollama, `localhost:11434`, 2026-10-06), considered
 and dropped once every model moved to llama.cpp: `llama3.2:3b` (3.2B),

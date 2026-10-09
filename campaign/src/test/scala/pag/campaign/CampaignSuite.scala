@@ -8,7 +8,8 @@ import pag.campaign.FakeServer.{completion, withServer}
 import pag.cli.DomainJars.apiPath
 
 /** Running a campaign (implementation_strategy.md Phase 10): its inputs pinned on
-  * the first run, only missing samples run, and no attempt ever rewritten. The
+  * the first run; under the same inputs only missing samples run and no attempt is
+  * rewritten; under changed inputs the old campaign is deleted and run afresh. The
   * fake model answers without files, so no build is needed and the tests are fast.
   */
 class CampaignSuite extends munit.FunSuite:
@@ -60,36 +61,70 @@ class CampaignSuite extends munit.FunSuite:
       }
     }
 
-  test("a different agent configuration is refused, and nothing runs"):
+  /** Runs one sample, then reruns under `changed` inputs; the old attempt's reply marks whether it survived. */
+  def rerunChanged(s: FakeServer, results: Path, changed: (FakeServer, Path) => Either[String, List[SampleOutcome]]
+  ): Unit =
+    generate(s, results, 1).fold(e => fail(e), identity)
+    val old = results.resolve("e1-test/attempt-001/attempt.json")
+    Files.writeString(old, Files.readString(old).replace("no files", "the old campaign"))
+    val stray = Files.writeString(results.resolve("e1-test/notes.txt"), "left by hand")
+    val out = changed(s, results).fold(e => fail(e), identity)
+    assertEquals(out.collect { case SampleOutcome.Ran(r) => r.attempt }, List("attempt-001", "attempt-002"),
+      "every sample ran afresh")
+    assert(!Files.readString(old).contains("the old campaign"), "the old attempt-001 survived")
+    assert(!Files.exists(stray), "the old directory was not deleted whole")
+    assertEquals(chats(s), 3)
+
+  test("a different agent configuration deletes the old campaign and runs every sample afresh"):
     withServer(200 -> completion("no files")) { s =>
-      withResults { results =>
-        generate(s, results, 1).fold(e => fail(e), identity)
-        val r = generate(s, results, 2, temperature = 0.9)
-        assert(r.left.exists(_.contains("the agent configuration changed")), r)
-        assertEquals(chats(s), 1)
-      }
+      withResults(results => rerunChanged(s, results, (s, r) => generate(s, r, 2, temperature = 0.9)))
     }
 
-  test("a different prompt is refused"):
+  test("so does a different prompt, and the new pin is what a third run compares against"):
     withServer(200 -> completion("no files")) { s =>
       withResults { results =>
-        generate(s, results, 1).fold(e => fail(e), identity)
         val edited = prompt.copy(sha256 = "0" * 64)
-        assert(generate(s, results, 2, p = edited).left.exists(_.contains("the prompt changed")))
+        rerunChanged(s, results, (s, r) => generate(s, r, 2, p = edited))
+        assertEquals(Campaign.pinned(results.resolve("e1-test")).map(_.promptSha256), Some("0" * 64))
+        val third = generate(s, results, 2, p = edited).fold(e => fail(e), identity)
+        assert(third.forall(_.isInstanceOf[SampleOutcome.Kept]), "the same new inputs resume")
       }
     }
 
-  test("a different corpus is refused"):
+  test("so does a different corpus"):
     withServer(200 -> completion("no files")) { s =>
       withResults { results =>
-        generate(s, results, 1).fold(e => fail(e), identity)
         val corpus = Files.createTempDirectory("corpus")
         try
           Using.resource(Files.list(repo.resolve("corpora/smoke")))(_.iterator.asScala.toList)
             .foreach(f => Files.copy(f, corpus.resolve(f.getFileName)))
           Files.writeString(corpus.resolve("Const1.java"), Files.readString(corpus.resolve("Const1.java")) + "\n// edited")
-          assert(generate(s, results, 2, t = tools(corpus)).left.exists(_.contains("the corpus changed")))
+          rerunChanged(s, results, (s, r) => generate(s, r, 2, t = tools(corpus)))
         finally Using.resource(Files.walk(corpus))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
+      }
+    }
+
+  test("the notice says what changed and what is deleted"):
+    withServer(200 -> completion("no files")) { s =>
+      withResults { results =>
+        generate(s, results, 1).fold(e => fail(e), identity)
+        val agent = AgentConfig(s.baseUrl, "m.gguf", temperature = 0.9, retries = 0)
+        val notices = List.newBuilder[String] // collects the callback's messages; the callback is the API under test
+        Campaign.generate("e1-test", 1, agent, ChatClient(agent), prompt, tools(), results, notice = notices += _)
+          .fold(e => fail(e), identity)
+        val List(n) = notices.result(): @unchecked
+        assert(n.contains("the agent configuration changed") && n.contains(s"deleting ${results.resolve("e1-test")}"), n)
+      }
+    }
+
+  test("an unreadable pin is an error, and nothing is deleted"):
+    withServer(200 -> completion("no files")) { s =>
+      withResults { results =>
+        generate(s, results, 1).fold(e => fail(e), identity)
+        Files.writeString(results.resolve("e1-test/campaign.json"), "{ not json")
+        assert(generate(s, results, 1, temperature = 0.9).isLeft)
+        assert(Files.isRegularFile(results.resolve("e1-test/attempt-001/attempt.json")))
+        assertEquals(chats(s), 1)
       }
     }
 
@@ -97,7 +132,8 @@ class CampaignSuite extends munit.FunSuite:
     withServer(200 -> completion("no files")) { s =>
       withResults { results =>
         val agent = AgentConfig(s.baseUrl, "m")
-        assert(Campaign.generate("../escape", 1, agent, ChatClient(agent), prompt, tools(), results).isLeft)
+        for bad <- List("../escape", ".", "..", "a/b") do
+          assert(Campaign.generate(bad, 1, agent, ChatClient(agent), prompt, tools(), results).isLeft, bad)
         assert(Campaign.generate("ok", 0, agent, ChatClient(agent), prompt, tools(), results).isLeft)
         assertEquals(chats(s), 0)
       }
