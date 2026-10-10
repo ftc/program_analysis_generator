@@ -20,8 +20,24 @@ final case class CampaignPin(
     promptSha256: String,
     corpusSha256: String,
     profile: String,
-    samples: Option[Int] = None // added 2026-10-09; None: pinned before then
+    samples: Option[Int] = None, // added 2026-10-09, as are the next two; None: pinned before then
+    build: Option[BuildPin] = None, // None: pinned before then, when builds had 5 minutes and one try
+    feedback: Option[FeedbackPin] = None // None: one shot
 )
+
+/** How domains are built (Build): the limit on each Gradle call, and how many tries a compile gets. */
+final case class BuildPin(timeoutSeconds: Int, compileTries: Int)
+
+/** Build feedback (implementation_strategy.md §16, item 25): at most `rounds` feedback rounds (at least 1; a
+  * one-shot campaign pins no FeedbackPin), what each round sends, and the templates' version and hash.
+  */
+final case class FeedbackPin(rounds: Int, history: FeedbackHistory, templateVersion: String, templateSha256: String)
+
+/** What a feedback round sends besides the original messages: the latest reply and its feedback, or every
+  * earlier reply and feedback.
+  */
+enum FeedbackHistory:
+  case Latest, Full
 
 /** How `generate` starts: a new run of a campaign, or an interrupted run continued. */
 enum Start:
@@ -42,9 +58,15 @@ enum SampleOutcome:
   */
 object Campaign:
 
+  given Codec[FeedbackHistory] = deriveCodec[FeedbackHistory]
+  given Codec[BuildPin] = deriveCodec[BuildPin]
+  given Codec[FeedbackPin] = deriveCodec[FeedbackPin]
   given Codec[CampaignPin] =
     import AttemptRecord.given
     deriveCodec[CampaignPin]
+
+  /** The build settings this code runs with. */
+  val CurrentBuild: BuildPin = BuildPin(Build.Timeout.toSeconds.toInt, Build.CompileTries)
 
   /** A run's start time in its directory name: UTC, to the second, sorting as text sorts. */
   val StartFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
@@ -55,7 +77,8 @@ object Campaign:
   ): Either[String, (Path, List[SampleOutcome])] =
     for
       corpusHash <- corpusSha256(tools.corpus)
-      current = CampaignPin(AgentRecord.of(agent), prompt.version, prompt.sha256, corpusHash, Attempt.Profile)
+      current = CampaignPin(AgentRecord.of(agent), prompt.version, prompt.sha256, corpusHash, Attempt.Profile,
+        build = Some(CurrentBuild))
       run <- start match
         case Start.Fresh(name, samples) => fresh(results, name, samples, current, now())
         case Start.Resume(dir, samples) => resume(dir, samples, current)
@@ -104,7 +127,9 @@ object Campaign:
         Option.when(pinned.promptVersion != current.promptVersion || pinned.promptSha256 != current.promptSha256)(
           "the prompt"),
         Option.when(pinned.corpusSha256 != current.corpusSha256)("the corpus"),
-        Option.when(pinned.profile != current.profile)("the profile")
+        Option.when(pinned.profile != current.profile)("the profile"),
+        Option.when(pinned.build != current.build)("the build settings"),
+        Option.when(pinned.feedback != current.feedback)("the feedback settings")
       ).flatten
       _ <- Either.cond(changed.isEmpty, (), s"$dir was run with different inputs (${changed.mkString(", ")} changed); " +
         "start a new run instead of resuming this one")

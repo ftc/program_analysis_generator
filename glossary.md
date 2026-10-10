@@ -375,7 +375,9 @@ The first kind is build feedback, the domain's javac errors
 history** are the two ways a round can send the conversation so far. Latest
 only sends the original messages, the latest reply and its feedback. Full
 history sends every earlier reply and every earlier feedback message. In both,
-replies are sent without their reasoning.
+replies are sent without their reasoning. An attempt's record keeps every round
+with exactly the messages it sent: the rounds whose domain failed to compile,
+each with its feedback, then the last round, the one evaluated.
 
 **Kill rate** — fraction of seeded mutants an adversary breaks within a budget.
 The number that makes "the adversary found nothing" mean anything.
@@ -385,8 +387,21 @@ adversary with a reasonable budget finds a reaching run. Not a theorem.
 
 **Campaign** — one run of the outer loop over a set of domains, with a fixed
 profile, api version, corpora and agent configs. The unit that makes results
-comparable; everything produced records which campaign produced it. Rerunning a
-campaign with any of those inputs changed replaces it whole.
+comparable; everything produced records which campaign produced it. Each run of
+a campaign has a directory of its own, `results/<campaign>-<UTC start>/`, and
+nothing is replaced or deleted; the report reads the latest run of each campaign
+(plan §14, *Decided — Shawn, 2026-10-09*). Directories from before then are
+named after the campaign alone.
+
+**Pin** — a run's `campaign.json`: the inputs it holds fixed, so its attempts
+are comparable with each other. They are the agent settings, the prompt's
+version and hash, the corpus hash, the profile, the sample count, the **build
+pin** (the limit on each Gradle call and how many tries a compile gets), and
+the **feedback pin** (the most feedback rounds, what each round sends, and the
+feedback templates' version and hash; none for a one-shot run). Written when a
+run starts. `generate --resume` continues a run only if the current inputs
+match its pin. Types `CampaignPin`, `BuildPin`, `FeedbackPin` (plan §14, §16
+item 25).
 
 **Campaign driver** — the codebase in `campaign/` that runs the loop. Separate
 from the engine on purpose: it drives `pag` by subprocess and exit code, so a

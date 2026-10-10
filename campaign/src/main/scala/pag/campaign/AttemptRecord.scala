@@ -30,9 +30,15 @@ final case class AttemptRecord(
     elapsedMs: Long,
     agent: AgentRecord,
     serverModels: Option[String], // the server's own /v1/models report, raw; None: it did not answer with HTTP 200
-    prompt: PromptRecord,
-    exchange: Exchange
+    prompt: PromptRecord, // the prompt's version, hash, and first messages; every round's messages are in conversation
+    conversation: Conversation
 ):
+  /** The last round's exchange: the one the record's other views describe, and the one evaluated. */
+  def exchange: Exchange = conversation.last.exchange
+
+  /** How many rounds the conversation took: 1 for one shot. */
+  def rounds: Int = conversation.failed.size + 1
+
   def reply: Option[ChatReply] = exchange match
     case Exchange.Replied(r, _, _) => Some(r)
     case Exchange.NoReply(_)       => None
@@ -74,6 +80,21 @@ final case class AttemptRecord(
       targets.exists(t => t.refuted && t.reachable),
       compiled
     )
+
+/** Every round of an attempt, in order: those whose domain failed to compile in a way fed back to the model,
+  * then the one that ended it. Only the last can be anything but a failed build: a domain that compiles ends
+  * the conversation, as does a failure nothing is fed back for (implementation_strategy.md §16, item 25).
+  */
+final case class Conversation(failed: List[FailedRound], last: LastRound)
+
+/** A round whose domain failed to compile, and the feedback sent because of it. `sent`: exactly the messages
+  * this round sent; the next round's end with `feedback`.
+  */
+final case class FailedRound(sent: List[ChatMessage], reply: ChatReply, files: FilesRecord, build: BuildRecord.Failed,
+    feedback: String)
+
+/** The round that ended the conversation, and exactly the messages it sent. */
+final case class LastRound(sent: List[ChatMessage], exchange: Exchange)
 
 /** How far the exchange with the model got. */
 enum Exchange:
@@ -205,4 +226,8 @@ object AttemptRecord:
   given Codec[Tests] = deriveAllCodecs[Tests]
   given Codec[BuildRecord] = deriveAllCodecs[BuildRecord]
   given Codec[Exchange] = deriveAllCodecs[Exchange]
+  given Codec[BuildRecord.Failed] = deriveCodec[BuildRecord.Failed]
+  given Codec[FailedRound] = deriveCodec[FailedRound]
+  given Codec[LastRound] = deriveCodec[LastRound]
+  given Codec[Conversation] = deriveCodec[Conversation]
   given Codec[AttemptRecord] = deriveCodec[AttemptRecord]

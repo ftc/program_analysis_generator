@@ -154,3 +154,30 @@ class AttemptSuite extends munit.FunSuite:
       assert(json.contains(s"\"schema\": ${AttemptRecord.Schema}"), json.take(200))
       assertEquals(Attempt.read(dir.resolve("attempt.json")), Right(r))
     }
+
+  // Rounds: every round's messages kept exactly, and the record's views describe the last round.
+
+  test("a one-shot attempt is one round, which sent exactly the prompt's messages"):
+    attempt(200 -> completion("I am not sure how to do this.")) { (r, _) =>
+      assertEquals((r.rounds, r.conversation.failed, r.conversation.last.sent), (1, Nil, prompt.messages))
+    }
+
+  test("a record with two failed rounds: written and read back the same, its views on the last round"):
+    attempt(200 -> completion(reply(intervalReply))) { (r, dir) =>
+      val failedBuild = new BuildRecord.Failed(CompileTry("src/D.java:1: error: x\n1 error\n(exit 1)", false), Nil)
+      val replyOf = (text: String) => r.reply.get.copy(content = text)
+      def round(n: Int): FailedRound =
+        val sent = prompt.messages ++ Option.when(n > 1)(List(ChatMessage("assistant", s"reply ${n - 1}"),
+          ChatMessage("user", s"feedback ${n - 1}"))).toList.flatten
+        FailedRound(sent, replyOf(s"reply $n"), FilesRecord(List("src/D.java"), 0, Nil), failedBuild, s"feedback $n")
+      val lastSent = prompt.messages ++ List(ChatMessage("assistant", "reply 2"), ChatMessage("user", "feedback 2"))
+      val three = r.copy(conversation = Conversation(List(round(1), round(2)), r.conversation.last.copy(sent = lastSent)))
+      import AttemptRecord.given
+      val f = dir.resolve("three.json")
+      Files.write(f, io.bullet.borer.Json.encode(three).toByteArray)
+      val back = Attempt.read(f).fold(e => fail(e), identity)
+      assertEquals(back, three)
+      assertEquals(back.rounds, 3)
+      assertEquals(back.conversation.failed.map(_.sent.last.content), List(prompt.messages.last.content, "feedback 1"))
+      assertEquals((back.summary, back.targets, back.reply), (r.summary, r.targets, r.reply), "the views read the last round")
+    }

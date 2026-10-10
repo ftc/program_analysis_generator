@@ -329,8 +329,12 @@ log, and every target's result. Each stage holds the next, so a record can only
 say what the pipeline can do; Table 1's row is derived from it when read, never
 stored (since 2026-10-09, schema 2; earlier records have the flat schema 1, with
 a stored summary row, and are converted when read — `AttemptRecordV1`). A
-campaign's `campaign.json` pins its inputs. Feedback rounds, when they come, add
-each round's kind and outcome.
+campaign's `campaign.json` pins its inputs, the build limit and compile tries
+included, and the feedback settings when there are any (rounds, what each round
+sends, the templates' version and hash). **Every round is recorded with exactly
+the messages it sent**: the rounds whose domain failed to compile, each with
+the feedback it led to, then the last round, which is the one evaluated. A
+one-shot attempt is one round.
 
 ### What the answer looks like
 

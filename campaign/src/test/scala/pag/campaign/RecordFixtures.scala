@@ -34,5 +34,6 @@ object RecordFixtures:
   /** `base` with its reply's exchange replaced; `base` must have a reply. */
   def withExchange(base: AttemptRecord)(f: (ChatReply, FilesRecord, Option[BuildRecord]) => Exchange): AttemptRecord =
     base.exchange match
-      case Exchange.Replied(reply, files, build) => base.copy(exchange = f(reply, files, build))
+      case Exchange.Replied(reply, files, build) =>
+        base.copy(conversation = base.conversation.copy(last = base.conversation.last.copy(exchange = f(reply, files, build))))
       case Exchange.NoReply(_)                   => throw IllegalArgumentException("the base record has no reply")

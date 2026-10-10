@@ -199,3 +199,52 @@ class CampaignSuite extends munit.FunSuite:
     val empty = Files.createTempDirectory("repo")
     try assert(Main.locate(empty).left.exists(_.contains("bash scripts/common.sh")))
     finally Files.delete(empty)
+
+  // The build and feedback settings are pinned, and a resume under different ones is refused.
+
+  test("a new run pins this code's build settings and no feedback, visibly in campaign.json"):
+    withServer(200 -> completion("no files")) { s =>
+      withResults { results =>
+        val dir = fresh(s, results, 1)
+        val pin = Campaign.pinned(dir).getOrElse(fail("no pin"))
+        assertEquals((pin.build, pin.feedback), (Some(BuildPin(120, 3)), None))
+        val text = Files.readString(dir.resolve("campaign.json"))
+        assert(text.contains("\"timeoutSeconds\": 120") && text.contains("\"compileTries\": 3"), text)
+      }
+    }
+
+  test("a feedback pin survives campaign.json, its history written as the case's name"):
+    import Campaign.given
+    for (history, json) <- List(FeedbackHistory.Latest -> "Latest", FeedbackHistory.Full -> "Full") do
+      val pin = FeedbackPin(3, history, "feedback-build-v1", "ab" * 32)
+      val text = Json.encode(pin).toUtf8String
+      assert(text.contains(s"\"history\":\"$json\""), text)
+      assertEquals(Json.decode(text.getBytes("UTF-8")).to[FeedbackPin].valueEither, Right(pin))
+
+  /** A one-sample run whose pin is then edited by `edit`; resuming it is refused, naming `what`. */
+  def resumeAfterPinEdit(what: String, edit: CampaignPin => CampaignPin): Unit =
+    import Campaign.given
+    withServer(200 -> completion("no files")) { s =>
+      withResults { results =>
+        val dir = fresh(s, results, 2)
+        Using.resource(Files.walk(dir.resolve("attempt-002")))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
+        Files.write(dir.resolve("campaign.json"), Json.encode(edit(Campaign.pinned(dir).get)).toByteArray)
+        val before = snapshot(dir)
+        val out = generate(s, results, Start.Resume(dir, None))
+        assert(out.left.exists(_.contains(s"$what changed")), out)
+        assertEquals((snapshot(dir), chats(s)), (before, 2))
+      }
+    }
+
+  test("resuming a run pinned with other build settings is refused, as it is for the runs from before them"):
+    resumeAfterPinEdit("the build settings", _.copy(build = Some(BuildPin(300, 1))))
+    resumeAfterPinEdit("the build settings", _.copy(build = None))
+
+  test("resuming a run pinned with feedback, from code running one shot, is refused"):
+    resumeAfterPinEdit("the feedback settings",
+      _.copy(feedback = Some(FeedbackPin(3, FeedbackHistory.Latest, "feedback-build-v1", "ab" * 32))))
+
+  test("the committed E1 pins have neither build nor feedback settings"):
+    val pins = Using.resource(Files.list(repo.resolve("results")))(_.iterator.asScala.toList).sorted
+      .filter(_.getFileName.toString.startsWith("e1-")).flatMap(Campaign.pinned)
+    assertEquals(pins.map(p => (p.build, p.feedback)), List.fill(3)((None, None)))

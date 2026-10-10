@@ -85,3 +85,8 @@ class CommittedRecordsSuite extends munit.FunSuite:
       Files.writeString(f, """{"schema": 99, "campaign": "c"}""")
       assert(Attempt.read(f).left.exists(_.contains("schema 99")), Attempt.read(f))
     finally Using.resource(Files.walk(dir))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
+
+  test("records from before rounds convert to one round, which sent the record's prompt"):
+    for f <- records do
+      val r = read(f)
+      assertEquals((r.rounds, r.conversation.last.sent), (1, stored(f).prompt.messages), f)

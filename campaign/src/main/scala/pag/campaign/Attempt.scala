@@ -61,7 +61,7 @@ object Attempt:
       AgentRecord.of(agent),
       serverModels,
       PromptRecord(prompt.version, prompt.sha256, prompt.messages),
-      exchange
+      Conversation(Nil, LastRound(prompt.messages, exchange)) // one round until feedback rounds are run
     )
     stage("writing the record")
     save(record, dir.resolve("attempt.json"))

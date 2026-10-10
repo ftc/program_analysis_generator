@@ -76,8 +76,8 @@ object AttemptRecordV1:
           build(b, a.targets, evaluationErrors.map(_.stripPrefix(EvaluationPrefix))).map(Some(_))
         ).map(Exchange.Replied(r, files.copy(problems = problems), _))
       case _ => Left("schema 1: expected a reply with files, or a failure without, and found neither")
-    exchange.map(AttemptRecord(1, a.envelope, a.campaign, a.attempt, a.sample, a.startedAt, a.elapsedMs, a.agent,
-      a.serverModels, a.prompt, _))
+    exchange.map(e => AttemptRecord(1, a.envelope, a.campaign, a.attempt, a.sample, a.startedAt, a.elapsedMs, a.agent,
+      a.serverModels, a.prompt, Conversation(Nil, LastRound(a.prompt.messages, e))))
 
   private def failure(f: ChatFailure): Either[String, pag.campaign.ChatFailure] = (f.status, f.body) match
     case (None, None)       => Right(pag.campaign.ChatFailure.NoResponse(f.message, f.tries))
