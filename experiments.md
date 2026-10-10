@@ -219,7 +219,9 @@ across sizes as a measure of quality.
 ### The inspection rubric
 
 *Decided — Shawn, 2026-10-08.* Per attempt, in `report/inspection.json`, keyed
-by `"<campaign>/<attempt>"`, every field optional:
+by `"<run directory>/<attempt>"` (the run's directory name, e.g.
+`e1-rung0-qwen3.5-9B-20261009T172600Z`, or the campaign name for directories
+from before 2026-10-09), every field optional:
 
 - **closest existing domain** — constants, signs, intervals, intervals with
   widening, another (named), or none coherent;
@@ -409,10 +411,12 @@ inspection notes. No figures yet; acceptable against model size is the first,
 once the five sizes are run.
 
 - **`campaign report [--prefix e1-rung0-]`** reads every campaign whose name
-  starts with the prefix, smallest model first (the size is read from the name),
+  starts with the prefix — **the latest run of each**, warning of the runs it
+  skips and of a run holding fewer attempts than its pinned sample count —
+  smallest model first (the size is read from the name),
   and writes into `report/tables/`: `table1.tex`, `table2.tex`, `settings.tex`
-  (the settings each campaign actually ran with, and its model's revision and
-  SHA-256, from its records), `corpus.tex` (from the manifest), and
+  (the settings each campaign actually ran with, its model's revision and
+  SHA-256, from its records, and when the run read started), `corpus.tex` (from the manifest), and
   `prompt.txt` (the prompt exactly as sent, from the records). So the setup
   section cannot disagree with what ran. Output is deterministic, so
   regenerating unchanged results changes nothing in git; an inspection naming no

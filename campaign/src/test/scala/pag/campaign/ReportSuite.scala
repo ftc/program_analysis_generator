@@ -162,3 +162,85 @@ class ReportSuite extends munit.FunSuite:
       val t = Report.table1(Report.campaigns(dir, "e1-rung0-"), inspections)
       assert(t.contains("qwen3.5-27b & 1 & evaluated & 4 & yes & did not compile & yes & A & A & A & 0 &"), t)
     }
+
+  // Runs: every rerun has its own directory, <campaign>-<UTC start>, and the report reads the latest of each campaign.
+
+  test("a run directory's name splits into its campaign and start; other names are runs from before start times"):
+    assertEquals(Report.runName("e1-rung0-qwen3.5-9B-20261009T172600Z"),
+      RunName("e1-rung0-qwen3.5-9B", Some(java.time.Instant.parse("2026-10-09T17:26:00Z"))))
+    assertEquals(Report.runName("e1-rung0-qwen3.5-9B"), RunName("e1-rung0-qwen3.5-9B", None))
+    assertEquals(Report.runName("e1-test-2026"), RunName("e1-test-2026", None))
+    assertEquals(Report.runName("e1-x-20261399T999999Z"), RunName("e1-x-20261399T999999Z", None), "not a real time")
+
+  /** Writes a pin with this sample count into a run directory. */
+  def pin(dir: Path, run: String, samples: Int): Unit =
+    import Campaign.given
+    Files.write(dir.resolve(run).resolve("campaign.json"),
+      Json.encode(CampaignPin(base.agent, "v", "s", "c", "p", Some(samples))).toByteArray)
+
+  test("two runs of one campaign: the later is read, and the skipped one is named"):
+    withResults(Map(
+      "e1-rung0-qwen3.5-4b-20261009T100000Z" -> List(failed(1)),
+      "e1-rung0-qwen3.5-4b-20261010T100000Z" -> List(evaluated(1, List("R", "A", "R")))
+    )) { dir =>
+      val (cs, warnings) = Report.latestRuns(dir, "e1-rung0-")
+      assertEquals(cs.map(c => (c.name, c.run, c.model)),
+        List(("e1-rung0-qwen3.5-4b", "e1-rung0-qwen3.5-4b-20261010T100000Z", "qwen3.5-4b")))
+      assertEquals(warnings, List("e1-rung0-qwen3.5-4b: read run e1-rung0-qwen3.5-4b-20261010T100000Z, " +
+        "skipped e1-rung0-qwen3.5-4b-20261009T100000Z"))
+    }
+
+  test("a directory from before start times is older than any timestamped run of the same campaign"):
+    withResults(Map(
+      "e1-rung0-qwen3.5-9b" -> List(evaluated(1, List("R", "A", "R"))),
+      "e1-rung0-qwen3.5-9b-20261009T100000Z" -> List(failed(1))
+    )) { dir =>
+      assertEquals(Report.campaigns(dir, "e1-rung0-").map(_.run), List("e1-rung0-qwen3.5-9b-20261009T100000Z"))
+    }
+
+  test("each campaign's latest run, smallest model first, mixing old and new directories"):
+    withResults(Map(
+      "e1-rung0-qwen3.5-27b" -> List(failed(1)),
+      "e1-rung0-qwen3.5-0.8b-20261011T000000Z" -> List(failed(1)),
+      "e1-rung0-qwen3.5-4b-20261010T000000Z" -> List(failed(1))
+    )) { dir =>
+      assertEquals(Report.campaigns(dir, "e1-rung0-").map(_.model), List("qwen3.5-0.8b", "qwen3.5-4b", "qwen3.5-27b"))
+    }
+
+  test("a run read with fewer attempts than its pinned samples is warned of; a complete one is not"):
+    withResults(Map(
+      "e1-rung0-qwen3.5-4b-20261010T000000Z" -> List(failed(1), failed(2), failed(3)),
+      "e1-rung0-qwen3.5-9b-20261010T000000Z" -> List(failed(1), failed(2))
+    )) { dir =>
+      pin(dir, "e1-rung0-qwen3.5-4b-20261010T000000Z", 5)
+      pin(dir, "e1-rung0-qwen3.5-9b-20261010T000000Z", 2)
+      assertEquals(Report.latestRuns(dir, "e1-rung0-")._2,
+        List("e1-rung0-qwen3.5-4b-20261010T000000Z holds 3 of its 5 samples: resume it before trusting its rows"))
+    }
+
+  test("inspections are keyed by run directory: the run read is shown, a skipped run's key is warned of"):
+    val older = "e1-rung0-qwen3.5-4b-20261009T100000Z"
+    val newer = "e1-rung0-qwen3.5-4b-20261010T100000Z"
+    withResults(Map(older -> List(evaluated(1, List("R", "A", "R"))), newer -> List(evaluated(1, List("R", "A", "R"))))) {
+      dir =>
+        import Report.given
+        val ins = Inspections(Map(s"$newer/attempt-001" -> Inspection(Some("intervals")),
+          s"$older/attempt-001" -> Inspection(Some("signs"))))
+        val t = Report.table1(Report.campaigns(dir, "e1-rung0-"), ins)
+        assert(t.contains("& intervals &") && !t.contains("signs"), t)
+        Files.write(dir.resolve("inspection.json"), Json.encode(ins).toByteArray)
+        val warnings = Report.write(dir, "e1-rung0-", dir.resolve("inspection.json"), corpus, dir.resolve("tables"))
+          .fold(e => fail(e), identity)
+        assert(warnings.contains(s"inspection.json names $older/attempt-001, which is not among the campaigns read"), warnings)
+    }
+
+  test("the settings table says when each run started: from its name, or its first attempt for an older one"):
+    withResults(Map(
+      "e1-rung0-qwen3.5-4b-20261010T093000Z" -> List(evaluated(1, List("R", "A", "R"))),
+      "e1-rung0-qwen3.5-9b" -> List(evaluated(1, List("R", "A", "R")).copy(startedAt = "2026-10-08T21:05:59Z"))
+    )) { dir =>
+      val s = Report.settings(Report.campaigns(dir, "e1-rung0-"))
+      assert(s.contains("Run started \\\\"), s)
+      assert(s.linesIterator.exists(l => l.startsWith("qwen3.5-4b &") && l.endsWith("& 2026-10-10 09:30Z \\\\")), s)
+      assert(s.linesIterator.exists(l => l.startsWith("qwen3.5-9b &") && l.endsWith("& 2026-10-08 21:05Z \\\\")), s)
+    }

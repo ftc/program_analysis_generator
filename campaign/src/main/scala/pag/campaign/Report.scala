@@ -1,8 +1,9 @@
 package pag.campaign
 
 import java.nio.file.{Files, Path}
+import java.time.Instant
 import scala.jdk.CollectionConverters.*
-import scala.util.Using
+import scala.util.{Try, Using}
 
 import io.bullet.borer.{Codec, Json}
 import io.bullet.borer.NullOptions.given
@@ -19,11 +20,19 @@ final case class Inspection(
     notes: Option[String] = None
 )
 
-/** `report/inspection.json`: inspections keyed by `"<campaign>/<attempt>"`. */
+/** `report/inspection.json`: inspections keyed by `"<run directory>/<attempt>"`. */
 final case class Inspections(attempts: Map[String, Inspection] = Map.empty)
 
-/** One model's campaign, as the report reads it. */
-final case class CampaignResults(name: String, model: String, attempts: List[AttemptRecord])
+/** One model's campaign, as the report reads it: the campaign's name, the run read (its directory's name), the
+  * model (the name less the prefix), when the run started, and its attempts.
+  */
+final case class CampaignResults(name: String, run: String, model: String, started: Option[Instant],
+    attempts: List[AttemptRecord])
+
+/** A run directory's name, split: the campaign it runs, and its start, which directories made before
+  * 2026-10-09 do not have in their names.
+  */
+final case class RunName(campaign: String, started: Option[Instant])
 
 /** `campaign report` (experiments.md, The report): Tables 1 and 2 as LaTeX, and
   * the prompt for the appendix, from the attempt records and the inspection file.
@@ -35,20 +44,42 @@ object Report:
   given Codec[Inspection] = deriveCodec[Inspection]
   given Codec[Inspections] = deriveCodec[Inspections]
 
-  /** The campaigns under `results` whose names start with `prefix`, smallest model first. */
-  def campaigns(results: Path, prefix: String): List[CampaignResults] =
-    if !Files.isDirectory(results) then Nil
-    else
-      Using.resource(Files.list(results))(_.iterator.asScala.toList)
-        .filter(d => Files.isDirectory(d) && d.getFileName.toString.startsWith(prefix))
-        .map { d =>
-          val name = d.getFileName.toString
-          val attempts = Using.resource(Files.list(d))(_.iterator.asScala.toList)
-            .map(_.resolve("attempt.json")).filter(Files.isRegularFile(_))
-            .flatMap(f => Attempt.read(f).toOption).sortBy(_.attempt)
-          CampaignResults(name, name.stripPrefix(prefix), attempts)
-        }
-        .sortBy(c => (size(c.model), c.model))
+  private val Timestamped = """(.+)-(\d{8}T\d{6}Z)""".r
+
+  /** `<campaign>-<yyyyMMddTHHmmssZ>` is a run of `<campaign>`; any other name is a run from before start times. */
+  def runName(dir: String): RunName = dir match
+    case Timestamped(campaign, at) =>
+      Try(Instant.from(Campaign.StartFormat.parse(at))).toOption.fold(RunName(dir, None))(t => RunName(campaign, Some(t)))
+    case _ => RunName(dir, None)
+
+  /** The latest run of each campaign under `results` whose name starts with `prefix`, smallest model first; and
+    * warnings for the runs skipped, and for a run read that holds fewer attempts than its pinned sample count.
+    * A run without a start in its name predates every run with one.
+    */
+  def latestRuns(results: Path, prefix: String): (List[CampaignResults], List[String]) =
+    val dirs =
+      if !Files.isDirectory(results) then Nil
+      else Using.resource(Files.list(results))(_.iterator.asScala.toList).filter(Files.isDirectory(_))
+        .map(d => (d, runName(d.getFileName.toString))).filter(_._2.campaign.startsWith(prefix))
+    val byCampaign = dirs.groupBy(_._2.campaign).toList.sortBy(_._1)
+    val chosen = byCampaign.map { (campaign, runs) =>
+      val ordered = runs.sortBy((d, r) => (r.started.isDefined, r.started.map(_.toEpochMilli).getOrElse(0L), d.toString))
+      val (dir, name) = ordered.last
+      val attempts = Using.resource(Files.list(dir))(_.iterator.asScala.toList)
+        .map(_.resolve("attempt.json")).filter(Files.isRegularFile(_))
+        .flatMap(f => Attempt.read(f).toOption).sortBy(_.attempt)
+      val skipped = ordered.init.map(_._1.getFileName.toString)
+      val warnings = Option.when(skipped.nonEmpty)(
+          s"$campaign: read run ${dir.getFileName}, skipped ${skipped.mkString(", ")}").toList ++
+        Campaign.pinned(dir).flatMap(_.samples).filter(_ > attempts.size).map(n =>
+          s"${dir.getFileName} holds ${attempts.size} of its $n samples: resume it before trusting its rows")
+      (CampaignResults(campaign, dir.getFileName.toString, campaign.stripPrefix(prefix), name.started, attempts),
+        warnings)
+    }
+    (chosen.map(_._1).sortBy(c => (size(c.model), c.model)), chosen.flatMap(_._2))
+
+  /** The latest run of each campaign whose name starts with `prefix`, smallest model first. */
+  def campaigns(results: Path, prefix: String): List[CampaignResults] = latestRuns(results, prefix)._1
 
   /** A model's size in billions of parameters, read from its name ("qwen3.5-0.8b" is 0.8); unknown sorts last. */
   def size(model: String): Double =
@@ -68,7 +99,7 @@ object Report:
       inspections <- readInspections(inspectionFile)
       corpusTargets <- Corpus.read(corpus)
     yield
-      val cs = campaigns(results, prefix)
+      val (cs, runWarnings) = latestRuns(results, prefix)
       Files.createDirectories(out)
       Files.writeString(out.resolve("table1.tex"), table1(cs, inspections))
       Files.writeString(out.resolve("table2.tex"), table2(cs, inspections))
@@ -78,10 +109,10 @@ object Report:
         Files.writeString(out.resolve("prompt.txt"),
           r.prompt.messages.map(m => s"=== ${m.role} ===\n${m.content}").mkString("\n\n") + "\n")
       }
-      val known = cs.flatMap(c => c.attempts.map(a => s"${c.name}/${a.attempt}")).toSet
+      val known = cs.flatMap(c => c.attempts.map(a => s"${c.run}/${a.attempt}")).toSet
       val stray = inspections.attempts.keySet.diff(known).toList.sorted
       val prompts = cs.flatMap(_.attempts).map(_.prompt.sha256).distinct
-      stray.map(k => s"inspection.json names $k, which is not among the campaigns read") ++
+      runWarnings ++ stray.map(k => s"inspection.json names $k, which is not among the campaigns read") ++
         Option.when(prompts.size > 1)(s"the campaigns used ${prompts.size} different prompts; prompt.txt shows the first")
 
   def table1(cs: List[CampaignResults], ins: Inspections): String =
@@ -91,7 +122,7 @@ object Report:
     val rows = cs.flatMap { c =>
       c.attempts.map { r =>
         val s = r.summary
-        val i = ins.attempts.getOrElse(s"${c.name}/${r.attempt}", Inspection())
+        val i = ins.attempts.getOrElse(s"${c.run}/${r.attempt}", Inspection())
         val before = List(c.model, r.sample.toString, StatusView.outcome(r), s.files.toString, yes(s.builds),
           tests(s), yes(s.loads))
         val cells = probes.map(p => r.targets.find(_.probe == p).fold("")(t => cell(t.cell)))
@@ -109,7 +140,7 @@ object Report:
     val rows = cs.map { c =>
       val n = c.attempts.size
       val mech = c.attempts.filter(mechanicallyAcceptable)
-      val inspected = c.attempts.flatMap(a => ins.attempts.get(s"${c.name}/${a.attempt}")).flatMap(_.acceptable)
+      val inspected = c.attempts.flatMap(a => ins.attempts.get(s"${c.run}/${a.attempt}")).flatMap(_.acceptable)
       val proved = mech.map(_.summary.proved).sorted
       val median =
         if proved.isEmpty then ""
@@ -124,14 +155,19 @@ object Report:
   /** The settings each campaign actually ran with, and where its model came from, read from its records. */
   def settings(cs: List[CampaignResults]): String =
     val header = List("Model", "Temp.", "top\\_p", "top\\_k", "min\\_p", "Presence", "Thinking", "Max tokens",
-      "Timeout", "Revision", "SHA-256")
+      "Timeout", "Revision", "SHA-256", "Run started")
     val rows = cs.flatMap(c => c.attempts.headOption.map(r => (c, r.agent))).map { (c, a) =>
       def opt[A](o: Option[A]): String = o.fold("default")(_.toString)
       List(c.model, a.temperature.toString, opt(a.topP), opt(a.topK), opt(a.minP), opt(a.presencePenalty),
         a.thinking.fold("default")(t => if t then "on" else "off"), opt(a.maxTokens), s"${a.timeoutSeconds} s",
-        a.source.revision.fold("")(_.take(12)), a.source.sha256.fold("")(_.take(12))).map(escape)
+        a.source.revision.fold("")(_.take(12)), a.source.sha256.fold("")(_.take(12)), started(c)).map(escape)
     }
     tabular("l" * header.size, header.map(h => if h.contains("\\_") then h else escape(h)), rows)
+
+  /** When the run began, to the minute in UTC: from its directory's name, or its earliest attempt for an older one. */
+  private def started(c: CampaignResults): String =
+    c.started.orElse(c.attempts.flatMap(a => Try(Instant.parse(a.startedAt)).toOption).minOption)
+      .fold("")(t => java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm'Z'").withZone(java.time.ZoneOffset.UTC).format(t))
 
   /** The smoke corpus: each target, its true answer, and what can prove it. */
   def corpusTable(c: Corpus): String =
