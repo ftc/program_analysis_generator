@@ -27,29 +27,7 @@ object Attempt:
     val attempt = dir.getFileName.toString
     Files.createDirectories(dir)
     val serverModels = client.models().toOption
-    stage("asking the model")
-    val chat = client.chat(prompt.messages)
-    val parsed = chat.toOption.map(r => Reply.files(r.content))
-    val written = parsed.map(p => write(p.files, dir.resolve("domain")))
-    val build = written.filter(_.nonEmpty).map(_ => Build.run(tools.template, dir.resolve("domain"), tools.api,
-      stage = stage))
-    val evaluation = build.flatMap(_.jar).map { jar =>
-      Evaluate.run(tools.pag, jar, tools.corpus, tools.probeLib, dir.resolve("work"), stage = stage)
-    }
-    val exchange = chat match
-      case Left(failure) => Exchange.NoReply(failure)
-      case Right(reply) =>
-        val p = parsed.get // parsed is Some exactly when chat is Right
-        Exchange.Replied(reply, FilesRecord(written.getOrElse(Nil), p.ignoredBlocks, p.problems), build.map { b =>
-          val (last, earlier) = (b.tries.last, b.tries.init)
-          (b.jar, evaluation) match
-            case (Some(_), Some(e)) =>
-              val tests = b.testsCompiled match
-                case Some(false) => Tests.DidNotCompile(b.testLog)
-                case _           => Tests.Ran(b.testsRun, b.testFailures, b.testErrors, b.testLog)
-              BuildRecord.Compiled(last, earlier, tests, e.fold(EvaluationRecord.Failed(_), ev => EvaluationRecord.Evaluated(ev.results.map(_.record))))
-            case _ => BuildRecord.Failed(last, earlier)
-        })
+    val exchange = round(prompt.messages, client, tools, dir.resolve("domain"), dir.resolve("work"), stage)
     val record = AttemptRecord(
       AttemptRecord.Schema,
       Envelope.current(Profile),
@@ -66,6 +44,31 @@ object Attempt:
     stage("writing the record")
     save(record, dir.resolve("attempt.json"))
     record
+
+  /** One round: send `sent`, write the reply's files into `domainDir`, build them, and evaluate the domain on
+    * the corpus (working in `workDir`) if it compiled. Each step that cannot run is recorded as not run.
+    */
+  def round(sent: List[ChatMessage], client: ChatClient, tools: Tools, domainDir: Path, workDir: Path,
+      stage: String => Unit): Exchange =
+    stage("asking the model")
+    client.chat(sent) match
+      case Left(failure) => Exchange.NoReply(failure)
+      case Right(reply) =>
+        val parsed = Reply.files(reply.content)
+        val written = write(parsed.files, domainDir)
+        val build = Option.when(written.nonEmpty)(Build.run(tools.template, domainDir, tools.api, stage = stage)).map { b =>
+          val (last, earlier) = (b.tries.last, b.tries.init)
+          b.jar match
+            case Some(jar) =>
+              val tests = b.testsCompiled match
+                case Some(false) => Tests.DidNotCompile(b.testLog)
+                case _           => Tests.Ran(b.testsRun, b.testFailures, b.testErrors, b.testLog)
+              val evaluation = Evaluate.run(tools.pag, jar, tools.corpus, tools.probeLib, workDir, stage = stage)
+              BuildRecord.Compiled(last, earlier, tests,
+                evaluation.fold(EvaluationRecord.Failed(_), e => EvaluationRecord.Evaluated(e.results.map(_.record))))
+            case None => BuildRecord.Failed(last, earlier)
+        }
+        Exchange.Replied(reply, FilesRecord(written, parsed.ignoredBlocks, parsed.problems), build)
 
   /** The reply's files under `root`; their paths were checked safe by `Reply`. */
   private def write(files: Map[String, String], root: Path): List[String] =
