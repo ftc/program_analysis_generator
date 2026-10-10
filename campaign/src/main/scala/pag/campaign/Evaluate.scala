@@ -5,33 +5,21 @@ import java.nio.file.{Files, Path}
 import javax.tools.ToolProvider
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 
-import pag.results.{CheckResult, Incomplete, Verdict, Wire}
+import pag.results.{CheckResult, Wire}
 import pag.results.Codecs.given
 
-/** One target's result: how `pag check` ended, and its record when it printed one. */
-final case class TargetResult(
-    target: Target,
-    exitCode: Option[Int], // None: killed for running too long
-    check: Option[CheckResult],
-    stderr: String,
-    timedOut: Boolean,
-    elapsedMs: Long
-):
-  def refuted: Boolean = check.exists(_.analysis.verdict == Verdict.Refuted)
+/** One target's result: how `pag check` ended, and its stderr. */
+final case class TargetResult(target: Target, run: TargetRun, stderr: String, elapsedMs: Long):
 
-  /** Table 1's cell (experiments.md): R refuted, A alarm, ✗ refuted a reachable
-    * target, I inconclusive (did not converge: iteration limit or deadline),
-    * E domain failure, H hung (killed at the wall-clock bound), – anything else.
-    */
-  def cell: String =
-    if timedOut then "H"
-    else
-      check.map(_.analysis.verdict) match
-        case Some(Verdict.Refuted)                                 => if target.reachable then "✗" else "R"
-        case Some(Verdict.Alarm)                                   => "A"
-        case Some(Verdict.Inconclusive(_: Incomplete.DomainFailure)) => "E"
-        case Some(Verdict.Inconclusive(_))                         => "I"
-        case None                                                  => "–"
+  /** As it is recorded; `check`, `refuted` and `cell` are defined there, once. */
+  def record: TargetRecord =
+    TargetRecord(target.probe, target.reach, target.reachable, target.rung, run, stderr, elapsedMs)
+
+  def check: Option[CheckResult] = record.check
+
+  def refuted: Boolean = record.refuted
+
+  def cell: String = record.cell
 
 /** A domain over a corpus. */
 final case class Evaluation(results: List[TargetResult]):
@@ -79,7 +67,8 @@ object Evaluate:
       val p = Processes.run(command, timeout)
       val check = Option.when(p.exitCode.exists(Set(0, 3, 4, 5)))(p.stdout)
         .flatMap(out => Wire.decode[CheckResult](out.strip.getBytes(UTF_8)).toOption)
-      TargetResult(t, p.exitCode, check, p.stderr, p.timedOut, p.elapsedMs)
+      // Processes gives no exit code exactly when it killed the process.
+      TargetResult(t, p.exitCode.fold(TargetRun.Killed)(TargetRun.Exited(_, check)), p.stderr, p.elapsedMs)
     })
 
   /** Each probe compiled once, as probes are built (§5.5): javac -g against probe-lib alone. */

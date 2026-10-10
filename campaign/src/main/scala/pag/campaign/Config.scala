@@ -7,7 +7,8 @@ import io.bullet.borer.derivation.MapBasedCodecs.*
 
 /** Where a model came from and which bytes it is (implementation_strategy.md
   * §10), entered by hand once per model and copied into every attempt record
-  * uninterpreted — a placeholder for a fuller provenance scheme.
+  * uninterpreted — a placeholder for a fuller provenance scheme. A field left
+  * None was not entered.
   */
 final case class ModelSource(
     url: Option[String] = None,
@@ -23,14 +24,14 @@ final case class ModelSource(
 final case class AgentConfig(
     baseUrl: String,
     model: String,
-    apiKeyEnv: Option[String] = None,
+    apiKeyEnv: Option[String] = None, // None: no Authorization header
     temperature: Double = 0.2,
     topP: Option[Double] = None, // the sampling fields llama.cpp accepts; unset means the server's default
     topK: Option[Int] = None,
     minP: Option[Double] = None,
     presencePenalty: Option[Double] = None,
     thinking: Option[Boolean] = None, // sent as chat_template_kwargs.enable_thinking; unset: the template's default
-    maxTokens: Option[Int] = None, // counts the thinking too
+    maxTokens: Option[Int] = None, // counts the thinking too; unset: the server's default
     timeoutSeconds: Int = 1800, // one answer from a local 27B model can take many minutes
     retries: Int = 3, // after the first try, for connection failures, 429 and 5xx
     source: ModelSource = ModelSource()

@@ -19,18 +19,29 @@ final case class ChatMessage(role: String, content: String)
   */
 final case class ChatReply(
     content: String,
-    reasoning: Option[String], // a reasoning model's separate thinking, if the server returns it
-    finishReason: Option[String],
-    promptTokens: Option[Long],
+    // A reasoning model's separate thinking; None: no reasoning_content in the response (thinking off, or the
+    // server did not separate it from content).
+    reasoning: Option[String],
+    finishReason: Option[String], // None: no choices[0].finish_reason in the response
+    promptTokens: Option[Long], // this and the next, None: the response's usage did not give that count
     completionTokens: Option[Long],
-    model: Option[String], // as the server names it
+    model: Option[String], // as the server names it; None: the response named none
     rawResponse: String,
     elapsedMs: Long,
     tries: Int
 )
 
-/** Why there is no reply. `retryable` failures were retried until the budget ran out. */
-final case class ChatFailure(message: String, status: Option[Int], body: Option[String], tries: Int)
+/** Why there is no reply. Retryable failures were retried until the budget ran out. */
+sealed trait ChatFailure:
+  def message: String
+  def tries: Int
+
+object ChatFailure:
+  /** No HTTP response at all: no connection, or no reply within the timeout. */
+  final case class NoResponse(message: String, tries: Int) extends ChatFailure
+
+  /** A response that was not a usable reply: an error status, or a 200 whose body could not be read. */
+  final case class BadResponse(message: String, status: Int, body: String, tries: Int) extends ChatFailure
 
 /** A client for the OpenAI-compatible `/v1/chat/completions` API that Ollama,
   * vLLM, llama.cpp and hosted models serve (implementation_strategy.md §10).
@@ -65,16 +76,16 @@ final class ChatClient(
           val response = http.send(request, HttpResponse.BodyHandlers.ofString())
           if response.statusCode == 200 then
             ChatClient.parse(response.body, System.currentTimeMillis() - started, tries).left
-              .map(m => (ChatFailure(m, Some(200), Some(response.body), tries), false))
+              .map(m => (ChatFailure.BadResponse(m, 200, response.body, tries), false))
           else
             val retryable = response.statusCode == 429 || response.statusCode >= 500
-            Left((ChatFailure(s"HTTP ${response.statusCode}", Some(response.statusCode), Some(response.body), tries),
+            Left((ChatFailure.BadResponse(s"HTTP ${response.statusCode}", response.statusCode, response.body, tries),
               retryable))
         catch
           // HttpTimeoutException is an IOException, so it must be caught first
           case _: java.net.http.HttpTimeoutException =>
-            Left((ChatFailure(s"no reply within ${agent.timeoutSeconds} s (not retried)", None, None, tries), false))
-          case e: java.io.IOException => Left((ChatFailure(s"no response: $e", None, None, tries), true))
+            Left((ChatFailure.NoResponse(s"no reply within ${agent.timeoutSeconds} s (not retried)", tries), false))
+          case e: java.io.IOException => Left((ChatFailure.NoResponse(s"no response: $e", tries), true))
       outcome match
         case Left((_, true)) if tries <= agent.retries =>
           sleep(1000L << (tries - 1)) // 1 s, 2 s, 4 s, ...

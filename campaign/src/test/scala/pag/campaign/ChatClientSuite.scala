@@ -8,6 +8,10 @@ import pag.campaign.FakeServer.{completion, withServer}
   */
 class ChatClientSuite extends munit.FunSuite:
 
+  def status(f: ChatFailure): Option[Int] = f match
+    case b: ChatFailure.BadResponse => Some(b.status)
+    case _: ChatFailure.NoResponse  => None
+
   val hello: List[ChatMessage] = List(ChatMessage("system", "be brief"), ChatMessage("user", "hi"))
 
   /** A client that records its backoff sleeps instead of sleeping. */
@@ -74,20 +78,20 @@ class ChatClientSuite extends munit.FunSuite:
   test("retries are bounded: the last failure is returned with its status and body"):
     withServer(503 -> "down") { s =>
       val failure = client(s.baseUrl, retries = 2)._1.chat(hello).fold(identity, r => fail(r.toString))
-      assertEquals(failure, ChatFailure("HTTP 503", Some(503), Some("down"), 3))
+      assertEquals(failure, ChatFailure.BadResponse("HTTP 503", 503, "down", 3))
     }
 
   test("a 4xx other than 429 is not retried"):
     withServer(400 -> """{"error":"bad model"}""") { s =>
       val (c, slept) = client(s.baseUrl)
-      assertEquals(c.chat(hello).left.map(f => (f.status, f.tries)), Left((Some(400), 1)))
+      assertEquals(c.chat(hello).left.map(f => (status(f), f.tries)), Left((Some(400), 1)))
       assert(slept.isEmpty)
     }
 
   test("a 200 without a message is a failure, not retried"):
     withServer(200 -> """{"choices":[]}""") { s =>
       val failure = client(s.baseUrl)._1.chat(hello).fold(identity, r => fail(r.toString))
-      assertEquals((failure.status, failure.tries), (Some(200), 1))
+      assertEquals((status(failure), failure.tries), (Some(200), 1))
       assert(failure.message.contains("choices[0].message.content"), failure.message)
     }
 

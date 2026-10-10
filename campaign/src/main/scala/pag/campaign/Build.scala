@@ -8,14 +8,18 @@ import scala.util.Using
 /** How a generated domain built: its jar if it compiled, and how its own tests did. */
 final case class BuildResult(
     jar: Option[Path], // None: did not compile
-    compileLog: String,
+    tries: List[CompileTry], // every compile try, oldest first; never empty, and the last decided
     testsRun: Int,
     testFailures: Int, // failed assertions
     testErrors: Int, // tests that threw
     testLog: String, // the test compile's log if it failed, else the test run's
     elapsedMs: Long,
     testsCompiled: Option[Boolean] // None: not tried, because the domain did not compile
-)
+):
+  def compileLog: String = tries.last.log
+  def compileTimedOut: Boolean = tries.last.timedOut
+  def compileTries: Int = tries.size
+  def earlierCompileLogs: List[String] = tries.init.map(_.log)
 
 /** Builds a domain with the fixed Gradle template (implementation_strategy.md §3,
   * "How domains are built"). Three Gradle runs, deliberately: `jar` compiles and
@@ -24,16 +28,26 @@ final case class BuildResult(
   * tests at all. A domain whose tests fail, or do not compile, is still
   * evaluated — the smoke corpus is what judges it, and its tests are a column of
   * their own (experiments.md, Table 1).
+  *
+  * A compile that fails without javac errors (killed at the time limit, or
+  * Gradle failing some other way) is tried again, up to `CompileTries` tries.
+  * One that fails with javac errors is the model's, and is not
+  * (implementation_strategy.md §16, item 25).
   */
 object Build:
 
-  def run(template: Path, domainDir: Path, api: Path, timeout: FiniteDuration = 5.minutes,
+  /** The limit on each Gradle call. Successful builds have taken 0.4–4 s. */
+  val Timeout: FiniteDuration = 2.minutes
+
+  val CompileTries: Int = 3
+
+  def run(template: Path, domainDir: Path, api: Path, timeout: FiniteDuration = Timeout,
       stage: String => Unit = _ => ()): BuildResult =
     val gradle = List(template.resolve("gradlew").toString, "-p", template.toString, "--console=plain",
       s"-PdomainDir=$domainDir", s"-PapiJar=$api")
     val started = System.currentTimeMillis()
-    stage("compiling")
-    val compile = Processes.run(gradle :+ "jar", timeout)
+    val tries = compileTries(gradle :+ "jar", domainDir, timeout, stage)
+    val compile = tries.last
     val jar = domainDir.resolve(s"build/libs/${domainDir.getFileName}.jar")
     val compiled = compile.exitCode.contains(0) && Files.isRegularFile(jar)
     val testCompile = Option.when(compiled) { stage("compiling its tests"); Processes.run(gradle :+ "testClasses", timeout) }
@@ -41,8 +55,18 @@ object Build:
     val test = Option.when(testsCompiled.contains(true)) { stage("running its tests"); Processes.run(gradle :+ "test", timeout) }
     val (run, failures, errors) =
       if test.isDefined then junitCounts(domainDir.resolve("build/test-results/test")) else (0, 0, 0)
-    BuildResult(Option.when(compiled)(jar), log(compile), run, failures, errors, test.orElse(testCompile).fold("")(log),
-      System.currentTimeMillis() - started, testsCompiled)
+    BuildResult(Option.when(compiled)(jar), tries.map(p => CompileTry(log(p), p.timedOut)), run, failures, errors,
+      test.orElse(testCompile).fold("")(log), System.currentTimeMillis() - started, testsCompiled)
+
+  /** Every try of `command`, in order: until one succeeds, fails with javac's errors, or `CompileTries` are used. */
+  private def compileTries(command: List[String], domainDir: Path, timeout: FiniteDuration,
+      stage: String => Unit): List[ProcessResult] =
+    def from(n: Int): List[ProcessResult] =
+      stage(if n == 1 then "compiling" else s"compiling, try $n of $CompileTries")
+      val p = Processes.run(command, timeout)
+      val again = !p.exitCode.contains(0) && Feedback.errors(log(p), domainDir).isEmpty && n < CompileTries
+      if again then p :: from(n + 1) else List(p)
+    from(1)
 
   private def log(p: ProcessResult): String =
     val ending = if p.timedOut then "(killed at the time limit)" else s"(exit ${p.exitCode.getOrElse("?")})"

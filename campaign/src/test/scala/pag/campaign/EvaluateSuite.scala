@@ -12,6 +12,11 @@ import pag.cli.DomainJars.*
   */
 class EvaluateSuite extends munit.FunSuite:
 
+  /** None: killed at the wall-clock limit. */
+  def exitCode(r: TargetResult): Option[Int] = r.run match
+    case TargetRun.Exited(code, _) => Some(code)
+    case TargetRun.Killed          => None
+
   override val munitTimeout: scala.concurrent.duration.Duration = 2.minutes
 
   val repo: Path = Repo.root().fold(e => throw IllegalStateException(e), identity)
@@ -52,7 +57,7 @@ class EvaluateSuite extends munit.FunSuite:
     assertNotEquals(noWidening, intervalSources, "the edit applied")
     val e = evaluate(noWidening)
     assertEquals(cells(e)("Loop1"), "I")
-    assertEquals(e.results.find(_.target.probe == "Loop1").flatMap(_.exitCode), Some(4))
+    assertEquals(e.results.find(_.target.probe == "Loop1").flatMap(r => exitCode(r)), Some(4))
 
   test("ref-sign proves only the sign target"):
     val e = evaluate(domainSources("ref-sign"))
@@ -63,12 +68,12 @@ class EvaluateSuite extends munit.FunSuite:
   test("a domain that refutes everything is caught on every reachable target"):
     val e = evaluate(refutesAllStub)
     assertEquals(e.results.filter(_.cell == "✗").map(_.target.probe), List("Const2", "Range2", "Loop2"))
-    assertEquals(e.results.filter(_.target.reachable).map(_.exitCode), List(Some(3), Some(3), Some(3)))
+    assertEquals(e.results.filter(_.target.reachable).map(exitCode), List(Some(3), Some(3), Some(3)))
     assertEquals((e.proved, e.unsound), (5, true))
 
   test("a domain that throws is a domain failure everywhere, with no verdict"):
     val e = evaluate(throwingStub)
-    assertEquals(e.results.map(_.exitCode).distinct, List(Some(5)))
+    assertEquals(e.results.map(exitCode).distinct, List(Some(5)))
     assertEquals(e.results.map(_.cell).distinct, List("E"))
     assertEquals((e.proved, e.unsound), (0, false))
 
@@ -82,7 +87,7 @@ class EvaluateSuite extends munit.FunSuite:
       val e = evaluate(Map(stub("Hangs", transfer = "while (true) { }")), deadline = 2.seconds, timeout = 8.seconds,
         corpusDir = dir)
       val r = e.results.head
-      assert(r.timedOut && r.exitCode.isEmpty, (r.timedOut, r.exitCode))
+      assertEquals(r.run, TargetRun.Killed)
       assertEquals(r.cell, "H")
       assert(r.elapsedMs >= 8000 && r.elapsedMs < 20000, r.elapsedMs)
     finally Using.resource(Files.walk(dir))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
@@ -96,7 +101,7 @@ class EvaluateSuite extends munit.FunSuite:
         """{"about":"one","targets":[{"probe":"Sign1","reach":1,"reachable":false,"inputs":[1],"rung":1,"provableBy":""}]}""")
       val slow = Map(stub("Slow", transfer = "try { Thread.sleep(1000); } catch (InterruptedException e) { } return post;"))
       val r = evaluate(slow, deadline = 2.seconds, timeout = 20.seconds, corpusDir = dir).results.head
-      assertEquals((r.cell, r.exitCode, r.timedOut), ("I", Some(4), false))
+      assertEquals((r.cell, exitCode(r)), ("I", Some(4)))
     finally Using.resource(Files.walk(dir))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
 
   test("a deadline at or after the wall-clock kill is refused"):

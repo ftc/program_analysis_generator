@@ -32,11 +32,9 @@ class ReportSuite extends munit.FunSuite:
   val corpus: Path = repo.resolve("corpora/smoke")
 
   /** An evaluated attempt with these cells (over three targets). */
-  def evaluated(n: Int, cells: List[String]): AttemptRecord =
-    val proved = cells.count(_ == "R")
-    base.copy(attempt = f"attempt-$n%03d", sample = n, elapsedMs = 90000,
-      targets = probes.zip(cells).map((p, c) => TargetRecord(p, 1, p == "Const2", 0, c, Some(0), None, "", false, 1)),
-      summary = Summary(false, 4, builds = true, 10, 1, loads = true, cells, proved, cells.contains("✗")))
+  def evaluated(n: Int, cells: List[String], tests: Tests = Tests.Ran(10, 1, 0, "")): AttemptRecord =
+    RecordFixtures.evaluated(base, cells, probes, (p, _) => p == "Const2", tests)
+      .copy(attempt = f"attempt-$n%03d", sample = n, elapsedMs = 90000)
 
   def failed(n: Int): AttemptRecord = base.copy(attempt = f"attempt-$n%03d", sample = n) // "no files in the reply"
 
@@ -122,7 +120,7 @@ class ReportSuite extends munit.FunSuite:
 
   test("the report builds with LuaLaTeX from generated tables, unsound marks and the prompt's Unicode included"):
     val latexmk = sys.env.getOrElse("PATH", "").split(java.io.File.pathSeparator).map(Paths.get(_).resolve("latexmk"))
-      .exists(Files.isExecutable(_))
+      .exists(Files.isExecutable)
     assume(latexmk, "latexmk is not installed; the report's build is not checked here")
     withResults(campaigns) { dir =>
       import Report.given
@@ -152,15 +150,14 @@ class ReportSuite extends munit.FunSuite:
       "a\\_b \\& 50\\% \\#1 \\$x \\{y\\} \\textasciitilde{} \\textasciicircum{} \\textbackslash{}")
 
   test("the Tests cell: passing out of run, did not compile, or blank when the domain did not build"):
-    val built = Summary(false, 2, builds = true, 4, 1, loads = true, Nil, 0, false)
+    val built = Summary(false, 2, builds = true, 4, 1, loads = true, Nil, 0, false, None)
     assertEquals(Report.tests(built.copy(testsCompiled = Some(true))), "3/4")
     assertEquals(Report.tests(built.copy(testsRun = 0, testsFailed = 0, testsCompiled = Some(false))), "did not compile")
     assertEquals(Report.tests(built), "3/4", "a record from before testsCompiled was recorded")
     assertEquals(Report.tests(built.copy(builds = false)), "")
 
   test("Table 1 shows tests that did not compile"):
-    val r = evaluated(1, List("A", "A", "A"))
-    val noCompile = r.copy(summary = r.summary.copy(testsRun = 0, testsFailed = 0, testsCompiled = Some(false)))
+    val noCompile = evaluated(1, List("A", "A", "A"), Tests.DidNotCompile("BrokenTest.java:3: error"))
     withResults(Map("e1-rung0-qwen3.5-27b" -> List(noCompile))) { dir =>
       val t = Report.table1(Report.campaigns(dir, "e1-rung0-"), inspections)
       assert(t.contains("qwen3.5-27b & 1 & evaluated & 4 & yes & did not compile & yes & A & A & A & 0 &"), t)

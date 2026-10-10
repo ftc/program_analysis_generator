@@ -39,9 +39,10 @@ class StatusSuite extends munit.FunSuite:
       finally Using.resource(Files.walk(dir))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
     }
 
-  def evaluated(id: String, cells: List[String], proved: Int, unsound: Boolean = false, ms: Long = 600000): AttemptRecord =
-    record.copy(attempt = id, elapsedMs = ms,
-      summary = Summary(outOfTokens = false, 4, builds = true, 10, 0, loads = true, cells, proved, unsound))
+  /** proved and unsound follow from the cells: R proves, ✗ is unsound. */
+  def evaluated(id: String, cells: List[String], ms: Long = 600000): AttemptRecord =
+    RecordFixtures.evaluated(record, cells, cells.indices.map(i => s"P$i").toList, (_, c) => c == "✗")
+      .copy(attempt = id, elapsedMs = ms)
 
   def status(attempt: Option[String], stage: String, stageFrom: Long, attemptFrom: Long = 0): Status =
     Status("c", 5, attempt, stage, at(stageFrom).toString, attempt.map(_ => at(attemptFrom).toString), 1800,
@@ -53,7 +54,7 @@ class StatusSuite extends munit.FunSuite:
 
   test("progress: samples finished, the current stage, time per attempt, and an estimate"):
     val s = screen(Some(status(Some("attempt-003"), "asking the model", 0)),
-      List(evaluated("attempt-001", List("R"), 1), evaluated("attempt-002", List("A"), 0)), Right(Nil), Nil, at(120))
+      List(evaluated("attempt-001", List("R")), evaluated("attempt-002", List("A"))), Right(Nil), Nil, at(120))
     assert(s.contains("2 of 5 finished"), s)
     assert(s.contains("attempt-003: asking the model, for 2m00s"), s)
     assert(s.contains("10m00s per attempt"), s)
@@ -93,21 +94,21 @@ class StatusSuite extends munit.FunSuite:
 
   test("finished attempts: a mini Table 1, failures counted, and a run of the same failure flagged"):
     val noFiles = (1 to 3).toList.map(i => record.copy(attempt = f"attempt-00${i + 1}%d"))
-    val s = screen(None, evaluated("attempt-001", List("R", "A"), 1) :: noFiles, Right(Nil), Nil, at(0))
+    val s = screen(None, evaluated("attempt-001", List("R", "A")) :: noFiles, Right(Nil), Nil, at(0))
     assert(s.contains("attempt-001  evaluated"), s)
     assert(s.contains("R A"), s)
     assert(s.contains("no files in the reply ×3"), s)
     assert(s.contains("the last 3 attempts all failed the same way (no files in the reply)"), s)
 
   test("a reply cut off at the token budget is 'ran out of tokens', not a missing file or a compile error"):
-    val cut = record.copy(attempt = "attempt-001",
-      reply = record.reply.map(_.copy(finishReason = Some("length"))),
-      summary = record.summary.copy(outOfTokens = true))
+    val cut = RecordFixtures.withExchange(record.copy(attempt = "attempt-001")) { (reply, files, build) =>
+      Exchange.Replied(reply.copy(finishReason = Some("length")), files, build)
+    }
     assertEquals(StatusView.outcome(cut), "ran out of tokens")
     assert(screen(None, List(cut), Right(Nil), Nil, at(0)).contains("ran out of tokens ×1"))
 
   test("an unsound attempt and a killed pag are flagged"):
-    val s = screen(None, List(evaluated("attempt-001", List("✗", "H"), 1, unsound = true)), Right(Nil), Nil, at(0))
+    val s = screen(None, List(evaluated("attempt-001", List("✗", "H"))), Right(Nil), Nil, at(0))
     assert(s.contains("unsound: attempt-001 refuted a reachable target"), s)
     assert(s.contains("a pag check was killed (H) in attempt-001"), s)
 

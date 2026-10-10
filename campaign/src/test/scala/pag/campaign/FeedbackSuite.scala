@@ -25,7 +25,7 @@ class FeedbackSuite extends munit.FunSuite:
       all.iterator.asScala.filter(_.getFileName.toString == "attempt.json").toList.sorted
     }.map(f => Attempt.read(f).fold(e => fail(e), identity))
       .flatMap(r => r.build.filter(b => !b.compiled).map(b => r -> """(?m)^(\d+) errors?$""".r
-        .findFirstMatchIn(b.compileLog).fold(-1)(_.group(1).toInt)))
+        .findFirstMatchIn(b.last.log).fold(-1)(_.group(1).toInt)))
 
   test("the committed failed builds are the 12 known from findings.md"):
     assertEquals(failedBuilds.size, 12)
@@ -34,7 +34,7 @@ class FeedbackSuite extends munit.FunSuite:
   test("every committed failed build: each of javac's errors once, no absolute paths, within the cap"):
     for (r, count) <- failedBuilds do
       val name = s"${r.campaign}/${r.attempt}"
-      val text = Feedback.errors(r.build.get.compileLog, serverDomain(r.campaign, r.attempt)).getOrElse(fail(s"$name: none"))
+      val text = Feedback.errors(r.build.get.last.log, serverDomain(r.campaign, r.attempt)).getOrElse(fail(s"$name: none"))
       assertEquals(Header.findAllMatchIn(text).size, count, name)
       assert(!text.contains("/home/"), s"$name:\n$text")
       assert(text.getBytes(UTF_8).length <= Feedback.Cap, name)
@@ -42,7 +42,7 @@ class FeedbackSuite extends munit.FunSuite:
 
   test("Qwen3.5-9B sample 2, worked by hand: its five errors in javac's order, carets kept"):
     val r = failedBuilds.map(_._1).find(r => r.campaign == "e1-rung0-qwen3.5-9B" && r.attempt == "attempt-002").get
-    val text = Feedback.errors(r.build.get.compileLog, serverDomain(r.campaign, r.attempt)).get
+    val text = Feedback.errors(r.build.get.last.log, serverDomain(r.campaign, r.attempt)).get
     val f = "src/pag/domains/gen/IntervalDomain.java"
     val (carets, rest) = text.linesIterator.toList.partition(_.trim == "^")
     assertEquals(carets.size, 5)

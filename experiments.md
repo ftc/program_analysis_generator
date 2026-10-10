@@ -157,6 +157,7 @@ settings it ran with, and a campaign pins them.
 | `maxTokens`                                              | 32,768, every size      | the card's "most queries" length; one budget for all sizes. The pipeline check passed 47,000 without finishing, so expect some "ran out of tokens" — data, and the first setting to revisit (the card suggests 81,920 for complex problems) |
 | `timeoutSeconds`                                         | 2,700 (45 minutes)      | 32,768 tokens at about 28 tokens/s is about 20 minutes for the 27B, plus margin. A timeout is not retried                                                                                                                                   |
 | `retries`                                                | 3                       | connection failures, 429 and 5xx only                                                                                                                                                                                                       |
+| build limit, compile tries                               | 2 minutes; 3 tries      | each Gradle call, the domain's own tests included. A compile that fails without javac errors is tried again; one with javac errors is not. Added 2026-10-09; earlier campaigns ran with 5 minutes and one try                               |
 | samples                                                  | 5 per size              | a first table quickly; more for the cheap small sizes if noisy                                                                                                                                                                              |
 | seed                                                     | unset                   | samples should differ; GPU arithmetic is not bit-reproducible anyway                                                                                                                                                                        |
 | llama.cpp `-c` (server)                                  | 65,536                  | covers prompt plus budget, with a far smaller KV cache than the full 262,144                                                                                                                                                                |
@@ -310,9 +311,13 @@ Every attempt writes `results/<campaign>/<attempt>/attempt.json`, committed with
 the domain sources the model wrote: the envelope (commit, dirty flag, profile),
 the settings and the model's `source`, the server's own report of its model,
 **the full messages sent** and **the full reply** (with its reasoning and token
-usage), the files read from it, the build and test logs, every target's result,
-and the summary row. A campaign's `campaign.json` pins its inputs. Feedback
-rounds, when they come, add each round's kind and outcome.
+usage), the files read from it, every compile try's log, the tests' outcome and
+log, and every target's result. Each stage holds the next, so a record can only
+say what the pipeline can do; Table 1's row is derived from it when read, never
+stored (since 2026-10-09, schema 2; earlier records have the flat schema 1, with
+a stored summary row, and are converted when read — `AttemptRecordV1`). A
+campaign's `campaign.json` pins its inputs. Feedback rounds, when they come, add
+each round's kind and outcome.
 
 ### What the answer looks like
 

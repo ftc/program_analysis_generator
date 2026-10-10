@@ -52,7 +52,7 @@ class AttemptSuite extends munit.FunSuite:
   test("a good reply: written, built, its tests pass, and the corpus judges it like ref-interval"):
     attempt(200 -> completion(reply(intervalReply))) { (r, dir) =>
       assertEquals(r.summary.files, intervalReply.size)
-      assert(r.summary.builds && r.summary.loads, r.build.map(_.compileLog))
+      assert(r.summary.builds && r.summary.loads, r.build.map(_.last.log))
       assertEquals((r.summary.testsRun > 0, r.summary.testsFailed), (true, 0))
       assertEquals(r.summary.cells, List("R", "A", "R", "R", "A", "R", "R", "A"))
       assertEquals((r.summary.proved, r.summary.unsound), (5, false))
@@ -84,7 +84,7 @@ class AttemptSuite extends munit.FunSuite:
     attempt(200 -> completion(reply(Map("src/pag/domains/gen/D.java" -> "package pag.domains.gen; class D { int x = ; }")))) {
       (r, _) =>
         assertEquals((r.summary.builds, r.targets, r.summary.cells), (false, Nil, Nil))
-        assert(r.build.exists(_.compileLog.contains("error: illegal start of expression")), r.build.map(_.compileLog))
+        assert(r.build.exists(_.last.log.contains("error: illegal start of expression")), r.build.map(_.last.log))
     }
 
   test("a reply stopped at the token budget is recorded as out of tokens"):
@@ -109,7 +109,7 @@ class AttemptSuite extends munit.FunSuite:
   test("the model is unreachable: the failure is recorded and the attempt still finishes"):
     attempt(500 -> "down") { (r, dir) =>
       assertEquals((r.reply, r.files, r.build), (None, None, None))
-      assertEquals(r.failure.map(_.status), Some(Some(500)))
+      assertEquals(r.failure.collect { case f: ChatFailure.BadResponse => f.status }, Some(500))
       assert(Files.isRegularFile(dir.resolve("attempt.json")))
     }
 
@@ -120,7 +120,8 @@ class AttemptSuite extends munit.FunSuite:
 
   test("tests that compile: recorded as compiled, in the build and the summary"):
     attempt(200 -> completion(reply(intervalReply))) { (r, _) =>
-      assertEquals((r.build.flatMap(_.testsCompiled), r.summary.testsCompiled), (Some(true), Some(true)))
+      assert(r.build.exists { case BuildRecord.Compiled(_, _, _: Tests.Ran, _) => true; case _ => false }, r.build)
+      assertEquals(r.summary.testsCompiled, Some(true))
       assert(r.summary.testsRun > 0)
     }
 
@@ -128,7 +129,8 @@ class AttemptSuite extends munit.FunSuite:
     attempt(200 -> completion(reply(intervalReply + brokenTest))) { (r, _) =>
       assertEquals((r.summary.builds, r.summary.loads, r.summary.proved), (true, true, 5))
       assertEquals((r.summary.testsCompiled, r.summary.testsRun, r.summary.testsFailed), (Some(false), 0, 0))
-      assert(r.build.exists(_.testLog.contains("BrokenTest.java:3: error: cannot find symbol")), r.build.map(_.testLog))
+      val testLog = r.build.collect { case BuildRecord.Compiled(_, _, Tests.DidNotCompile(log), _) => log }
+      assert(testLog.exists(_.contains("BrokenTest.java:3: error: cannot find symbol")), testLog)
       assertEquals(Report.tests(r.summary), "did not compile")
     }
 
@@ -141,12 +143,14 @@ class AttemptSuite extends munit.FunSuite:
   test("a domain that does not compile: its tests are not tried"):
     attempt(200 -> completion(reply(Map("src/pag/domains/gen/D.java" -> "package pag.domains.gen; class D { int x = ; }")))) {
       (r, _) =>
-        assertEquals((r.build.map(_.testsCompiled), r.summary.testsCompiled), (Some(None), None))
+        assertEquals((r.build.map(_.compiled), r.summary.testsCompiled), (Some(false), None))
     }
 
   test("tests that did not compile survive attempt.json: written out, and decoded the same"):
     attempt(200 -> completion(reply(intervalReply + brokenTest))) { (r, dir) =>
       val json = Files.readString(dir.resolve("attempt.json"))
-      assertEquals("\"testsCompiled\":\\s*false".r.findAllMatchIn(json).size, 2, "once in build, once in summary")
+      assertEquals("\"DidNotCompile\"".r.findAllMatchIn(json).size, 1, "the tests' case, written once")
+      assert(!json.contains("\"summary\""), "the summary is derived, never stored")
+      assert(json.contains(s"\"schema\": ${AttemptRecord.Schema}"), json.take(200))
       assertEquals(Attempt.read(dir.resolve("attempt.json")), Right(r))
     }

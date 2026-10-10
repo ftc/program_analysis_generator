@@ -36,13 +36,22 @@ object Attempt:
     val evaluation = build.flatMap(_.jar).map { jar =>
       Evaluate.run(tools.pag, jar, tools.corpus, tools.probeLib, dir.resolve("work"), stage = stage)
     }
-    val targets = evaluation.flatMap(_.toOption).fold(List.empty[TargetRecord])(_.results.map { r =>
-      TargetRecord(r.target.probe, r.target.reach, r.target.reachable, r.target.rung, r.cell, r.exitCode, r.check,
-        r.stderr, r.timedOut, r.elapsedMs)
-    })
-    val proved = evaluation.flatMap(_.toOption).fold(0)(_.proved)
-    val unsound = evaluation.flatMap(_.toOption).exists(_.unsound)
+    val exchange = chat match
+      case Left(failure) => Exchange.NoReply(failure)
+      case Right(reply) =>
+        val p = parsed.get // parsed is Some exactly when chat is Right
+        Exchange.Replied(reply, FilesRecord(written.getOrElse(Nil), p.ignoredBlocks, p.problems), build.map { b =>
+          val (last, earlier) = (b.tries.last, b.tries.init)
+          (b.jar, evaluation) match
+            case (Some(_), Some(e)) =>
+              val tests = b.testsCompiled match
+                case Some(false) => Tests.DidNotCompile(b.testLog)
+                case _           => Tests.Ran(b.testsRun, b.testFailures, b.testErrors, b.testLog)
+              BuildRecord.Compiled(last, earlier, tests, e.fold(EvaluationRecord.Failed(_), ev => EvaluationRecord.Evaluated(ev.results.map(_.record))))
+            case _ => BuildRecord.Failed(last, earlier)
+        })
     val record = AttemptRecord(
+      AttemptRecord.Schema,
       Envelope.current(Profile),
       campaign,
       attempt,
@@ -52,25 +61,7 @@ object Attempt:
       AgentRecord.of(agent),
       serverModels,
       PromptRecord(prompt.version, prompt.sha256, prompt.messages),
-      chat.toOption,
-      chat.left.toOption,
-      parsed.map(p => FilesRecord(written.getOrElse(Nil), p.ignoredBlocks,
-        p.problems ++ evaluation.flatMap(_.left.toOption).map(e => s"evaluation: $e"))),
-      build.map(b => BuildRecord(b.jar.isDefined, b.compileLog, b.testsRun, b.testFailures, b.testErrors, b.testLog,
-        b.elapsedMs, b.testsCompiled)),
-      targets,
-      Summary(
-        chat.toOption.exists(_.finishReason.contains("length")),
-        written.fold(0)(_.size),
-        build.exists(_.jar.isDefined),
-        build.fold(0)(_.testsRun),
-        build.fold(0)(b => b.testFailures + b.testErrors),
-        targets.exists(_.check.isDefined), // pag printed a result only if it loaded the domain
-        targets.map(_.cell),
-        proved,
-        unsound,
-        build.flatMap(_.testsCompiled)
-      )
+      exchange
     )
     stage("writing the record")
     save(record, dir.resolve("attempt.json"))
@@ -93,6 +84,21 @@ object Attempt:
     Files.write(tmp, Json.encode(record).withPrettyRendering(2).toByteArray)
     Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
 
+  /** Just the schema; Borer skips the other keys. Records from before 2026-10-09 have none: schema 1. */
+  private final case class Header(schema: Option[Int] = None)
+
+  /** A record of any schema, in the current shape: schema 1 is converted (`AttemptRecordV1`). */
   def read(file: Path): Either[String, AttemptRecord] =
     import AttemptRecord.given
-    Json.decode(Files.readAllBytes(file)).to[AttemptRecord].valueEither.left.map(e => s"$file: ${e.getMessage}")
+    import io.bullet.borer.Codec
+    import io.bullet.borer.NullOptions.given
+    import io.bullet.borer.derivation.MapBasedCodecs.deriveCodec
+    given Codec[Header] = deriveCodec[Header]
+    val bytes = Files.readAllBytes(file)
+    def decode[A: io.bullet.borer.Decoder]: Either[String, A] = Json.decode(bytes).to[A].valueEither.left.map(_.getMessage)
+    val record = decode[Header].flatMap(_.schema match
+      case None                         => decode[AttemptRecordV1.Attempt].flatMap(AttemptRecordV1.convert)
+      case Some(AttemptRecord.Schema)   => decode[AttemptRecord]
+      case Some(n)                      => Left(s"schema $n is not one this code reads")
+    )
+    record.left.map(e => s"$file: $e")

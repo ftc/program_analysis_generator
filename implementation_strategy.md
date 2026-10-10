@@ -2426,7 +2426,11 @@ framework, library, or the OS.
       not necessarily the last round. This replaces "whatever builds last" in
       the first bullet above. Why: 27B sample 3's domain compiled while its
       test file did not, and a correction should not be able to throw away a
-      domain that had built.
+      domain that had built. Since only a failed domain compile triggers
+      feedback, a round whose domain compiles always ends the conversation, so
+      this is always the last round. The record's types say so: earlier rounds
+      can hold only a failed build (noted 2026-10-09, when the record became
+      a staged type).
     - **A correction reply holds every file again, complete** (open question
       3). The domain is rebuilt from that reply alone, so one reply is one
       domain.
