@@ -2150,7 +2150,16 @@ same campaign with any of them changed deletes `results/<campaign>/` and starts
 afresh, printing what changed, so two experiments' samples never mix under one
 name; the old attempts survive in git history once committed. *Decided — Shawn,
 2026-10-08*, replacing the earlier refusal, which forced a new name for every
-rerun and left superseded campaigns where the report would read them. An
+rerun and left superseded campaigns where the report would read them.
+**Replaced — Shawn, 2026-10-09:** every run gets a directory of its own,
+`results/<campaign>-<UTC start>/` (`yyyyMMddTHHmmssZ`), and nothing is ever
+reused or deleted, so earlier results stay where they are. The pin also
+records the sample count. An interrupted run is continued only on request,
+`generate --resume <dir>`, which refuses if any pinned input differs and
+otherwise runs only the missing samples. The report reads the latest run of
+each campaign name and warns of the ones it skips, which answers the
+objection to the earlier refusal. Directories from before this decision have
+no start time in their names and stay as they are. An
 unreadable `campaign.json` is still an error: nothing is deleted on a guess. The commit is not pinned:
 committing the attempts or the inspection notes moves `HEAD`, and resuming must
 still work; each attempt's envelope records its own commit. Suggested naming,

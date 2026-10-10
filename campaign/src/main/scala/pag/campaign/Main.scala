@@ -10,7 +10,7 @@ import scopt.OParser
 object Main:
 
   final case class Args(command: String = "", config: Option[Path] = None, campaign: Option[String] = None,
-      samples: Int = 1, prompt: String = "generator-v2", every: Option[Int] = None, prefix: String = "e1-rung0-",
+      resume: Option[Path] = None, samples: Option[Int] = None, prompt: String = "generator-v2", every: Option[Int] = None, prefix: String = "e1-rung0-",
       out: Option[Path] = None)
 
   private val parser: OParser[Unit, Args] =
@@ -24,10 +24,12 @@ object Main:
         .children(
           opt[Path]("config").required().valueName("<file>").action((p, a) => a.copy(config = Some(p)))
             .text("the campaign config (JSON, implementation_strategy.md §10)"),
-          opt[String]("campaign").required().valueName("<name>").action((n, a) => a.copy(campaign = Some(n)))
-            .text("results/<name>/, e.g. e1-rung0-<model>; changed inputs delete it and start afresh"),
-          opt[Int]("samples").valueName("N").action((n, a) => a.copy(samples = n))
-            .text("how many attempts the campaign should hold (default 1); existing ones are kept"),
+          opt[String]("campaign").valueName("<name>").action((n, a) => a.copy(campaign = Some(n)))
+            .text("start a new run in results/<name>-<UTC start>/, e.g. e1-rung0-<model>; nothing earlier is touched"),
+          opt[Path]("resume").valueName("<dir>").action((d, a) => a.copy(resume = Some(d)))
+            .text("continue an interrupted run, results/<name>-<start>/, under the inputs it was pinned with"),
+          opt[Int]("samples").valueName("N").action((n, a) => a.copy(samples = Some(n)))
+            .text("how many attempts a new run holds (default 1); a resumed run keeps its pinned count"),
           opt[String]("prompt").valueName("<version>").action((v, a) => a.copy(prompt = v))
             .text("campaign/prompts/<version>/ (default generator-v2)")
         ),
@@ -48,7 +50,11 @@ object Main:
           opt[Path]("out").valueName("<dir>").action((p, a) => a.copy(out = Some(p)))
             .text("where the tables go (default report/tables)")
         ),
-      checkConfig(a => if a.command.isEmpty then failure("no command given") else success)
+      checkConfig(a =>
+        if a.command.isEmpty then failure("no command given")
+        else if a.command == "generate" && a.campaign.isDefined == a.resume.isDefined then
+          failure("generate takes exactly one of --campaign (a new run) and --resume (an interrupted one)")
+        else success)
     )
 
   def main(args: Array[String]): Unit =
@@ -76,12 +82,13 @@ object Main:
           config <- CampaignConfig.read(a.config.get)
           prompt <- Prompt.assemble(repo, a.prompt)
           agent = config.agents.generator
-          done <- Campaign.generate(a.campaign.get, a.samples, agent, ChatClient(agent), prompt, tools,
-            repo.resolve("results"), report, println)
+          start = a.resume.fold(Start.Fresh(a.campaign.get, a.samples.getOrElse(1)))(Start.Resume(_, a.samples))
+          done <- Campaign.generate(start, agent, ChatClient(agent), prompt, tools, repo.resolve("results"), report,
+            println)
         yield done
         outcome match
-          case Left(message) => System.err.println(s"campaign: $message"); sys.exit(1)
-          case Right(done)   => println(s"${done.size} samples in results/${a.campaign.get}/")
+          case Left(message)         => System.err.println(s"campaign: $message"); sys.exit(1)
+          case Right((dir, samples)) => println(s"${samples.size} samples in $dir/")
 
   /** Draws the status screen once, or every `every` seconds until interrupted. */
   private def watch(dir: Path, name: String, every: Option[Int]): Unit =

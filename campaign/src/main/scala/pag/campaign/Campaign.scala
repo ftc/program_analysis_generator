@@ -1,9 +1,12 @@
 package pag.campaign
 
 import java.nio.file.{Files, Path}
+import java.time.{Instant, ZoneOffset}
+import java.time.format.DateTimeFormatter
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
 import io.bullet.borer.{Codec, Json}
+import io.bullet.borer.NullOptions.given
 import io.bullet.borer.derivation.MapBasedCodecs.*
 
 /** What a campaign holds fixed (implementation_strategy.md §12, Phase 10): if any
@@ -16,19 +19,26 @@ final case class CampaignPin(
     promptVersion: String,
     promptSha256: String,
     corpusSha256: String,
-    profile: String
+    profile: String,
+    samples: Option[Int] = None // added 2026-10-09; None: pinned before then
 )
+
+/** How `generate` starts: a new run of a campaign, or an interrupted run continued. */
+enum Start:
+  case Fresh(name: String, samples: Int)
+  case Resume(dir: Path, samples: Option[Int]) // samples: only for a run pinned before the pin recorded it
 
 /** What one `generate` run did for each sample. */
 enum SampleOutcome:
   case Ran(record: AttemptRecord)
   case Kept(attempt: String) // attempt.json already there: never rewritten
 
-/** Running a campaign's samples (implementation_strategy.md Phase 10): pin its
-  * inputs on the first run; under the same inputs, run only the samples that have
-  * no `attempt.json` and never rewrite one; under different inputs, delete the
-  * campaign's directory and start afresh, so two experiments' samples never mix.
-  * The deleted attempts live on in git history once committed.
+/** Running a campaign's samples (implementation_strategy.md Phase 10, §14). Every
+  * run gets a directory of its own, named after the campaign and its UTC start
+  * time, so a rerun never reuses or deletes an earlier run. A run that was
+  * interrupted is continued only on request (`Start.Resume`), and only under the
+  * inputs it was pinned with: then only samples without an `attempt.json` run,
+  * and no attempt is ever rewritten.
   */
 object Campaign:
 
@@ -36,18 +46,23 @@ object Campaign:
     import AttemptRecord.given
     deriveCodec[CampaignPin]
 
-  def generate(name: String, samples: Int, agent: AgentConfig, client: ChatClient, prompt: Prompt, tools: Tools,
-      results: Path, progress: SampleOutcome => Unit = _ => (), notice: String => Unit = _ => ()
-  ): Either[String, List[SampleOutcome]] =
-    val dir = results.resolve(name)
+  /** A run's start time in its directory name: UTC, to the second, sorting as text sorts. */
+  val StartFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
+
+  /** Runs the samples; returns the run's directory and what happened to each sample. */
+  def generate(start: Start, agent: AgentConfig, client: ChatClient, prompt: Prompt, tools: Tools, results: Path,
+      progress: SampleOutcome => Unit = _ => (), notice: String => Unit = _ => (), now: () => Instant = () => Instant.now()
+  ): Either[String, (Path, List[SampleOutcome])] =
     for
-      // "." and ".." would name results/ itself or its parent, which a changed input then deletes
-      _ <- Either.cond(name.matches("[A-Za-z0-9._-]+") && !name.matches("\\.+"), (),
-        s"campaign name '$name': use letters, digits, '.', '_' and '-'")
-      _ <- Either.cond(samples > 0, (), s"--samples must be positive, not $samples")
       corpusHash <- corpusSha256(tools.corpus)
-      _ <- pin(dir, CampaignPin(AgentRecord.of(agent), prompt.version, prompt.sha256, corpusHash, Attempt.Profile), notice)
+      current = CampaignPin(AgentRecord.of(agent), prompt.version, prompt.sha256, corpusHash, Attempt.Profile)
+      run <- start match
+        case Start.Fresh(name, samples) => fresh(results, name, samples, current, now())
+        case Start.Resume(dir, samples) => resume(dir, samples, current)
+      (dir, samples) = run
     yield
+      notice(s"campaign run $dir")
+      val name = dir.getFileName.toString
       val status = StatusReporter(dir, name, samples, agent.timeoutSeconds)
       val outcomes = (1 to samples).toList.map { sample =>
         val attemptDir = dir.resolve(f"attempt-$sample%03d")
@@ -60,39 +75,45 @@ object Campaign:
         outcome
       }
       status.finished()
-      outcomes
+      (dir, outcomes)
 
-  /** Writes the pin on a campaign's first run. Afterwards, the same pin keeps
-    * the directory; a different one deletes it, says what changed, and pins afresh.
-    * An unreadable pin is an error: deleting what cannot be read is a guess.
-    */
-  private def pin(dir: Path, current: CampaignPin, notice: String => Unit): Either[String, Unit] =
-    val file = dir.resolve("campaign.json")
-    def write(): Unit =
+  /** A new directory, `<name>-<start>`, pinned. Never an existing one: two starts in one second are refused. */
+  private def fresh(results: Path, name: String, samples: Int, current: CampaignPin, at: Instant
+  ): Either[String, (Path, Int)] =
+    val dir = results.resolve(s"$name-${StartFormat.format(at)}")
+    for
+      // "." and ".." would name results/ itself or its parent
+      _ <- Either.cond(name.matches("[A-Za-z0-9._-]+") && !name.matches("\\.+"), (),
+        s"campaign name '$name': use letters, digits, '.', '_' and '-'")
+      _ <- Either.cond(samples > 0, (), s"--samples must be positive, not $samples")
+      _ <- Either.cond(!Files.exists(dir), (), s"$dir already exists; start again in a second")
+    yield
       Files.createDirectories(dir)
-      Files.write(file, Json.encode(current).withPrettyRendering(2).toByteArray)
-    if !Files.exists(file) then Right(write())
-    else
-      Json.decode(Files.readAllBytes(file)).to[CampaignPin].valueEither.left.map(e => s"$file: ${e.getMessage}")
-        .flatMap { pinned =>
-          val changed = List(
-            Option.when(pinned.agent != current.agent)("the agent configuration"),
-            Option.when(pinned.promptVersion != current.promptVersion || pinned.promptSha256 != current.promptSha256)(
-              "the prompt"),
-            Option.when(pinned.corpusSha256 != current.corpusSha256)("the corpus"),
-            Option.when(pinned.profile != current.profile)("the profile")
-          ).flatten
-          if changed.nonEmpty then
-            notice(s"campaign ${dir.getFileName} was run with different inputs (${changed.mkString(", ")} changed); " +
-              s"deleting $dir and starting afresh")
-            deleteTree(dir)
-            write()
-          Right(())
-        }
+      Files.write(dir.resolve("campaign.json"), Json.encode(current.copy(samples = Some(samples)))
+        .withPrettyRendering(2).toByteArray)
+      (dir, samples)
 
-  /** Deletes a directory and everything under it; symbolic links are deleted, not followed. */
-  private def deleteTree(dir: Path): Unit =
-    Using.resource(Files.walk(dir))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
+  /** An existing run, continued under the inputs it was pinned with, to its pinned sample count. */
+  private def resume(dir: Path, samples: Option[Int], current: CampaignPin): Either[String, (Path, Int)] =
+    val file = dir.resolve("campaign.json")
+    for
+      _ <- Either.cond(Files.isRegularFile(file), (), s"$file: no such file; --resume takes a campaign run's directory")
+      pinned <- Json.decode(Files.readAllBytes(file)).to[CampaignPin].valueEither.left.map(e => s"$file: ${e.getMessage}")
+      changed = List(
+        Option.when(pinned.agent != current.agent)("the agent configuration"),
+        Option.when(pinned.promptVersion != current.promptVersion || pinned.promptSha256 != current.promptSha256)(
+          "the prompt"),
+        Option.when(pinned.corpusSha256 != current.corpusSha256)("the corpus"),
+        Option.when(pinned.profile != current.profile)("the profile")
+      ).flatten
+      _ <- Either.cond(changed.isEmpty, (), s"$dir was run with different inputs (${changed.mkString(", ")} changed); " +
+        "start a new run instead of resuming this one")
+      count <- (pinned.samples, samples) match
+        case (Some(n), None)    => Right(n)
+        case (None, Some(n))    => Either.cond(n > 0, n, s"--samples must be positive, not $n")
+        case (Some(_), Some(_)) => Left(s"$dir pins its sample count; resume it without --samples")
+        case (None, None)       => Left(s"$dir was pinned before sample counts were; resume it with --samples")
+    yield (dir, count)
 
   /** A campaign's pinned inputs, if it has been run. */
   def pinned(dir: Path): Option[CampaignPin] =

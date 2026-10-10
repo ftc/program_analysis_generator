@@ -83,16 +83,25 @@ missing — but the attempt in progress would be lost.
    ```
 
    One campaign per model, named `e1-rung0-<model>`; `generate` uses the
-   current prompt, `generator-v2`, unless `--prompt` says otherwise. The first
-   run pins the campaign's inputs (settings, prompt, corpus, profile). Rerunning
-   with the same inputs only fills in samples that have no `attempt.json`, and
-   never rewrites one; rerunning with any input changed deletes
-   `results/<campaign>/` and starts afresh, saying so — commit the old attempts
-   first if they are worth keeping, since git history is then their only copy.
-4. **Watch it**, in a second `tmux` window (Ctrl-b c):
+   current prompt, `generator-v2`, unless `--prompt` says otherwise. **Each run
+   gets a directory of its own**, the campaign's name and its UTC start time,
+   e.g. `results/e1-rung0-qwen3.5-9B-20261009T172600Z/`, printed when it
+   starts; it pins the run's inputs (settings, prompt, corpus, profile, sample
+   count). Rerunning starts another directory and leaves every earlier run as
+   it was; nothing is reused or deleted. **If a run is interrupted**, continue
+   it under the same inputs with
 
    ```
-   sbt "campaign/run status --campaign e1-rung0-qwen3.5-<size> --every 5"
+   sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --resume results/<that directory>"
+   ```
+
+   which runs only the samples without an `attempt.json`, rewrites none, and
+   refuses if any pinned input has changed.
+4. **Watch it**, in a second `tmux` window (Ctrl-b c), with the directory
+   name `generate` printed:
+
+   ```
+   sbt "campaign/run status --campaign <that directory's name> --every 5"
    ```
 
    Progress, the live generation (tokens, rate, time before the timeout), the

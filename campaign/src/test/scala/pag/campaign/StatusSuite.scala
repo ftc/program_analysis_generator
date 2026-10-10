@@ -124,8 +124,10 @@ class StatusSuite extends munit.FunSuite:
         val tools = Tools(List("true"), repo.resolve("domains/build-template"), apiPath,
           Paths.get(classOf[pag.probe.Rand].getProtectionDomain.getCodeSource.getLocation.toURI), repo.resolve("corpora/smoke"))
         val prompt = Prompt.assemble(repo, "generator-v1").fold(e => fail(e), identity)
-        Campaign.generate("c", 2, agent, ChatClient(agent), prompt, tools, results).fold(e => fail(e), identity)
-        val st = Status.read(results.resolve("c")).getOrElse(fail("no status.json"))
+        val (dir, _) = Campaign.generate(Start.Fresh("c", 2), agent, ChatClient(agent), prompt, tools, results)
+          .fold(e => fail(e), identity)
+        val st = Status.read(dir).getOrElse(fail("no status.json"))
+        assertEquals(st.campaign, dir.getFileName.toString)
         assertEquals((st.running, st.stage, st.samplesRequested, st.attempt), (false, "finished", 2, None))
       finally Using.resource(Files.walk(results))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
     }

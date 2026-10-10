@@ -680,8 +680,10 @@ sbt "cli/run run <classes-dir> --inputs 10 --trace"   # run it on the IR interpr
 ./scripts/reachable.sh     # ...cannot refute a reachable one, and a run reaches it
 bash scripts/common.sh     # build what a campaign needs, including the pag launcher
 sbt "campaign/run generate --config config/<file>.json --campaign <name> --samples N"
-                                # ask the generator model N times; results/<name>/ keeps every attempt
-sbt "campaign/run status --campaign <name> --every 5"
+                                # ask the generator model N times, in a new results/<name>-<UTC start>/
+sbt "campaign/run generate --config config/<file>.json --resume results/<name>-<start>"
+                                # continue an interrupted run under its pinned inputs
+sbt "campaign/run status --campaign <name>-<start> --every 5"
                                 # watch a running campaign: progress, live generation, finished attempts, warnings
 sbt "campaign/run report"       # the report's tables and prompt, from results/e1-rung0-* and report/inspection.json
 (cd report && latexmk -lualatex -outdir=build report.tex)   # the report itself: report/build/report.pdf
