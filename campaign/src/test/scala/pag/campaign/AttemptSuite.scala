@@ -40,12 +40,17 @@ class AttemptSuite extends munit.FunSuite:
 
   /** Runs one attempt against a server answering `script`, in a directory deleted afterwards. */
   def attempt(script: (Int, String)*)(check: (AttemptRecord, Path) => Unit): Unit =
+    attemptWith(None, tools, script*)((r, dir, _) => check(r, dir))
+
+  /** As `attempt`, with feedback rounds and other tools; `check` also sees what the server received. */
+  def attemptWith(feedback: Option[FeedbackSettings], t: Tools, script: (Int, String)*)(
+      check: (AttemptRecord, Path, FakeServer) => Unit): Unit =
     val dir = Files.createTempDirectory("attempt")
     try withServer(script*) { s =>
         val agent = AgentConfig(s.baseUrl, "m.gguf", retries = 0)
-        val record = Attempt.run("test-campaign", 1, agent, ChatClient(agent, sleep = _ => ()), prompt, tools,
-          dir.resolve("attempt-001"))
-        check(record, dir.resolve("attempt-001"))
+        val record = Attempt.run("test-campaign", 1, agent, ChatClient(agent, sleep = _ => ()), prompt, t,
+          dir.resolve("attempt-001"), feedback = feedback)
+        check(record, dir.resolve("attempt-001"), s)
       }
     finally Using.resource(Files.walk(dir))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
 
@@ -56,7 +61,7 @@ class AttemptSuite extends munit.FunSuite:
       assertEquals((r.summary.testsRun > 0, r.summary.testsFailed), (true, 0))
       assertEquals(r.summary.cells, List("R", "A", "R", "R", "A", "R", "R", "A"))
       assertEquals((r.summary.proved, r.summary.unsound), (5, false))
-      assert(Files.isRegularFile(dir.resolve("domain/src/pag/domains/gen/IntervalDomain.java")))
+      assert(Files.isRegularFile(dir.resolve("round-1/domain/src/pag/domains/gen/IntervalDomain.java")))
     }
 
   test("attempt.json is written, decodes to the same record, and holds the full messages and reply"):
@@ -181,3 +186,105 @@ class AttemptSuite extends munit.FunSuite:
       assertEquals(back.conversation.failed.map(_.sent.last.content), List(prompt.messages.last.content, "feedback 1"))
       assertEquals((back.summary, back.targets, back.reply), (r.summary, r.targets, r.reply), "the views read the last round")
     }
+
+  // Feedback rounds (implementation_strategy.md §16, item 25), latest-only.
+
+  val templates: FeedbackTemplates = Feedback.load(repo, "feedback-build-v1").fold(e => throw IllegalStateException(e), identity)
+  def rounds(n: Int): Option[FeedbackSettings] = Some(FeedbackSettings.of(n, templates).fold(e => throw IllegalStateException(e), identity))
+
+  val broken: Map[String, String] = Map("src/pag/domains/gen/D.java" -> "package pag.domains.gen; class D { int x = ; }")
+
+  /** The messages of each chat request the server received, as (role, content) pairs. */
+  def sentMessages(s: FakeServer): List[List[(String, String)]] =
+    import io.bullet.borer.{Dom, Json}
+    s.received.filter(_.path.endsWith("/chat/completions")).map { r =>
+      val root = Json.decode(r.body.getBytes("UTF-8")).to[Dom.Element].value.asInstanceOf[Dom.MapElem]
+      val msgs = root.toMap.collectFirst { case (Dom.StringElem("messages"), a: Dom.ArrayElem) => a.elems }.get
+      msgs.toList.map {
+        case m: Dom.MapElem =>
+          val f = m.toMap.collect { case (Dom.StringElem(k), Dom.StringElem(v)) => k -> v }
+          (f("role"), f("content"))
+        case other => fail(s"a message that is not an object: $other")
+      }
+    }
+
+  test("a reply that fails to compile, then a good one: two rounds, the second evaluated, built from its own files"):
+    attemptWith(rounds(3), tools, 200 -> completion(reply(broken), reasoning = Some("my secret plan")),
+      200 -> completion(reply(intervalReply))) { (r, dir, s) =>
+      assertEquals(r.rounds, 2)
+      val fb = r.conversation.failed.head.feedback
+      assert(fb.contains("These are the errors from compiling the domain:") &&
+        fb.contains("src/pag/domains/gen/D.java:1: error: illegal start of expression"), fb)
+      assert(!fb.contains(dir.toString), "paths in the feedback are relative")
+      val second = sentMessages(s)(1)
+      assertEquals(second, prompt.messages.map(m => (m.role, m.content)) ++
+        List("assistant" -> reply(broken), "user" -> fb))
+      assert(!s.received.filter(_.path.endsWith("/chat/completions"))(1).body.contains("my secret plan"),
+        "the reasoning is never sent back")
+      assertEquals(r.conversation.last.sent.map(m => (m.role, m.content)), second, "the record holds what was sent")
+      assertEquals((r.summary.builds, r.summary.proved), (true, 5))
+      assert(Files.isRegularFile(dir.resolve("round-1/domain/src/pag/domains/gen/D.java")))
+      assert(Files.isRegularFile(dir.resolve("round-2/domain/src/pag/domains/gen/IntervalDomain.java")))
+      assert(!Files.exists(dir.resolve("round-2/domain/src/pag/domains/gen/D.java")), "round 2 is built from its own reply")
+    }
+
+  test("every reply fails to compile: N feedback rounds, then it stops, unevaluated"):
+    attemptWith(rounds(2), tools, 200 -> completion(reply(broken))) { (r, _, s) =>
+      assertEquals((r.rounds, r.conversation.failed.size, r.summary.builds, r.targets), (3, 2, false, Nil))
+      assertEquals(sentMessages(s).map(_.size), List(2, 4, 4), "latest only: the prompt, the last reply, its feedback")
+    }
+
+  test("no files in a later round: it stops there"):
+    attemptWith(rounds(3), tools, 200 -> completion(reply(broken)), 200 -> completion("I give up.")) { (r, _, _) =>
+      assertEquals(r.rounds, 2)
+      assertEquals((r.files.map(_.written), r.build), (Some(Nil), None))
+    }
+
+  test("the model unreachable in a later round: it stops there, the failure recorded"):
+    attemptWith(rounds(3), tools, 200 -> completion(reply(broken)), 500 -> "down") { (r, _, _) =>
+      assertEquals(r.rounds, 2)
+      assertEquals(r.failure.collect { case f: ChatFailure.BadResponse => f.status }, Some(500))
+    }
+
+  /** Tools whose gradlew is `script` (sh), in a temporary template deleted afterwards. */
+  def withFakeGradle(script: String, timeout: scala.concurrent.duration.FiniteDuration = Build.Timeout)(body: Tools => Unit): Unit =
+    val template = Files.createTempDirectory("template")
+    try
+      val gradlew = template.resolve("gradlew")
+      Files.writeString(gradlew, "#!/bin/sh\n" + script)
+      Files.setPosixFilePermissions(gradlew, java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"))
+      body(tools.copy(template = template, buildTimeout = timeout))
+    finally Using.resource(Files.walk(template))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
+
+  test("a compile that fails without javac errors is the harness's problem: no feedback, one round"):
+    withFakeGradle("echo 'FAILURE: could not start the daemon'; exit 1") { t =>
+      attemptWith(rounds(3), t, 200 -> completion(reply(broken))) { (r, _, s) =>
+        assertEquals((r.rounds, sentMessages(s).size), (1, 1))
+        assertEquals(r.build.map(_.earlier.size), Some(2), "it was tried three times")
+      }
+    }
+
+  test("a compile killed at the limit on every try: the timeout feedback, with the limit and the tries"):
+    import scala.concurrent.duration.DurationInt
+    withFakeGradle("sleep 30", timeout = 300.millis) { t =>
+      attemptWith(rounds(1), t, 200 -> completion(reply(broken))) { (r, _, _) =>
+        assertEquals(r.rounds, 2)
+        assert(r.conversation.failed.head.feedback.contains("the compiler took more than 0 minutes,\non each of 3 tries."),
+          r.conversation.failed.head.feedback)
+      }
+    }
+
+  test("one shot, without feedback settings: one round, and the stages do not name rounds"):
+    val stages = List.newBuilder[String] // collects the callback's stages; the callback is the API under test
+    withServer(200 -> completion(reply(broken))) { s =>
+      val dir = Files.createTempDirectory("attempt")
+      try
+        val agent = AgentConfig(s.baseUrl, "m.gguf", retries = 0)
+        val r = Attempt.run("c", 1, agent, ChatClient(agent), prompt, tools, dir.resolve("attempt-001"), stages += _)
+        assertEquals(r.rounds, 1)
+      finally Using.resource(Files.walk(dir))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
+    }
+    assert(stages.result().contains("asking the model") && !stages.result().exists(_.contains("round")), stages.result())
+
+  test("feedback settings refuse a non-positive round count"):
+    assert(FeedbackSettings.of(0, templates).isLeft && FeedbackSettings.of(-1, templates).isLeft)

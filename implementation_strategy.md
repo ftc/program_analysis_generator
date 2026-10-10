@@ -2466,7 +2466,9 @@ framework, library, or the OS.
       - **The stage is named through a placeholder** in the template. For now
         it is always "compiling the domain", the only stage that triggers
         feedback. Other stages can fill it later without a new template shape.
-    - **The flag is `--feedback-history latest|full`,** default `latest`.
+    - **The flag is `--feedback-history latest|full`,** default `latest`. It
+      arrives with full-history mode; until then every feedback campaign is
+      latest only, and its pin says so (*Decided — Shawn, 2026-10-09*).
     - **The model's own JUnit tests stay in the prompt and are recorded
       honestly.** `generator-v2` is unchanged, so the feedback campaigns
       differ from the one-shot baseline only in the feedback. A test file that

@@ -10,7 +10,7 @@ import scopt.OParser
 object Main:
 
   final case class Args(command: String = "", config: Option[Path] = None, campaign: Option[String] = None,
-      resume: Option[Path] = None, samples: Option[Int] = None, prompt: String = "generator-v2", every: Option[Int] = None, prefix: String = "e1-rung0-",
+      resume: Option[Path] = None, samples: Option[Int] = None, feedbackRounds: Int = 0, prompt: String = "generator-v2", every: Option[Int] = None, prefix: String = "e1-rung0-",
       out: Option[Path] = None)
 
   private val parser: OParser[Unit, Args] =
@@ -30,6 +30,8 @@ object Main:
             .text("continue an interrupted run, results/<name>-<start>/, under the inputs it was pinned with"),
           opt[Int]("samples").valueName("N").action((n, a) => a.copy(samples = Some(n)))
             .text("how many attempts a new run holds (default 1); a resumed run keeps its pinned count"),
+          opt[Int]("feedback-rounds").valueName("N").action((n, a) => a.copy(feedbackRounds = n))
+            .text("after a domain fails to compile, send its errors back and ask again, up to N times (default 0)"),
           opt[String]("prompt").valueName("<version>").action((v, a) => a.copy(prompt = v))
             .text("campaign/prompts/<version>/ (default generator-v2)")
         ),
@@ -58,6 +60,9 @@ object Main:
         else success)
     )
 
+  /** The build feedback templates a campaign with feedback rounds uses. */
+  val FeedbackTemplateVersion: String = "feedback-build-v1"
+
   def main(args: Array[String]): Unit =
     OParser.parse(parser, args, Args()) match
       case None => sys.exit(1)
@@ -83,9 +88,11 @@ object Main:
           config <- CampaignConfig.read(a.config.get)
           prompt <- Prompt.assemble(repo, a.prompt)
           agent = config.agents.generator
+          feedback <- Option.when(a.feedbackRounds != 0)(a.feedbackRounds).fold(Right(None))(n =>
+            Feedback.load(repo, FeedbackTemplateVersion).flatMap(FeedbackSettings.of(n, _)).map(Some(_)))
           start = a.resume.fold(Start.Fresh(a.campaign.get, a.samples.getOrElse(1)))(Start.Resume(_, a.samples))
           done <- Campaign.generate(start, agent, ChatClient(agent), prompt, tools, repo.resolve("results"), report,
-            println)
+            println, feedback = feedback)
         yield done
         outcome match
           case Left(message)         => System.err.println(s"campaign: $message"); sys.exit(1)

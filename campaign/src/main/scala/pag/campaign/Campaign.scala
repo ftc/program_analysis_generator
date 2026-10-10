@@ -73,12 +73,13 @@ object Campaign:
 
   /** Runs the samples; returns the run's directory and what happened to each sample. */
   def generate(start: Start, agent: AgentConfig, client: ChatClient, prompt: Prompt, tools: Tools, results: Path,
-      progress: SampleOutcome => Unit = _ => (), notice: String => Unit = _ => (), now: () => Instant = () => Instant.now()
+      progress: SampleOutcome => Unit = _ => (), notice: String => Unit = _ => (), now: () => Instant = () => Instant.now(),
+      feedback: Option[FeedbackSettings] = None
   ): Either[String, (Path, List[SampleOutcome])] =
     for
       corpusHash <- corpusSha256(tools.corpus)
       current = CampaignPin(AgentRecord.of(agent), prompt.version, prompt.sha256, corpusHash, Attempt.Profile,
-        build = Some(CurrentBuild))
+        build = Some(CurrentBuild), feedback = feedback.map(_.pin))
       run <- start match
         case Start.Fresh(name, samples) => fresh(results, name, samples, current, now())
         case Start.Resume(dir, samples) => resume(dir, samples, current)
@@ -93,7 +94,7 @@ object Campaign:
           if Files.exists(attemptDir.resolve("attempt.json")) then SampleOutcome.Kept(attemptDir.getFileName.toString)
           else
             status.attempt(attemptDir.getFileName.toString)
-            SampleOutcome.Ran(Attempt.run(name, sample, agent, client, prompt, tools, attemptDir, status.stage))
+            SampleOutcome.Ran(Attempt.run(name, sample, agent, client, prompt, tools, attemptDir, status.stage, feedback))
         progress(outcome)
         outcome
       }

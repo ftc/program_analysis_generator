@@ -248,3 +248,20 @@ class CampaignSuite extends munit.FunSuite:
     val pins = Using.resource(Files.list(repo.resolve("results")))(_.iterator.asScala.toList).sorted
       .filter(_.getFileName.toString.startsWith("e1-")).flatMap(Campaign.pinned)
     assertEquals(pins.map(p => (p.build, p.feedback)), List.fill(3)((None, None)))
+
+  test("a run with feedback rounds pins them, and resuming with another count, or none, is refused"):
+    val templates = Feedback.load(repo, "feedback-build-v1").fold(e => fail(e), identity)
+    def settings(n: Int): Option[FeedbackSettings] = Some(FeedbackSettings.of(n, templates).fold(e => fail(e), identity))
+    withServer(200 -> completion("no files")) { s =>
+      withResults { results =>
+        val agent = AgentConfig(s.baseUrl, "m.gguf", retries = 0)
+        def run(start: Start, f: Option[FeedbackSettings]) =
+          Campaign.generate(start, agent, ChatClient(agent), prompt, tools(), results, now = () => at, feedback = f)
+        val (dir, _) = run(Start.Fresh("e1fb-test", 1), settings(3)).fold(e => fail(e), identity)
+        assertEquals(Campaign.pinned(dir).flatMap(_.feedback),
+          Some(FeedbackPin(3, FeedbackHistory.Latest, "feedback-build-v1", templates.sha256)))
+        assert(run(Start.Resume(dir, None), settings(2)).left.exists(_.contains("the feedback settings changed")))
+        assert(run(Start.Resume(dir, None), None).left.exists(_.contains("the feedback settings changed")))
+        assert(run(Start.Resume(dir, None), settings(3)).isRight, "the same settings resume")
+      }
+    }

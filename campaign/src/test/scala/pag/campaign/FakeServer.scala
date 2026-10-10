@@ -11,8 +11,10 @@ import com.sun.net.httpserver.HttpServer
 final case class Received(method: String, path: String, authorization: Option[String], body: String)
 
 /** An OpenAI-compatible endpoint for tests, on the JDK's own HTTP server: it
-  * answers each request with the next scripted (status, body), repeating the
-  * last, and keeps what it received. Mutable by nature — it observes requests.
+  * answers each chat request with the next scripted (status, body), repeating
+  * the last, and keeps what it received. A `/models` request is answered with
+  * the next one without using it up, so scripts list only the chat replies.
+  * Mutable by nature — it observes requests.
   */
 final class FakeServer(script: List[(Int, String)], delayMs: Long = 0):
   private val server: HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
@@ -24,7 +26,8 @@ final class FakeServer(script: List[(Int, String)], delayMs: Long = 0):
     log.add(Received(exchange.getRequestMethod, exchange.getRequestURI.getPath,
       Option(exchange.getRequestHeaders.getFirst("Authorization")), body))
     if delayMs > 0 then Thread.sleep(delayMs) // a slow model: received, then answered late
-    val (status, reply) = if pending.size > 1 then pending.poll() else pending.peek()
+    val models = exchange.getRequestURI.getPath.endsWith("/models")
+    val (status, reply) = if pending.size > 1 && !models then pending.poll() else pending.peek()
     val bytes = reply.getBytes(UTF_8)
     exchange.sendResponseHeaders(status, bytes.length.toLong)
     exchange.getResponseBody.write(bytes)

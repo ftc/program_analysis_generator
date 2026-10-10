@@ -97,6 +97,11 @@ missing — but the attempt in progress would be lost.
 
    which runs only the samples without an `attempt.json`, rewrites none, and
    refuses if any pinned input has changed.
+
+   **With build feedback** (§16, item 25), name the campaign `e1fb-rung0-<model>`
+   and add `--feedback-rounds 3`: when a domain fails to compile, its javac
+   errors (or that the compiler ran out of time) go back to the model, up to
+   three times. A resume must give the same `--feedback-rounds`.
 4. **Watch it**, in a second `tmux` window (Ctrl-b c):
 
    ```
@@ -334,7 +339,9 @@ included, and the feedback settings when there are any (rounds, what each round
 sends, the templates' version and hash). **Every round is recorded with exactly
 the messages it sent**: the rounds whose domain failed to compile, each with
 the feedback it led to, then the last round, which is the one evaluated. A
-one-shot attempt is one round.
+one-shot attempt is one round. Round *n*'s files and build are in
+`attempt-NNN/round-n/` (before 2026-10-09, one-shot attempts used
+`attempt-NNN/domain/`).
 
 ### What the answer looks like
 
