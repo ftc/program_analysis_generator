@@ -49,13 +49,18 @@ object StatusView:
   val StallSeconds: Long = 60
   val SameFailureRun: Int = 3
 
+  /** Past the client's timeout, how long a running generate may go without updating its status before it looks dead. */
+  val CrashMarginSeconds: Int = 600
+
   def render(
       now: Instant,
       campaign: String,
       status: Option[Status],
       attempts: List[AttemptRecord],
       slots: Either[String, List[Slot]],
-      history: List[Reading] // oldest first
+      history: List[Reading], // oldest first
+      how: String = "", // how the run was chosen, e.g. "most recent run"; empty when named
+      othersRunning: List[String] = Nil // other runs whose status still says running
   ): List[String] =
     val requested = status.map(_.samplesRequested)
     val done = attempts.size
@@ -71,7 +76,7 @@ object StatusView:
     yield if left.isNegative then Duration.ZERO else left
 
     val progress = List(
-      s"campaign  $campaign   ${requested.fold(s"$done finished")(r => s"$done of $r finished")}" +
+      s"campaign  $campaign${if how.isEmpty then "" else s"  ($how)"}   ${requested.fold(s"$done finished")(r => s"$done of $r finished")}" +
         status.fold("   (no status.json: not started, or from before campaign status)")(s =>
           if s.running then "" else "   (run finished)"),
       current.fold(s"now       ${status.fold("—")(_.stage)}") { (s, a) =>
@@ -80,7 +85,8 @@ object StatusView:
       },
       s"timing    ${avg.fold("no attempt finished yet")(a => s"${clock(Duration.ofMillis(a))} per attempt")}" +
         eta.fold("")(e => s",  about ${clock(e)} to go")
-    )
+    ) ++ Option.when(othersRunning.nonEmpty)(
+      s"also      marked running: ${othersRunning.mkString(", ")} (another server, or a run that crashed)")
 
     val asking = current.exists(_._1.stage == "asking the model")
     val (live, liveWarnings) = slots match
@@ -128,7 +134,10 @@ object StatusView:
     }
     val failures = attempts.sortBy(_.attempt).map(outcome).filterNot(_ == "evaluated")
     val streak = attempts.sortBy(_.attempt).reverse.map(outcome).takeWhile(o => o != "evaluated")
+    val quiet = status.filter(_.running).map(s => Duration.between(Instant.parse(s.updatedAt), now))
     val warnings = liveWarnings ++ List(
+      quiet.filter(q => q.getSeconds > status.fold(0)(_.timeoutSeconds) + CrashMarginSeconds).map(q =>
+        s"no update for ${clock(q)}, longer than the client's timeout allows: the run may have crashed"),
       Option.when(streak.size >= SameFailureRun && streak.take(SameFailureRun).distinct.size == 1)(
         s"the last ${streak.size} attempts all failed the same way (${streak.head}): check the prompt and reply format"),
       Option.when(attempts.exists(_.summary.unsound))(

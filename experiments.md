@@ -97,12 +97,14 @@ missing — but the attempt in progress would be lost.
 
    which runs only the samples without an `attempt.json`, rewrites none, and
    refuses if any pinned input has changed.
-4. **Watch it**, in a second `tmux` window (Ctrl-b c), with the directory
-   name `generate` printed:
+4. **Watch it**, in a second `tmux` window (Ctrl-b c):
 
    ```
-   sbt "campaign/run status --campaign <that directory's name> --every 5"
+   sbt "campaign/run status --every 5"
    ```
+
+   It shows the most recent run, chosen again at each refresh, so it follows
+   the next run when one starts; `--campaign <directory name>` shows another.
 
    Progress, the live generation (tokens, rate, time before the timeout), the
    finished attempts, and warnings — above all, the same failure several times

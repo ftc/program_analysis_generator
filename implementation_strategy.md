@@ -2127,7 +2127,7 @@ last, through a temporary file and an atomic move, so its presence means the
 attempt finished. That is what lets a campaign resume (§12).
 
 **`campaign status`, a command-line dashboard.** Campaigns run for hours, so
-problems must show early. `campaign status --campaign <name> [--every 5]`
+problems must show early. `campaign status [--every 5]`
 refreshes one screen from three sources — finished `attempt.json`s, a small
 `status.json` the `generate` loop rewrites at each stage, and llama.cpp's
 `/slots` — showing: progress (samples done, the current stage, time per
@@ -2139,7 +2139,13 @@ several times running (a prompt or format problem, the cheapest to catch),
 a generation nearing its timeout or the context limit, a stall, an unsound
 attempt, a killed `pag`. Every model runs on llama.cpp (E3), so `/slots` is the
 one live source; streaming replies and GPU statistics are left out.
-*Decided — Shawn, 2026-10-07.*
+*Decided — Shawn, 2026-10-07.* **It finds the run itself** (*Decided — Shawn,
+2026-10-09*): the one whose `generate` began most recently, by `status.json`'s
+`startedAt` (a resume begins anew), running or not — `running` cannot choose,
+since a crashed `generate` leaves it true. It is chosen again at each refresh;
+`--campaign <dir>` names another. Other runs still marked running are listed,
+and a running run with no update for longer than the client's timeout plus 10
+minutes is flagged as possibly crashed.
 
 **A campaign's inputs are pinned** (crude Phase 10, `campaign generate`). A
 campaign is the unit of work with fixed inputs (§12), so its first run writes

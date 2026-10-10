@@ -128,6 +128,68 @@ class StatusSuite extends munit.FunSuite:
           .fold(e => fail(e), identity)
         val st = Status.read(dir).getOrElse(fail("no status.json"))
         assertEquals(st.campaign, dir.getFileName.toString)
+        assert(st.startedAt.flatMap(t => scala.util.Try(Instant.parse(t)).toOption).isDefined, st)
         assertEquals((st.running, st.stage, st.samplesRequested, st.attempt), (false, "finished", 2, None))
       finally Using.resource(Files.walk(results))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
     }
+
+  // Which run `campaign status` shows when none is named.
+
+  /** A results directory holding these runs' status files, deleted afterwards. */
+  def withRuns[A](runs: (String, Status)*)(body: Path => A): A =
+    val results = Files.createTempDirectory("results")
+    try
+      for (name, st) <- runs do Status.write(results.resolve(name), st)
+      body(results)
+    finally Using.resource(Files.walk(results))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
+
+  def run(began: Long, running: Boolean, startedAt: Boolean = true): Status =
+    status(None, if running then "asking the model" else "finished", began)
+      .copy(running = running, startedAt = Option.when(startedAt)(at(began).toString))
+
+  test("the run whose generate began last is shown, though an older crashed run still says running"):
+    withRuns("e1-a-crashed" -> run(0, running = true), "e1-b-done" -> run(100, running = false)) { results =>
+      val c = Status.latest(results).getOrElse(fail("none chosen"))
+      assertEquals((c.dir.getFileName.toString, c.othersRunning), ("e1-b-done", List("e1-a-crashed")))
+    }
+
+  test("an older directory resumed just now is the one shown"):
+    withRuns("e1-x-20261001T000000Z" -> run(500, running = true), "e1-x-20261005T000000Z" -> run(100, running = false)) {
+      results => assertEquals(Status.latest(results).map(_.dir.getFileName.toString), Some("e1-x-20261001T000000Z"))
+    }
+
+  test("status files from before startedAt fall back to the last moment they record"):
+    withRuns("old" -> run(300, running = false, startedAt = false), "new" -> run(200, running = false)) { results =>
+      assertEquals(Status.latest(results).map(_.dir.getFileName.toString), Some("old"))
+    }
+
+  test("an unreadable status file is skipped, and with no runs at all nothing is chosen"):
+    withRuns("good" -> run(0, running = false)) { results =>
+      Files.createDirectories(results.resolve("bad"))
+      Files.writeString(results.resolve("bad/status.json"), "{ not json")
+      assertEquals(Status.latest(results).map(_.dir.getFileName.toString), Some("good"))
+    }
+    withRuns() { results => assertEquals(Status.latest(results), None) }
+    assertEquals(Status.latest(Paths.get("/no/such/results")), None)
+
+  test("the committed E1 runs: the 27B, finished last, is shown, and none still says running"):
+    val committed = List("e1-rung0-qwen3.5-0.8B", "e1-rung0-qwen3.5-9B", "e1-rung0-qwen3.5-27B")
+    withRuns(committed.map(n => n -> Status.read(repo.resolve("results").resolve(n)).getOrElse(fail(n)))*) { results =>
+      val c = Status.latest(results).getOrElse(fail("none chosen"))
+      assertEquals((c.dir.getFileName.toString, c.othersRunning), ("e1-rung0-qwen3.5-27B", Nil))
+    }
+
+  test("the screen says how the run was chosen, and lists the others still marked running"):
+    val s = StatusView.render(at(10), "e1-b", Some(run(0, running = false)), Nil, Right(Nil), Nil,
+      "most recent run", List("e1-a")).mkString("\n")
+    assert(s.contains("campaign  e1-b  (most recent run)"), s)
+    assert(s.contains("also      marked running: e1-a"), s)
+
+  test("a running run quiet for longer than the client's timeout plus the margin may have crashed; not a moment before"):
+    val st = run(0, running = true) // updated at 0; the client's timeout is 1800 s
+    def warned(now: Long): Boolean =
+      StatusView.render(at(now), "c", Some(st), Nil, Right(Nil), Nil).exists(_.contains("the run may have crashed"))
+    val limit = 1800 + StatusView.CrashMarginSeconds
+    assertEquals((warned(limit), warned(limit + 1)), (false, true))
+    assert(!StatusView.render(at(99999), "c", Some(run(0, running = false)), Nil, Right(Nil), Nil)
+      .exists(_.contains("may have crashed")), "a finished run is never flagged")

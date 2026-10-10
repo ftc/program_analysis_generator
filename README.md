@@ -683,7 +683,7 @@ sbt "campaign/run generate --config config/<file>.json --campaign <name> --sampl
                                 # ask the generator model N times, in a new results/<name>-<UTC start>/
 sbt "campaign/run generate --config config/<file>.json --resume results/<name>-<start>"
                                 # continue an interrupted run under its pinned inputs
-sbt "campaign/run status --campaign <name>-<start> --every 5"
+sbt "campaign/run status --every 5"   # watch the most recent run; --campaign <name>-<start> picks another
                                 # watch a running campaign: progress, live generation, finished attempts, warnings
 sbt "campaign/run report"       # the report's tables and prompt, from results/e1-rung0-* and report/inspection.json
 (cd report && latexmk -lualatex -outdir=build report.tex)   # the report itself: report/build/report.pdf

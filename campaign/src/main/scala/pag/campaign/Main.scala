@@ -35,9 +35,10 @@ object Main:
         ),
       cmd("status")
         .action((_, a) => a.copy(command = "status"))
-        .text("show a campaign's progress, its finished attempts, and warnings")
+        .text("show the most recent campaign run's progress, its finished attempts, and warnings")
         .children(
-          opt[String]("campaign").required().valueName("<name>").action((n, a) => a.copy(campaign = Some(n))),
+          opt[String]("campaign").valueName("<dir>").action((n, a) => a.copy(campaign = Some(n)))
+            .text("show this run, results/<dir>/, instead of the most recent one"),
           opt[Int]("every").valueName("SECONDS").action((n, a) => a.copy(every = Some(n)))
             .text("refresh every SECONDS until interrupted (Ctrl-C)")
         ),
@@ -74,7 +75,7 @@ object Main:
       case Some(a) if a.command == "status" =>
         Repo.root() match
           case Left(e)     => System.err.println(s"campaign: $e"); sys.exit(1)
-          case Right(repo) => watch(repo.resolve("results").resolve(a.campaign.get), a.campaign.get, a.every)
+          case Right(repo) => watch(repo.resolve("results"), a.campaign, a.every)
       case Some(a) =>
         val outcome = for
           repo <- Repo.root()
@@ -90,23 +91,32 @@ object Main:
           case Left(message)         => System.err.println(s"campaign: $message"); sys.exit(1)
           case Right((dir, samples)) => println(s"${samples.size} samples in $dir/")
 
-  /** Draws the status screen once, or every `every` seconds until interrupted. */
-  private def watch(dir: Path, name: String, every: Option[Int]): Unit =
-    val baseUrl = Campaign.pinned(dir).map(_.agent.baseUrl)
+  /** Draws the status screen once, or every `every` seconds until interrupted. Unless a run is named, the
+    * most recent one is chosen again at every refresh, so the screen follows the next run when it starts.
+    */
+  private def watch(results: Path, named: Option[String], every: Option[Int]): Unit =
     @scala.annotation.tailrec
-    def loop(history: List[Reading]): Unit =
+    def loop(shown: Option[Path], history: List[Reading]): Unit =
       val now = java.time.Instant.now()
-      val slots = baseUrl.toRight("model     no campaign.json yet: unknown server").flatMap(Slots.fetch)
-      val reading = slots.toOption.flatMap(_.filter(_.busy).maxByOption(_.decoded)).map(s => Reading(now, s.decoded))
-      val kept = (history ++ reading).filter(r => java.time.Duration.between(r.at, now).getSeconds <= 300)
-      val attempts = attemptRecords(dir)
-      val screen = StatusView.render(now, name, Status.read(dir), attempts, slots, kept)
+      val chosen = named match
+        case Some(n) => Some((results.resolve(n), "", Nil))
+        case None    => Status.latest(results).map(c => (c.dir, "most recent run", c.othersRunning))
+      val (screen, next, kept) = chosen match
+        case None => (List(s"no campaign has run yet in $results"), None, Nil)
+        case Some((dir, how, others)) =>
+          val earlier = if shown.contains(dir) then history else Nil // a new run: its tokens start afresh
+          val slots = Campaign.pinned(dir).map(_.agent.baseUrl)
+            .toRight("model     no campaign.json yet: unknown server").flatMap(Slots.fetch)
+          val reading = slots.toOption.flatMap(_.filter(_.busy).maxByOption(_.decoded)).map(s => Reading(now, s.decoded))
+          val kept = (earlier ++ reading).filter(r => java.time.Duration.between(r.at, now).getSeconds <= 300)
+          (StatusView.render(now, dir.getFileName.toString, Status.read(dir), attemptRecords(dir), slots, kept, how,
+            others), Some(dir), kept)
       if every.isDefined then print("\u001b[H\u001b[2J") // clear the terminal
       println(screen.mkString("\n"))
       every match
-        case Some(s) => Thread.sleep(s * 1000L); loop(kept)
+        case Some(s) => Thread.sleep(s * 1000L); loop(next, kept)
         case None    => ()
-    loop(Nil)
+    loop(None, Nil)
 
   private def attemptRecords(dir: Path): List[AttemptRecord] =
     if !Files.isDirectory(dir) then Nil
