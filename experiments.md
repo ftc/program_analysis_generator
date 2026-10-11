@@ -16,7 +16,9 @@ generation breaks, then measure what each kind of feedback buys.
 Raise the difficulty one rung at a time and record, for each rung and model,
 whether the model can produce an acceptable domain with no feedback, and if
 not, how much feedback it needs. The first run is rung 0 of the information
-ladder, one shot, on the smoke corpus: Table 1.
+ladder, one shot, on the smoke corpus: Table 1. The second is rung 0 with build
+feedback (§16, item 25), run before the one-shot table is filled for every
+size; why is in `findings.md`.
 
 ### Running E1, step by step
 
@@ -30,8 +32,16 @@ repository there. Set it up once as in `README.md`, *Setup on a new machine*,
 including steps 4 and 5 (git, tmux, LaTeX; llama.cpp and the model-download
 tools). **Run campaigns inside `tmux`** (or
 `screen`): a campaign takes hours, and an SSH disconnect would kill a plain
-shell's sbt. Finished attempts survive that — a rerun fills in only what is
-missing — but the attempt in progress would be lost.
+shell's sbt. Finished attempts survive that — `--resume` (step 3) fills in
+only what is missing — but the attempt in progress would be lost.
+
+**Before each session, update the clone and rebuild** what a campaign needs
+(the `pag` launcher and the api jar), so the server runs the committed code:
+
+```
+git pull
+bash scripts/common.sh
+```
 
 1. **Make the model and serve it.** On the server, with the model's
    `source` URL from the table below:
@@ -78,7 +88,6 @@ missing — but the attempt in progress would be lost.
    reattach with `tmux attach -t e1`):
 
    ```
-   bash scripts/common.sh
    sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --campaign e1-rung0-qwen3.5-<size> --samples 5"
    ```
 
@@ -98,10 +107,27 @@ missing — but the attempt in progress would be lost.
    which runs only the samples without an `attempt.json`, rewrites none, and
    refuses if any pinned input has changed.
 
-   **With build feedback** (§16, item 25), name the campaign `e1fb-rung0-<model>`
-   and add `--feedback-rounds 3`: when a domain fails to compile, its javac
-   errors (or that the compiler ran out of time) go back to the model, up to
-   three times. A resume must give the same `--feedback-rounds`.
+   **With build feedback** (§16, item 25), name the campaign
+   `e1fb-rung0-<model>` and add `--feedback-rounds 3`; the config is the same
+   one:
+
+   ```
+   sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --campaign e1fb-rung0-qwen3.5-<size> --samples 5 --feedback-rounds 3"
+   ```
+
+   When a domain fails to compile, its javac errors (or that the compiler ran
+   out of time) go back to the model and it answers again, up to three times;
+   the round whose domain compiles, or the last, is evaluated. Each round
+   sends the prompt, the previous reply without its reasoning, and the
+   feedback, about 10k tokens, well inside the server's 65,536. An attempt can
+   take up to four replies, so expect up to four times the one-shot time (the
+   9B's replies took 1–3 minutes, the 27B's about 5). Start with the 9B, the
+   case that motivated it, and `--samples 1`. A resume must give the same
+   `--feedback-rounds`:
+
+   ```
+   sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --resume results/<that directory> --feedback-rounds 3"
+   ```
 4. **Watch it**, in a second `tmux` window (Ctrl-b c):
 
    ```
@@ -114,16 +140,25 @@ missing — but the attempt in progress would be lost.
    Progress, the live generation (tokens, rate, time before the timeout), the
    finished attempts, and warnings — above all, the same failure several times
    running, which points at the prompt or the reply format.
-5. **Inspect** each attempt's `results/<campaign>/attempt-NNN/` — `attempt.json`
-   (prompt, reply, reasoning, build log, results) and `domain/` (the model's
-   code) — and record the judgment in `report/inspection.json`
-   (*The inspection rubric*, below).
+5. **Inspect** each attempt's `results/<run directory>/attempt-NNN/` —
+   `attempt.json` (every round's messages, replies, reasoning, build logs and
+   feedback, and the last round's results) and `round-N/domain/` (the model's
+   code in round N; runs from before 2026-10-09 have `domain/`) — and record
+   the judgment in `report/inspection.json`, keyed by run directory and
+   attempt (*The inspection rubric*, below).
 6. **Write it up.**
 
    ```
-   sbt "campaign/run report"
+   sbt "campaign/run report"                      # the one-shot campaigns, e1-rung0-*
+   sbt "campaign/run report --prefix e1fb-rung0-" # the build-feedback campaigns
    (cd report && latexmk -lualatex -outdir=build report.tex)
    ```
+
+   Each reads the latest run of each campaign and warns of the runs it
+   skips. Both write into `report/tables/`, so the second replaces the first's
+   tables; `--out <dir>` keeps them apart. The tables do not yet show how many
+   rounds an attempt used (change 4 of the feedback plan); `attempt.json` has
+   them.
 
    Then commit `results/`, `report/inspection.json` and `report/tables/` on the
    server and push. Inspecting can happen anywhere after pulling, as long as
