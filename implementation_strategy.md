@@ -2189,6 +2189,11 @@ prompt once under its hash is the change to make if it ever does.
 read from fenced blocks naming their path, after the fence or alone on the
 block's first line (`experiments.md`, The information ladder); a path that could write outside the
 attempt's `src/` and `test/` is refused, since the files come from a model.
+A test placed under `src/` — under `src/test/`, or importing `org.junit`, which
+`src/` cannot see — is refused too, not moved to `test/`: it could never compile
+there, and its errors would bury the domain's. The refusal is recorded among the
+files' problems, not fed back. Attempts before this change built such files, so
+their rounds are not directly comparable. *Decided — Shawn, 2026-10-11.*
 This is E1's first data point (`experiments.md`): rung R0–R1, one shot, one
 model; the attempt records must already carry what E1 needs (prompt version,
 sample, each feedback round's kind and outcome).

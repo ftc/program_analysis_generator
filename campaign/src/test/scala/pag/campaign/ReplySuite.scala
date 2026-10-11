@@ -42,6 +42,28 @@ class ReplySuite extends munit.FunSuite:
     val r = Reply.files(block("java src/A.java", "v1") + "\n" + block("java src/A.java", "v2"))
     assertEquals((r.files, r.problems), (Map.empty[String, String], List("given twice: src/A.java")))
 
+  val junitTest: String = "import org.junit.jupiter.api.Test;\nclass ATest { @Test void t() {} }"
+
+  test("a file under src/test/ is refused as a test under src/, whatever it imports"):
+    val r = Reply.files(block("java src/A.java", "class A {}") + "\n" + block("java src/test/pag/ATest.java", "class ATest {}"))
+    assertEquals((r.files.keySet, r.problems), (Set("src/A.java"), List("test file under src/: src/test/pag/ATest.java")))
+
+  test("a file under src/ importing JUnit is refused as a test under src/"):
+    val plain = block("java src/pag/ATest.java", junitTest)
+    val static = block("java src/pag/BTest.java", "import static org.junit.jupiter.api.Assertions.*;\nclass BTest {}")
+    val r = Reply.files(plain + "\n" + static)
+    assertEquals(r.files, Map.empty[String, String])
+    assertEquals(r.problems, List("test file under src/: src/pag/ATest.java", "test file under src/: src/pag/BTest.java"))
+
+  test("a src/ file named like a test but without JUnit is kept; a JUnit test under test/ is kept"):
+    val r = Reply.files(block("java src/pag/ATest.java", "class ATest {}") + "\n" + block("java test/pag/ATest.java", junitTest))
+    assertEquals(r.files, Map("src/pag/ATest.java" -> "class ATest {}", "test/pag/ATest.java" -> junitTest))
+    assertEquals(r.problems, Nil)
+
+  test("JUnit mentioned in a comment or a string, not imported, does not refuse a src/ file"):
+    val text = "// unlike org.junit.Assert, this checks nothing\nclass A { String s = \"import org.junit.X;\"; }"
+    assertEquals(Reply.files(block("java src/A.java", text)).files, Map("src/A.java" -> text))
+
   test("an unclosed block is a problem; files before it are kept"):
     val r = Reply.files(block("java src/A.java", "class A {}") + "\n" + fence + "java src/B.java\nclass B {")
     assertEquals(r.files.keySet, Set("src/A.java"))

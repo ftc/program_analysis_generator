@@ -12,11 +12,14 @@ final case class ReplyFiles(files: Map[String, String], ignoredBlocks: Int, prob
   * obedience to one way of labelling a file; the raw reply is always recorded,
   * so older attempts can be read again the same way. The files come from a model and are written to disk, so a path must be
   * relative, normalized, under `src/` or `test/`, and end in `.java`; anything
-  * else is reported as a problem and never written.
+  * else is reported as a problem and never written. A test placed under `src/` —
+  * under `src/test/`, or importing JUnit, which `src/` cannot see — is refused the
+  * same way: it could never compile there, and its errors would bury the domain's.
   */
 object Reply:
 
   private val SafePath = "(src|test)/[A-Za-z0-9_/.$-]+\\.java".r
+  private val ImportsJUnit = "(?m)^\\s*import\\s+(static\\s+)?org\\.junit\\.".r
 
   def files(reply: String): ReplyFiles =
     val lines = reply.linesIterator.toVector
@@ -45,12 +48,17 @@ object Reply:
 
   private def collect(found: List[(String, String)], ignored: Int, problems: List[String]): ReplyFiles =
     val (safe, unsafe) = found.partition((path, _) => isSafe(path))
-    val duplicates = safe.groupBy(_._1).collect { case (p, xs) if xs.size > 1 => p }.toList.sorted
+    val (misplaced, placed) = safe.partition(isTestUnderSrc)
+    val duplicates = placed.groupBy(_._1).collect { case (p, xs) if xs.size > 1 => p }.toList.sorted
     ReplyFiles(
-      safe.filterNot((p, _) => duplicates.contains(p)).toMap,
+      placed.filterNot((p, _) => duplicates.contains(p)).toMap,
       ignored,
-      problems ++ unsafe.map((p, _) => s"refused path: $p") ++ duplicates.map(p => s"given twice: $p")
+      problems ++ unsafe.map((p, _) => s"refused path: $p") ++ misplaced.map((p, _) => s"test file under src/: $p")
+        ++ duplicates.map(p => s"given twice: $p")
     )
+
+  private def isTestUnderSrc(path: String, text: String): Boolean =
+    path.startsWith("src/") && (path.startsWith("src/test/") || ImportsJUnit.findFirstIn(text).isDefined)
 
   private def isSafe(path: String): Boolean =
     SafePath.matches(path) && !path.split('/').exists(seg => seg == ".." || seg == "." || seg.isEmpty)
