@@ -22,9 +22,12 @@ size; why is in `findings.md`.
 
 ### Running E1, step by step
 
-Shawn runs the experiments; these are the steps, once per model size. Start with
-**one sample of a small size**, to see a real reply go through the whole
-pipeline before spending hours on the 27B.
+These are the steps for the current campaign, **rung 0 with build feedback**
+(§16, item 25), once per model size. How the earlier one-shot campaigns were
+run is recorded under *The first run*, *How the one-shot campaigns were run*.
+Start with **one sample of the 9B**, the size that motivated build feedback, to
+see a real conversation go through the whole pipeline before spending hours on
+the 27B.
 
 **Everything runs on the Linux GPU server** (*Decided — Shawn, 2026-10-08*): the
 model server, `campaign`, the builds and the report, from a clone of this
@@ -44,7 +47,7 @@ bash scripts/common.sh
 ```
 
 1. **Make the model and serve it.** On the server, with the model's
-   `source` URL from the table below:
+   `source` URL from the table in *The first run*:
 
    ```
    bash scripts/serve_model.sh https://huggingface.co/Qwen/Qwen3.5-<size>
@@ -83,37 +86,21 @@ bash scripts/common.sh
    the `source` block from its `.source.json`. An existing config keeps its
    other fields; the script says so on stderr when it replaces a filled-in
    model or source. Check that the id matches `/v1/models`. `campaign`
-   refuses a config that still has a placeholder.
+   refuses a config that still has a placeholder. The config holds only the
+   model, the server and the sampling settings, so the one-shot campaigns
+   used the same file.
 3. **Run it**, in a `tmux` window (`tmux new -s e1`; detach with Ctrl-b d,
    reattach with `tmux attach -t e1`):
 
    ```
-   sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --campaign e1-rung0-qwen3.5-<size> --samples 5"
-   ```
-
-   One campaign per model, named `e1-rung0-<model>`; `generate` uses the
-   current prompt, `generator-v2`, unless `--prompt` says otherwise. **Each run
-   gets a directory of its own**, the campaign's name and its UTC start time,
-   e.g. `results/e1-rung0-qwen3.5-9B-20261009T172600Z/`, printed when it
-   starts; it pins the run's inputs (settings, prompt, corpus, profile, sample
-   count). Rerunning starts another directory and leaves every earlier run as
-   it was; nothing is reused or deleted. **If a run is interrupted**, continue
-   it under the same inputs with
-
-   ```
-   sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --resume results/<that directory>"
-   ```
-
-   which runs only the samples without an `attempt.json`, rewrites none, and
-   refuses if any pinned input has changed.
-
-   **With build feedback** (§16, item 25), name the campaign
-   `e1fb-rung0-<model>` and add `--feedback-rounds 3`; the config is the same
-   one:
-
-   ```
    sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --campaign e1fb-rung0-qwen3.5-<size> --samples 5 --feedback-rounds 3"
    ```
+
+   One campaign per model, named `e1fb-rung0-<model>`. The name keeps it apart
+   from the one-shot campaign `e1-rung0-<model>`: the report reads only the
+   latest run of each name, so a shared name would hide the one-shot run.
+   `generate` uses the current prompt, `generator-v2`, unless `--prompt` says
+   otherwise.
 
    When a domain fails to compile, its javac errors (or that the compiler ran
    out of time) go back to the model and it answers again, up to three times;
@@ -121,13 +108,23 @@ bash scripts/common.sh
    sends the prompt, the previous reply without its reasoning, and the
    feedback, about 10k tokens, well inside the server's 65,536. An attempt can
    take up to four replies, so expect up to four times the one-shot time (the
-   9B's replies took 1–3 minutes, the 27B's about 5). Start with the 9B, the
-   case that motivated it, and `--samples 1`. A resume must give the same
-   `--feedback-rounds`:
+   9B's one-shot replies took 1–3 minutes, the 27B's about 5).
+
+   **Each run gets a directory of its own**, the campaign's name and its UTC
+   start time, e.g. `results/e1fb-rung0-qwen3.5-9B-20261011T172600Z/`, printed
+   when it starts; it pins the run's inputs (settings, prompt, corpus,
+   profile, sample count, build limits, and the feedback rounds, template and
+   history). Rerunning starts another directory and leaves every earlier run
+   as it was; nothing is reused or deleted. **If a run is interrupted**,
+   continue it under the same inputs with
 
    ```
    sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --resume results/<that directory> --feedback-rounds 3"
    ```
+
+   which runs only the samples without an `attempt.json`, rewrites none, and
+   refuses if any pinned input has changed — `--feedback-rounds` included, so
+   it must be given again.
 4. **Watch it**, in a second `tmux` window (Ctrl-b c):
 
    ```
@@ -143,32 +140,29 @@ bash scripts/common.sh
 5. **Inspect** each attempt's `results/<run directory>/attempt-NNN/` —
    `attempt.json` (every round's messages, replies, reasoning, build logs and
    feedback, and the last round's results) and `round-N/domain/` (the model's
-   code in round N; runs from before 2026-10-09 have `domain/`) — and record
-   the judgment in `report/inspection.json`, keyed by run directory and
-   attempt (*The inspection rubric*, below).
+   code in round N) — and record the judgment in `report/inspection.json`,
+   keyed by run directory and attempt (*The inspection rubric*, below).
 6. **Write it up.**
 
    ```
-   sbt "campaign/run report"                      # the one-shot campaigns, e1-rung0-*
-   sbt "campaign/run report --prefix e1fb-rung0-" # the build-feedback campaigns
+   sbt "campaign/run report --prefix e1fb-rung0-"
    (cd report && latexmk -lualatex -outdir=build report.tex)
    ```
 
-   Each reads the latest run of each campaign and warns of the runs it
-   skips. Both write into `report/tables/`, so the second replaces the first's
-   tables; `--out <dir>` keeps them apart. The tables do not yet show how many
-   rounds an attempt used (change 4 of the feedback plan); `attempt.json` has
-   them.
+   The report reads the latest run of each `e1fb-rung0-` campaign and warns of
+   the runs it skips. It writes into `report/tables/`, replacing the one-shot
+   campaigns' tables; `--out <dir>` writes elsewhere. The tables do not yet
+   show how many rounds an attempt used (change 4 of the feedback plan);
+   `attempt.json` has them.
 
    Then commit `results/`, `report/inspection.json` and `report/tables/` on the
    server and push. Inspecting can happen anywhere after pulling, as long as
    `inspection.json` is committed back.
 
-The first one-shot table runs without a container: the model's domain and tests
-execute directly on the Linux machine — a desktop PC that only Shawn uses, which
-also holds the models. *Risk accepted — Shawn, 2026-10-08* (first for his Mac,
-then again for this machine); the container (a crude Phase 9) comes right
-after.
+The model's domain and tests run without a container: they execute directly on
+the Linux machine — a desktop PC that only Shawn uses, which also holds the
+models. *Risk accepted — Shawn, 2026-10-08* (first for his Mac, then again for
+this machine); the container (a crude Phase 9) comes right after.
 
 ### The first run: rung 0, one shot, the smoke corpus
 
@@ -255,6 +249,35 @@ settings, corpus and hardware for every model, guaranteed per campaign by its
 pin. Each model's chat template and thinking behaviour are part of the model,
 noted rather than controlled. Time is reported per attempt but never compared
 across sizes as a measure of quality.
+
+**How the one-shot campaigns were run.** A record of what ran, 2026-10-08 and
+2026-10-09: the campaigns `e1-rung0-qwen3.5-0.8B`, `e1-rung0-qwen3.5-9B` and
+`e1-rung0-qwen3.5-27B` (results and conclusions in `findings.md`). The model
+was served and configured as in steps 1 and 2 of *Running E1, step by step*,
+then, after `bash scripts/common.sh`,
+
+```
+sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --campaign e1-rung0-qwen3.5-<size> --samples 5"
+sbt "campaign/run status --campaign e1-rung0-qwen3.5-<size> --every 5"
+```
+
+at harness commits `411981b` (0.8B), `cf284b1` (9B) and `42fe7e2` (27B), each
+recorded as dirty. The harness then differed from today's in ways that show in
+the records:
+
+- one reply per attempt, no feedback;
+- a build limit of 5 minutes and one compile try (2 minutes and 3 tries since
+  2026-10-09), and whether the model's tests compiled was not recorded;
+- one directory per campaign, `results/<campaign>/`, with the code in
+  `attempt-NNN/domain/`; a rerun with the same inputs filled in missing
+  samples, and one with changed inputs deleted the directory and started
+  afresh;
+- records in schema 1, which today's code reads and converts.
+
+To run a one-shot campaign with today's harness, use the commands of *Running
+E1, step by step* with the campaign named `e1-rung0-<model>` and no
+`--feedback-rounds` (on a resume too); its report is
+`sbt "campaign/run report"`, whose default prefix is `e1-rung0-`.
 
 ### The inspection rubric
 
