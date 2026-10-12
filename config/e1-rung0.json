@@ -1,0 +1,18 @@
+{
+  "prompt": "generator-v2",
+  "samples": 5,
+  "agents": {
+    "generator": {
+      "baseUrl": "http://localhost:8933/v1",
+      "temperature": 0.6,
+      "topP": 0.95,
+      "topK": 20,
+      "minP": 0.0,
+      "presencePenalty": 0.0,
+      "thinking": true,
+      "maxTokens": 32768,
+      "timeoutSeconds": 2700,
+      "retries": 3
+    }
+  }
+}

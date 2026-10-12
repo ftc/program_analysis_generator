@@ -1,12 +1,8 @@
 package pag.campaign
 
-import java.nio.file.{Files, Path}
-import io.bullet.borer.{Codec, Json}
-import io.bullet.borer.NullOptions.given
-import io.bullet.borer.derivation.MapBasedCodecs.*
-
 /** Where a model came from and which bytes it is (implementation_strategy.md
-  * §10), entered by hand once per model and copied into every attempt record
+  * §10): the model file, written once per model by `scripts/serve_model.sh`
+  * (or by hand for a model it did not make), and copied into every attempt record
   * uninterpreted — a placeholder for a fuller provenance scheme. A field left
   * None was not entered.
   */
@@ -19,7 +15,8 @@ final case class ModelSource(
 
 /** One agent: an OpenAI-compatible endpoint, the model to ask, and how. The key
   * is named by environment variable, never written here (§10); with none, no
-  * Authorization header is sent.
+  * Authorization header is sent. A campaign's comes from `Experiment.read`, which
+  * sets every field, so the defaults here serve only tests.
   */
 final case class AgentConfig(
     baseUrl: String,
@@ -36,30 +33,3 @@ final case class AgentConfig(
     retries: Int = 3, // after the first try, for connection failures, 429 and 5xx
     source: ModelSource = ModelSource()
 )
-
-final case class Agents(generator: AgentConfig)
-
-/** A campaign's configuration (§10): JSON, read once. Optional fields may be left out. */
-final case class CampaignConfig(agents: Agents)
-
-object CampaignConfig:
-  given Codec[ModelSource] = deriveCodec[ModelSource]
-  given Codec[AgentConfig] = deriveCodec[AgentConfig]
-  given Codec[Agents] = deriveCodec[Agents]
-  given Codec[CampaignConfig] = deriveCodec[CampaignConfig]
-
-  def parse(json: String): Either[String, CampaignConfig] =
-    Json.decode(json.getBytes("UTF-8")).to[CampaignConfig].valueEither.left.map(_.getMessage)
-
-  def read(file: Path): Either[String, CampaignConfig] =
-    if !Files.isRegularFile(file) then Left(s"no config file at $file")
-    else
-      val text = Files.readString(file)
-      val placeholders = Placeholder.findAllMatchIn(text).map(_.group(0)).toList
-      if placeholders.nonEmpty then
-        Left(s"$file still has placeholders to fill in: ${placeholders.mkString(", ")} " +
-          "(a campaign pins its config on the first run, so it must not start with one)")
-      else parse(text).left.map(e => s"$file: $e")
-
-  /** A string value that is still an example's `<...>` placeholder. */
-  private val Placeholder = "\"<[^\"]*>\"".r

@@ -106,6 +106,21 @@ class ExperimentSuite extends munit.FunSuite:
       assertEquals(Experiment.read(e, dir.resolve("none.json")), Left(s"no file at ${dir.resolve("none.json")}"))
     }
 
+  test("the committed experiment files hold E1's run settings, and each arm's prompt, samples and rounds"):
+    val repo = Repo.root().fold(e => fail(e), identity)
+    withFiles() { (_, _, m) =>
+      val settings = (0.6, Some(0.95), Some(20), Some(0.0), Some(0.0), Some(true), Some(32768), 2700, 3,
+        "http://localhost:8933/v1", None)
+      List("e1-rung0" -> ("generator-v2", 5, 0), "e1fb-rung0" -> ("generator-v3", 5, 3)).foreach { (arm, expected) =>
+        val x = Experiment.read(repo.resolve(s"config/$arm.json"), m).fold(e => fail(e), identity)
+        val g = x.agent
+        assertEquals((g.temperature, g.topP, g.topK, g.minP, g.presencePenalty, g.thinking, g.maxTokens,
+          g.timeoutSeconds, g.retries, g.baseUrl, g.apiKeyEnv), settings, arm)
+        assertEquals((x.prompt, x.samples, x.feedbackRounds), expected, arm)
+        assertEquals(x.campaign, s"$arm-qwen3.8-27B")
+      }
+    }
+
   // Starting a run
 
   def experimentFor(samples: Int): Experiment =
