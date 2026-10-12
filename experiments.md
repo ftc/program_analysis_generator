@@ -11,6 +11,127 @@ generation breaks, then measure what each kind of feedback buys.
 
 ---
 
+## Running E1, step by step
+
+What a person does to run a campaign, and what to check along the way. How
+each part works is in the code: `scripts/serve_model.sh`, and the `campaign`
+module (§12, §14).
+
+**Everything runs on the Linux GPU server** (*Decided — Shawn, 2026-10-08*),
+from a clone of this repository. Set it up once as in `README.md`, *Setup on a
+new machine*, steps 4 and 5 included. The model's domain and tests run there
+without a container (*Risk accepted — Shawn, 2026-10-08*; the container, a
+crude Phase 9, comes next).
+
+**At the start of each session**, so the server runs the committed code:
+
+```
+git pull
+bash scripts/common.sh
+```
+
+1. **Serve the model**, with its URL from the table in *The first run*, below:
+
+   ```
+   bash scripts/serve_model.sh https://huggingface.co/Qwen/<Model>
+   ```
+
+   The first time for a model it downloads and converts it, which takes a
+   while; after that it starts serving at once. It prints the **model file**,
+   `~/models/<Model>-GGUF/<…>.source.json`, which step 2 needs. Check:
+
+   - If it refuses because the llama.cpp checkout and `llama-server` are at
+     different commits, bring them to the same commit (the checkout is
+     `LLAMA_CPP`, default `~/software/llama.cpp`). **Upgrade llama.cpp before
+     a ladder, not partway through**: every size should run on the same server.
+   - `curl -s http://localhost:8933/slots` shows **one slot** with `n_ctx` of
+     at least 65,536.
+   - `curl -s http://localhost:8933/v1/models` reports the GGUF's path as the
+     model id: the model file's path with `.gguf` for `.source.json`.
+
+2. **Start the campaign**, inside `tmux` (`tmux new -s e1`; detach with
+   Ctrl-b d, reattach with `tmux attach -t e1`). A campaign takes hours, and an
+   SSH disconnect would kill a plain shell along with the attempt in progress.
+
+   ```
+   sbt "campaign/run generate --experiment config/<arm>.json --model <the model file>"
+   ```
+
+   | arm                         | experiment file          | campaigns and report prefix |
+   |-----------------------------|--------------------------|-----------------------------|
+   | rung 0, one shot            | `config/e1-rung0.json`   | `e1-rung0-`                 |
+   | rung 0, build feedback      | `config/e1fb-rung0.json` | `e1fb-rung0-`               |
+
+   Every setting of the run is in the experiment file; to change one, edit the
+   file or add an arm (§10). It prints the run's directory,
+   `results/<arm>-<model>-<UTC start>/`. Expect an attempt to take a few
+   minutes per reply (the 9B's replies took 1–3 minutes, the 27B's about 5),
+   and up to four replies with build feedback.
+
+   **If a run is interrupted**, continue it with the same two files:
+
+   ```
+   sbt "campaign/run generate --experiment config/<arm>.json --model <the model file> --resume results/<that directory>"
+   ```
+
+   It runs only the missing samples. If it refuses because an input has
+   changed, start a new run instead.
+
+3. **Watch it**, in a second `tmux` window (Ctrl-b c):
+
+   ```
+   sbt "campaign/run status --every 5"
+   ```
+
+   Check the warnings, above all **the same failure several times running**,
+   which points at the prompt or the reply format: stop the run (Ctrl-C in its
+   window) and look before spending hours on it.
+
+4. **Inspect** each attempt in `results/<run directory>/attempt-NNN/`:
+   `attempt.json` holds every round's messages, replies and build logs, and
+   `round-N/domain/` the code the model wrote in round N. Record the judgment in
+   `report/inspection.json` (*The inspection rubric*, below).
+
+5. **Write it up and commit.**
+
+   ```
+   sbt "campaign/run report --prefix <the arm's prefix>"
+   (cd report && latexmk -lualatex -outdir=build report.tex)
+   ```
+
+   Check its warnings: runs skipped, runs short of their samples, and
+   inspections naming no attempt it read. It replaces what is in
+   `report/tables/`. Then commit `results/`, `report/inspection.json` and
+   `report/tables/` on the server and push. Inspecting can happen anywhere
+   after pulling, as long as `inspection.json` is committed back.
+
+### The inspection rubric
+
+*Decided — Shawn, 2026-10-08.* Per attempt, in `report/inspection.json`, keyed
+by `"<run directory>/<attempt>"` (the run's directory name, e.g.
+`e1-rung0-qwen3.5-9B-20261009T172600Z`, or the campaign name for directories
+from before 2026-10-09), every field optional:
+
+- **closest existing domain** — constants, signs, intervals, intervals with
+  widening, another (named), or none coherent;
+- **soundness by eye** — looks sound, suspicious (where), or clearly unsound;
+- **quality** — whether its own tests are meaningful or trivial, and anything
+  notable;
+- **acceptable** — yes or no: the inspection bar;
+- **notes** — free text.
+
+```json
+{ "attempts": {
+    "e1-rung0-qwen3.5-27b/attempt-001": {
+      "closestDomain": "intervals", "soundnessByEye": "looks sound",
+      "quality": "tests meaningful", "acceptable": true, "notes": "..." } } }
+```
+
+The fixed fields are short lists, so they can be counted across the table. The
+report reads this file and never writes it.
+
+---
+
 ## E1 — The complexity ladder
 
 Raise the difficulty one rung at a time and record, for each rung and model,
@@ -19,153 +140,6 @@ not, how much feedback it needs. The first run is rung 0 of the information
 ladder, one shot, on the smoke corpus: Table 1. The second is rung 0 with build
 feedback (§16, item 25), run before the one-shot table is filled for every
 size; why is in `findings.md`.
-
-### Running E1, step by step
-
-These are the steps for the current campaign, **rung 0 with build feedback**
-(§16, item 25), once per model size. How the earlier one-shot campaigns were
-run is recorded under *The first run*, *How the one-shot campaigns were run*.
-Start with **one sample of the 9B**, the size that motivated build feedback, to
-see a real conversation go through the whole pipeline before spending hours on
-the 27B.
-
-**Everything runs on the Linux GPU server** (*Decided — Shawn, 2026-10-08*): the
-model server, `campaign`, the builds and the report, from a clone of this
-repository there. Set it up once as in `README.md`, *Setup on a new machine*,
-including steps 4 and 5 (git, tmux, LaTeX; llama.cpp and the model-download
-tools). **Run campaigns inside `tmux`** (or
-`screen`): a campaign takes hours, and an SSH disconnect would kill a plain
-shell's sbt. Finished attempts survive that — `--resume` (step 3) fills in
-only what is missing — but the attempt in progress would be lost.
-
-**Before each session, update the clone and rebuild** what a campaign needs
-(the `pag` launcher and the api jar), so the server runs the committed code:
-
-```
-git pull
-bash scripts/common.sh
-```
-
-1. **Make the model and serve it.** On the server, with the model's
-   `source` URL from the table in *The first run*:
-
-   ```
-   bash scripts/serve_model.sh https://huggingface.co/Qwen/<Model>
-   ```
-
-   `<Model>` is the repository's name from the table, e.g. `Qwen3.8-27B`;
-   below, `<model>` is that name with its first letter lowered,
-   `qwen3.8-27B`, which names the model's campaigns.
-
-   The script pins the repository's current **revision** (its commit on
-   Hugging Face), downloads it, converts it with llama.cpp's converter to a
-   BF16 GGUF and quantizes that to Q8_0, then deletes the download and the
-   BF16 file. The result is
-   `~/models/<model>-GGUF/<model>-Q8_0-llamacpp-<commit>.gguf`, named after
-   the llama.cpp commit that made it. Beside it, `<same>.source.json` is the
-   **model file**: its `source` block, URL, file, revision and SHA-256. The script then
-   runs
-
-   ```
-   llama-server -m <the Q8 GGUF> -c 65536 -np 1 --port 8933 -ngl all
-   ```
-
-   (`--jinja` is on by default and is needed for the thinking switch;
-   `-ngl all` makes a model that does not fit fail instead of running partly
-   on the CPU). Arguments after the URL go to `llama-server`. If the GGUF
-   already exists, the script skips straight to serving. It refuses to run
-   when the llama.cpp checkout (`LLAMA_CPP`, default `~/software/llama.cpp`)
-   is not at the commit `llama-server --version` reports, so the converter
-   and the server always come from the same llama.cpp. Upgrade llama.cpp
-   before a ladder, not partway through it: every size should run on the
-   same server.
-
-   Check that `curl -s http://localhost:8933/slots` shows **one slot** with
-   `n_ctx` of at least 65,536.
-2. **Check the two files the run reads** (§10 of the plan). The **model
-   file** is `<the Q8 GGUF>.source.json`, which the script has just printed;
-   the model id the campaign sends is the GGUF's path, so check that it
-   matches `curl -s http://localhost:8933/v1/models` (llama-server reports the
-   `-m` path when no `--alias` is given). The **experiment file**,
-   `config/e1fb-rung0.json`, holds every setting of this campaign: the
-   endpoint, the sampling settings (*The run settings*, below), the prompt
-   version, the sample count and the feedback rounds. Nothing is set by flag
-   or per model. *Decided — Shawn, 2026-10-12.*
-3. **Run it**, in a `tmux` window (`tmux new -s e1`; detach with Ctrl-b d,
-   reattach with `tmux attach -t e1`):
-
-   ```
-   sbt "campaign/run generate --experiment config/e1fb-rung0.json --model <the model file>"
-   ```
-
-   One campaign per model, named `e1fb-rung0-<model>`, from the two files'
-   names. The name keeps it apart
-   from the one-shot campaign `e1-rung0-<model>`: the report reads only the
-   latest run of each name, so a shared name would hide the one-shot run.
-   The experiment file names the prompt, `generator-v3`. The first feedback
-   campaign,
-   `e1fb-rung0-qwen3.5-27B-20261012T013725Z`, used `generator-v2`.
-
-   When a domain fails to compile, its javac errors (or that the compiler ran
-   out of time) go back to the model and it answers again, up to three times;
-   the round whose domain compiles, or the last, is evaluated. Each round
-   sends the prompt, the previous reply without its reasoning, and the
-   feedback, about 10k tokens, well inside the server's 65,536. An attempt can
-   take up to four replies, so expect up to four times the one-shot time (the
-   9B's one-shot replies took 1–3 minutes, the 27B's about 5).
-
-   **Each run gets a directory of its own**, the campaign's name and its UTC
-   start time, e.g. `results/e1fb-rung0-qwen3.5-9B-20261011T172600Z/`, printed
-   when it starts; it pins the run's inputs (settings, prompt, corpus,
-   profile, sample count, build limits, the feedback rounds, template and
-   history, and the reply rules). Rerunning starts another directory and leaves every earlier run
-   as it was; nothing is reused or deleted. **If a run is interrupted**,
-   continue it under the same inputs with
-
-   ```
-   sbt "campaign/run generate --experiment config/e1fb-rung0.json --model <the model file> --resume results/<that directory>"
-   ```
-
-   which runs only the samples without an `attempt.json`, rewrites none, and
-   refuses if any pinned input has changed, either file included.
-4. **Watch it**, in a second `tmux` window (Ctrl-b c):
-
-   ```
-   sbt "campaign/run status --every 5"
-   ```
-
-   It shows the most recent run, chosen again at each refresh, so it follows
-   the next run when one starts; `--campaign <directory name>` shows another.
-
-   Progress, the live generation (tokens, rate, time before the timeout), the
-   finished attempts, and warnings — above all, the same failure several times
-   running, which points at the prompt or the reply format.
-5. **Inspect** each attempt's `results/<run directory>/attempt-NNN/` —
-   `attempt.json` (every round's messages, replies, reasoning, build logs and
-   feedback, and the last round's results) and `round-N/domain/` (the model's
-   code in round N) — and record the judgment in `report/inspection.json`,
-   keyed by run directory and attempt (*The inspection rubric*, below).
-6. **Write it up.**
-
-   ```
-   sbt "campaign/run report --prefix e1fb-rung0-"
-   (cd report && latexmk -lualatex -outdir=build report.tex)
-   ```
-
-   The report reads the latest run of each `e1fb-rung0-` campaign and warns of
-   the runs it skips. It writes into `report/tables/`, replacing the one-shot
-   campaigns' tables; `--out <dir>` writes elsewhere. The tables do not yet
-   show how many rounds an attempt used (change 4 of the feedback plan);
-   `attempt.json` has them.
-
-   Then commit `results/`, `report/inspection.json` and `report/tables/` on the
-   server and push. Inspecting can happen anywhere after pulling, as long as
-   `inspection.json` is committed back.
-
-The model's domain and tests run without a container: they execute directly on
-the Linux machine — a desktop PC that only Shawn uses, which also holds the
-models. *Risk accepted — Shawn, 2026-10-08* (first for his Mac, then again for
-this machine); the container (a crude Phase 9) comes right after.
 
 ### The first run: rung 0, one shot, the smoke corpus
 
@@ -196,8 +170,8 @@ a generation's gain from size. It too is a Q8 GGUF Shawn makes from the official
 
 **The run settings.** Chosen by Claude at Shawn's delegation, 2026-10-07, and
 written into the experiment files `config/e1-rung0.json` and
-`config/e1fb-rung0.json` (the example config until 2026-10-12). Expected to change: every attempt records the
-settings it ran with, and a campaign pins them.
+`config/e1fb-rung0.json`, which hold the current values. Expected to change:
+every attempt records the settings it ran with, and a campaign pins them.
 
 | setting                                                  | value                   | why                                                                                                                                                                                                                                         |
 |----------------------------------------------------------|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -243,7 +217,7 @@ separately:**
 
 - **mechanical** — passes the smoke corpus: evaluated, no ✗ (not caught
   unsound), and proves at least one of the five unreachable targets;
-- **inspection** — Shawn judges it acceptable (the rubric below).
+- **inspection** — Shawn judges it acceptable (*The inspection rubric*, above).
 
 **Unsound** is its own category, never folded into "failed". Per model, the
 summary gives counts, never percentages, since five samples are few.
@@ -253,61 +227,6 @@ settings, corpus and hardware for every model, guaranteed per campaign by its
 pin. Each model's chat template and thinking behaviour are part of the model,
 noted rather than controlled. Time is reported per attempt but never compared
 across sizes as a measure of quality.
-
-**How the one-shot campaigns were run.** A record of what ran, 2026-10-08 and
-2026-10-09: the campaigns `e1-rung0-qwen3.5-0.8B`, `e1-rung0-qwen3.5-9B` and
-`e1-rung0-qwen3.5-27B` (results and conclusions in `findings.md`). The model
-was served as in step 1 of *Running E1, step by step* and configured by a
-per-model config file holding both the model and the run settings (the scheme
-before experiment files, 2026-10-12), then, after `bash scripts/common.sh`,
-
-```
-sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --campaign e1-rung0-qwen3.5-<size> --samples 5"
-sbt "campaign/run status --campaign e1-rung0-qwen3.5-<size> --every 5"
-```
-
-at harness commits `411981b` (0.8B), `cf284b1` (9B) and `42fe7e2` (27B), each
-recorded as dirty. The harness then differed from today's in ways that show in
-the records:
-
-- one reply per attempt, no feedback;
-- a build limit of 5 minutes and one compile try (2 minutes and 3 tries since
-  2026-10-09), and whether the model's tests compiled was not recorded;
-- one directory per campaign, `results/<campaign>/`, with the code in
-  `attempt-NNN/domain/`; a rerun with the same inputs filled in missing
-  samples, and one with changed inputs deleted the directory and started
-  afresh;
-- records in schema 1, which today's code reads and converts.
-
-To run a one-shot campaign with today's harness, use the commands of *Running
-E1, step by step* with the experiment file `config/e1-rung0.json`, which has
-no feedback rounds; its report is
-`sbt "campaign/run report"`, whose default prefix is `e1-rung0-`.
-
-### The inspection rubric
-
-*Decided — Shawn, 2026-10-08.* Per attempt, in `report/inspection.json`, keyed
-by `"<run directory>/<attempt>"` (the run's directory name, e.g.
-`e1-rung0-qwen3.5-9B-20261009T172600Z`, or the campaign name for directories
-from before 2026-10-09), every field optional:
-
-- **closest existing domain** — constants, signs, intervals, intervals with
-  widening, another (named), or none coherent;
-- **soundness by eye** — looks sound, suspicious (where), or clearly unsound;
-- **quality** — whether its own tests are meaningful or trivial, and anything
-  notable;
-- **acceptable** — yes or no: the inspection bar;
-- **notes** — free text.
-
-```json
-{ "attempts": {
-    "e1-rung0-qwen3.5-27b/attempt-001": {
-      "closestDomain": "intervals", "soundnessByEye": "looks sound",
-      "quality": "tests meaningful", "acceptable": true, "notes": "..." } } }
-```
-
-The fixed fields are short lists, so they can be counted across the table. The
-report reads this file and never writes it.
 
 ### The rungs
 
@@ -401,26 +320,6 @@ domain generated piece by piece — state type, then `top`/`bottom`/`isBottom`,
 then `entails`/`join`/`widen`, then `transfer` — to find *which part* fails
 first, rather than only *that* the whole thing failed.
 
-### What is recorded
-
-Every attempt writes `results/<campaign>/<attempt>/attempt.json`, committed with
-the domain sources the model wrote: the envelope (commit, dirty flag, profile),
-the settings and the model's `source`, the server's own report of its model,
-**the full messages sent** and **the full reply** (with its reasoning and token
-usage), the files read from it, every compile try's log, the tests' outcome and
-log, and every target's result. Each stage holds the next, so a record can only
-say what the pipeline can do; Table 1's row is derived from it when read, never
-stored (since 2026-10-09, schema 2; earlier records have the flat schema 1, with
-a stored summary row, and are converted when read — `AttemptRecordV1`). A
-campaign's `campaign.json` pins its inputs, the build limit and compile tries
-included, and the feedback settings when there are any (rounds, what each round
-sends, the templates' version and hash). **Every round is recorded with exactly
-the messages it sent**: the rounds whose domain failed to compile, each with
-the feedback it led to, then the last round, which is the one evaluated. A
-one-shot attempt is one round. Round *n*'s files and build are in
-`attempt-NNN/round-n/` (before 2026-10-09, one-shot attempts used
-`attempt-NNN/domain/`).
-
 ### What the answer looks like
 
 Per model: **the highest rung reached one-shot**, and a curve of **feedback
@@ -499,55 +398,26 @@ appendix), Table 1, Table 2, and observations written by hand from the
 inspection notes. No figures yet; acceptable against model size is the first,
 once the five sizes are run.
 
-- **`campaign report [--prefix e1-rung0-]`** reads every campaign whose name
-  starts with the prefix — **the latest run of each campaign and prompt**
-  (*Decided — Shawn, 2026-10-12*), warning of the runs it skips, of a run
-  holding fewer attempts than its pinned sample count, and of a run that does
-  not say which prompt it ran — smallest model first (the size is read from
-  the name). A run's prompt is the version and hash its `campaign.json` pins,
-  or, without one, its first attempt's. The tables name each run by its
-  campaign and a letter for its prompt, "e1fb-rung0-qwen3.5-27B with prompt
-  B"; letters go A, B, … in order of prompt version, within one report. It
-  writes into `report/tables/`: `table1.tex`, `table2.tex`, `settings.tex`
-  (the settings each run actually ran with, its model's revision and
-  SHA-256, from its records, and when the run read started), `corpus.tex`
-  (from the manifest), and `prompts.tex` with one `prompt-<letter>.txt` per
-  prompt (each exactly as sent, from the records, under its letter, version
-  and hash). So the setup section cannot disagree with what ran. Output is deterministic, so
-  regenerating unchanged results changes nothing in git; an inspection naming no
-  attempt read is warned of. The generated files hold only the tables; captions
-  live in `report.tex`.
-- **Building**: `cd report && latexmk -lualatex -outdir=build report.tex`
-  (output in `report/build/`, not committed). LuaLaTeX and DejaVu Sans Mono
-  because the prompt appendix quotes the contract, whose Javadoc has σ′, ⊥ and
-  ↦. Missing tables show as a note saying how to make them, so the report builds
-  before any results; each inclusion is logged (`pag-report: included …`), which
-  the build test checks.
+`campaign report` reads the latest run of each campaign and prompt
+(*Decided — Shawn, 2026-10-12*) and names each run in the tables "<campaign>
+with prompt <letter>". The tables, the settings, the corpus and the prompts
+are generated from the records, so the setup section cannot disagree with what
+ran; the captions, which say what each column and cell means, live in
+`report.tex`.
 
 ### Table 1 — one shot, rung 0, the smoke corpus
 
-One row per attempt, under a heading naming its run (campaign and prompt);
-runs grouped, smallest model first.
-
-| column                         | meaning                                                                                                                                                                                          |
-|--------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Sample                         | which of the N samples                                                                                                                                                                           |
-| Stopped at                     | where it stopped: no reply, timed out, ran out of tokens, no files in the reply, did not compile, did not load — or evaluated                                                                    |
-| Files                          | source files read from the reply                                                                                                                                                                 |
-| Built                          | compiled by the Gradle template                                                                                                                                                                  |
-| Tests                          | its own JUnit tests passing, out of those run; "did not compile" if its test files did not compile (recorded since 2026-10-09; older records show 0/0)                                           |
-| Loads                          | `pag` found exactly one domain class and constructed it                                                                                                                                          |
-| one column per target          | R refuted, A alarm, × refuted a reachable target (unsound), I did not converge (iteration limit or deadline), E domain failure (threw or returned null), H hung (killed at the wall-clock bound) |
-| Proved                         | refutations among the five unreachable targets                                                                                                                                                   |
-| Tokens                         | completion tokens, thinking included                                                                                                                                                             |
-| Time                           | the attempt's wall-clock time                                                                                                                                                                    |
-| Closest domain, By eye, Accept | Shawn's inspection                                                                                                                                                                               |
+One row per attempt, under its run; runs grouped, smallest model first. Its
+columns: where the attempt stopped, the files read, whether it built, its own
+tests, whether it loaded, one cell per target, the targets proved, tokens,
+time, and Shawn's inspection. Records from before 2026-10-09 show 0/0 tests,
+since whether the model's tests compiled was not yet recorded.
 
 ### Table 2 — per run
 
-One row per run (campaign and prompt): attempts; acceptable by each bar ("2/5" mechanical; accepted out of those
-inspected); unsound attempts; the median *proved* among the mechanically
-acceptable; and how many stopped at each stage.
+One row per run (campaign and prompt): attempts; acceptable by each bar ("2/5"
+mechanical; accepted out of those inspected); unsound attempts; the median
+*proved* among the mechanically acceptable; and how many stopped at each stage.
 
 ---
 
@@ -581,6 +451,16 @@ looped in the answer, repeating a line (`abstract boolean entails(S a, S b);`,
 refused. Two changes followed: `generator-v2` (a placeholder file name) and the
 lenient parser (The information ladder). Rerunning the campaign under
 `generator-v2` replaces it; the v1 attempts are in git history.
+
+**The one-shot campaigns** (2026-10-08 and 2026-10-09):
+`e1-rung0-qwen3.5-0.8B`, `e1-rung0-qwen3.5-9B` and `e1-rung0-qwen3.5-27B`, at
+harness commits `411981b`, `cf284b1` and `42fe7e2`, each recorded as dirty
+(results and conclusions in `findings.md`). Each ran from a per-model config
+file holding both the model and the run settings, before experiment files. The
+harness then differed from today's in ways that show in the records: one reply
+per attempt; a build limit of 5 minutes and one compile try; one directory per
+campaign, `results/<campaign>/`, with the code in `attempt-NNN/domain/`; and
+records in schema 1, which today's code reads and converts.
 
 **Installed on Shawn's Mac** (Ollama, `localhost:11434`, 2026-10-06), considered
 and dropped once every model moved to llama.cpp: `llama3.2:3b` (3.2B),
