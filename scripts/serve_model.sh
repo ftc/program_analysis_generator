@@ -22,6 +22,10 @@
 # The converter must come from the same llama.cpp commit as llama-server, so
 # the commit in the file name is the one that made and serves it. Set
 # LLAMA_CPP to the checkout (default ~/software/llama.cpp).
+#
+# The download and the conversion run in the script's own Python environment,
+# scripts/out/venv, made on first use by scripts/python_env.sh. It needs only
+# python3 with the venv module (on Ubuntu, the python3-venv package).
 set -euo pipefail
 
 [ $# -ge 1 ] || { echo "usage: $0 <hf-url> [extra llama-server args...]" >&2; exit 2; }
@@ -92,6 +96,8 @@ elif [ -f "$GGUF" ]; then
   echo "== deleting the download and the BF16 intermediate"
   rm -rf "$MODELS"/.download-"$NAME"-* "$BF16" "$PIN"
 else
+  source "$ROOT/scripts/python_env.sh" # sets VENV
+
   # Pin the revision first, so the download and the record agree.
   REVISION="$(curl -fsS "https://huggingface.co/api/models/$REPO" \
     | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')"
@@ -100,10 +106,10 @@ else
   echo "$REVISION" > "$PIN"
 
   echo "== downloading $REPO at $REVISION"
-  huggingface-cli download "$REPO" --revision "$REVISION" --local-dir "$DOWNLOAD"
+  "$VENV/bin/huggingface-cli" download "$REPO" --revision "$REVISION" --local-dir "$DOWNLOAD"
 
   echo "== converting to BF16 (llama.cpp $COMMIT)"
-  python3 "$LLAMA_CPP/convert_hf_to_gguf.py" "$DOWNLOAD" --outtype bf16 --outfile "$BF16"
+  "$VENV/bin/python" "$LLAMA_CPP/convert_hf_to_gguf.py" "$DOWNLOAD" --outtype bf16 --outfile "$BF16"
 
   echo "== quantizing to Q8_0"
   llama-quantize "$BF16" "$GGUF.part" Q8_0

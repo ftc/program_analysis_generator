@@ -635,19 +635,20 @@ network access once; later builds run from the cache.
   `llama-server` and `llama-quantize` are found. The script refuses to run
   unless the checkout is at the commit `llama-server --version` reports, so
   rebuild after every `git pull`.
-- **Python 3 with the converter's packages**, for `convert_hf_to_gguf.py`:
-
-  ```sh
-  pip install -r ~/software/llama.cpp/requirements/requirements-convert_hf_to_gguf.txt
-  ```
-
-- **`huggingface-cli`**, which downloads the model: `pip install huggingface_hub`.
+- **Python 3 with the `venv` module** (on Ubuntu: `sudo apt install
+  python3-venv`). The script makes its own environment, `scripts/out/venv`,
+  the first time it converts a model: the pinned download tool from
+  `scripts/requirements-serve.txt`, and the converter's packages from the
+  llama.cpp checkout's `requirements/requirements-convert_hf_to_gguf.txt`. It
+  reinstalls when either file changes. `bash scripts/python_env.sh` makes it
+  on its own.
 - **`curl`** and **`sha256sum`**, standard on Linux.
 
 Check:
 
 ```sh
-command -v llama-server llama-quantize huggingface-cli python3 curl sha256sum   # six paths
+command -v llama-server llama-quantize python3 curl sha256sum   # five paths
+python3 -m venv --help > /dev/null && echo venv ok
 llama-server --version    # prints the commit
 ```
 
