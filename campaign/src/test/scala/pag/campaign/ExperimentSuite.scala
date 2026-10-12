@@ -4,8 +4,6 @@ import java.nio.file.{Files, Path}
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
-import io.bullet.borer.Json
-
 /** An experiment file applied to a provenance record (implementation_strategy.md §10): every setting from the
   * experiment file, the model from the record, nothing else; unknown keys refused; the campaign's name derived from
   * both.
@@ -146,41 +144,25 @@ class ExperimentSuite extends munit.FunSuite:
   def experimentFor(samples: Int): Experiment =
     Experiment("e1fb-rung0-qwen3.8-27B", AgentConfig("http://x/v1", "m.gguf", retries = 0), "generator-v3", samples, 3)
 
-  /** A run directory under a scratch results directory, holding a pin with this sample count (none: no pin). */
-  def withRun[A](name: String, pinnedSamples: Option[Option[Int]])(body: Path => A): A =
+  /** A run directory under a scratch results directory. */
+  def withRun[A](name: String)(body: Path => A): A =
     val results = Files.createTempDirectory("results")
-    try
-      val dir = Files.createDirectories(results.resolve(name))
-      pinnedSamples.foreach { samples =>
-        import Campaign.given
-        val pin = CampaignPin(AgentRecord.of(experimentFor(5).agent), "generator-v3", "p", "c", "profile",
-          samples = samples)
-        Files.write(dir.resolve("campaign.json"), Json.encode(pin).toByteArray)
-      }
-      body(dir)
+    try body(Files.createDirectories(results.resolve(name)))
     finally Using.resource(Files.walk(results))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
 
   test("without --resume, a new run of the derived campaign with the file's sample count"):
     assertEquals(experimentFor(5).start(None), Right(Start.Fresh("e1fb-rung0-qwen3.8-27B", 5)))
 
-  test("a resume of this campaign's run, pinned with the file's sample count, keeps the pinned count"):
-    withRun("e1fb-rung0-qwen3.8-27B-20261012T013725Z", Some(Some(5))) { dir =>
-      assertEquals(experimentFor(5).start(Some(dir)), Right(Start.Resume(dir, None)))
-    }
-
-  test("a resume whose pinned sample count differs from the file's is refused"):
-    withRun("e1fb-rung0-qwen3.8-27B-20261012T013725Z", Some(Some(5))) { dir =>
-      assert(experimentFor(3).start(Some(dir)).left.exists(_.contains("pins 5 samples")))
-    }
-
-  test("a run pinned before sample counts were, named after the campaign alone, takes the file's count"):
-    withRun("e1fb-rung0-qwen3.8-27B", Some(None)) { dir =>
-      assertEquals(experimentFor(5).start(Some(dir)), Right(Start.Resume(dir, Some(5))))
+  test("a resume of this campaign's run carries the file's sample count, for Campaign to check against the pin"):
+    List("e1fb-rung0-qwen3.8-27B-20261012T013725Z", "e1fb-rung0-qwen3.8-27B").foreach { n =>
+      withRun(n) { dir =>
+        assertEquals(experimentFor(5).start(Some(dir)), Right(Start.Resume(dir, 5)), n)
+      }
     }
 
   test("a resume of another campaign's run is refused, even one whose name extends this one's"):
     List("e1fb-rung0-qwen3.5-27B-20261012T013725Z", "e1fb-rung0-qwen3.8-27B-extra-20261012T013725Z").foreach { n =>
-      withRun(n, Some(Some(5))) { dir =>
+      withRun(n) { dir =>
         assert(experimentFor(5).start(Some(dir)).left.exists(_.contains("is not a run of campaign")), n)
       }
     }

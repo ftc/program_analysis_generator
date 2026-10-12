@@ -89,7 +89,7 @@ class CampaignSuite extends munit.FunSuite:
         val dir = fresh(s, results, 3)
         Using.resource(Files.walk(dir.resolve("attempt-003")))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
         val first = Files.readAllBytes(dir.resolve("attempt-001/attempt.json"))
-        val (again, out) = generate(s, results, Start.Resume(dir, None)).fold(e => fail(e), identity)
+        val (again, out) = generate(s, results, Start.Resume(dir, 3)).fold(e => fail(e), identity)
         assertEquals(again, dir)
         assertEquals(out.map {
           case SampleOutcome.Kept(a) => s"kept $a"
@@ -114,13 +114,13 @@ class CampaignSuite extends munit.FunSuite:
   test("resuming under a different agent configuration is refused, and nothing is touched"):
     withServer(200 -> completion("no files")) { s =>
       withResults(results => resumeChanged(s, results, "the agent configuration",
-        (s, r, d) => generate(s, r, Start.Resume(d, None), temperature = 0.9)))
+        (s, r, d) => generate(s, r, Start.Resume(d, 2), temperature = 0.9)))
     }
 
   test("so is resuming under a different prompt"):
     withServer(200 -> completion("no files")) { s =>
       withResults(results => resumeChanged(s, results, "the prompt",
-        (s, r, d) => generate(s, r, Start.Resume(d, None), p = prompt.copy(sha256 = "0" * 64))))
+        (s, r, d) => generate(s, r, Start.Resume(d, 2), p = prompt.copy(sha256 = "0" * 64))))
     }
 
   test("so is resuming under a different corpus"):
@@ -131,7 +131,7 @@ class CampaignSuite extends munit.FunSuite:
           Using.resource(Files.list(repo.resolve("corpora/smoke")))(_.iterator.asScala.toList)
             .foreach(f => Files.copy(f, corpus.resolve(f.getFileName)))
           Files.writeString(corpus.resolve("Const1.java"), Files.readString(corpus.resolve("Const1.java")) + "\n// edited")
-          resumeChanged(s, results, "the corpus", (s, r, d) => generate(s, r, Start.Resume(d, None), t = tools(corpus)))
+          resumeChanged(s, results, "the corpus", (s, r, d) => generate(s, r, Start.Resume(d, 2), t = tools(corpus)))
         finally Using.resource(Files.walk(corpus))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
       }
     }
@@ -139,30 +139,30 @@ class CampaignSuite extends munit.FunSuite:
   test("resuming a directory that is not a campaign run is refused"):
     withServer(200 -> completion("no files")) { s =>
       withResults { results =>
-        val out = generate(s, results, Start.Resume(results.resolve("nothing-here"), None))
+        val out = generate(s, results, Start.Resume(results.resolve("nothing-here"), 1))
         assert(out.left.exists(_.contains("--resume takes a campaign run's directory")), out)
         assertEquals(chats(s), 0)
       }
     }
 
-  test("a run pinned before sample counts were needs a sample count to resume, and only then"):
+  test("a run pinned before sample counts were resumes to the count given, which must be positive"):
     import Campaign.given
     withServer(200 -> completion("no files")) { s =>
       withResults { results =>
         val dir = fresh(s, results, 1)
         val pin = dir.resolve("campaign.json")
         Files.write(pin, Json.encode(Campaign.pinned(dir).get.copy(samples = None)).toByteArray)
-        assert(generate(s, results, Start.Resume(dir, None)).left.exists(_.contains("resuming it needs one")))
-        val (_, out) = generate(s, results, Start.Resume(dir, Some(2))).fold(e => fail(e), identity)
+        assert(generate(s, results, Start.Resume(dir, 0)).left.exists(_.contains("must be positive")))
+        val (_, out) = generate(s, results, Start.Resume(dir, 2)).fold(e => fail(e), identity)
         assertEquals(out.collect { case SampleOutcome.Ran(r) => r.attempt }, List("attempt-002"))
       }
     }
 
-  test("a run that pins its sample count refuses another on resuming"):
+  test("a run that pins its sample count refuses another on resuming, as a changed input"):
     withServer(200 -> completion("no files")) { s =>
       withResults { results =>
         val dir = fresh(s, results, 1)
-        assert(generate(s, results, Start.Resume(dir, Some(5))).left.exists(_.contains("resuming it takes none")))
+        assert(generate(s, results, Start.Resume(dir, 5)).left.exists(_.contains("the sample count changed")))
       }
     }
 
@@ -172,7 +172,7 @@ class CampaignSuite extends munit.FunSuite:
         val dir = fresh(s, results, 1)
         Files.writeString(dir.resolve("campaign.json"), "{ not json")
         val before = snapshot(dir)
-        assert(generate(s, results, Start.Resume(dir, None)).isLeft)
+        assert(generate(s, results, Start.Resume(dir, 1)).isLeft)
         assertEquals((snapshot(dir), chats(s)), (before, 1))
       }
     }
@@ -230,7 +230,7 @@ class CampaignSuite extends munit.FunSuite:
         Using.resource(Files.walk(dir.resolve("attempt-002")))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
         Files.write(dir.resolve("campaign.json"), Json.encode(edit(Campaign.pinned(dir).get)).toByteArray)
         val before = snapshot(dir)
-        val out = generate(s, results, Start.Resume(dir, None))
+        val out = generate(s, results, Start.Resume(dir, 2))
         assert(out.left.exists(_.contains(s"$what changed")), out)
         assertEquals((snapshot(dir), chats(s)), (before, 2))
       }
@@ -280,8 +280,8 @@ class CampaignSuite extends munit.FunSuite:
         val (dir, _) = run(Start.Fresh("e1fb-test", 1), settings(3)).fold(e => fail(e), identity)
         assertEquals(Campaign.pinned(dir).flatMap(_.feedback),
           Some(FeedbackPin(3, FeedbackHistory.Latest, "feedback-build-v1", templates.sha256)))
-        assert(run(Start.Resume(dir, None), settings(2)).left.exists(_.contains("the feedback settings changed")))
-        assert(run(Start.Resume(dir, None), None).left.exists(_.contains("the feedback settings changed")))
-        assert(run(Start.Resume(dir, None), settings(3)).isRight, "the same settings resume")
+        assert(run(Start.Resume(dir, 1), settings(2)).left.exists(_.contains("the feedback settings changed")))
+        assert(run(Start.Resume(dir, 1), None).left.exists(_.contains("the feedback settings changed")))
+        assert(run(Start.Resume(dir, 1), settings(3)).isRight, "the same settings resume")
       }
     }

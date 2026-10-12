@@ -49,20 +49,15 @@ final case class Model(name: String, gguf: Path, source: ModelSource)
 /** A campaign to run: an experiment file applied to a provenance record (implementation_strategy.md §10). */
 final case class Experiment(campaign: String, agent: AgentConfig, prompt: String, samples: Int, feedbackRounds: Int):
 
-  /** A new run, or the run in `dir` continued. A resumed run must be of this campaign, and if it pins a sample
-    * count, it must be this file's; the rest of its pin is checked by `Campaign.generate`.
+  /** A new run, or the run in `dir` continued. A resumed run must be of this campaign; its pin, the sample count
+    * included, is checked by `Campaign.generate`.
     */
   def start(resume: Option[Path]): Either[String, Start] = resume match
     case None => Right(Start.Fresh(campaign, samples))
     case Some(dir) =>
       val name = Option(dir.toAbsolutePath.normalize.getFileName).fold("")(_.toString)
-      val pinned = Campaign.pinned(dir).flatMap(_.samples)
-      for
-        _ <- Either.cond(name == campaign || name.matches(s"\\Q$campaign\\E-\\d{8}T\\d{6}Z"), (),
-          s"$dir is not a run of campaign $campaign, which these files name")
-        _ <- pinned.fold(Right(()))(n => Either.cond(n == samples, (),
-          s"$dir pins $n samples, but the experiment file says $samples"))
-      yield Start.Resume(dir, if pinned.isDefined then None else Some(samples)) // None: the pinned count
+      Either.cond(name == campaign || name.matches(s"\\Q$campaign\\E-\\d{8}T\\d{6}Z"), Start.Resume(dir, samples),
+        s"$dir is not a run of campaign $campaign, which these files name")
 
 object Experiment:
   given Codec[GeneratorSettings] = deriveCodec[GeneratorSettings]

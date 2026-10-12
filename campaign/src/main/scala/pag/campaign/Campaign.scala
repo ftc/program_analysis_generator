@@ -43,7 +43,7 @@ enum FeedbackHistory:
 /** How `generate` starts: a new run of a campaign, or an interrupted run continued. */
 enum Start:
   case Fresh(name: String, samples: Int)
-  case Resume(dir: Path, samples: Option[Int]) // samples: only for a run pinned before the pin recorded it
+  case Resume(dir: Path, samples: Int) // must be the pinned count; the count of a run pinned before the pin held one
 
 /** What one `generate` run did for each sample. */
 enum SampleOutcome:
@@ -118,8 +118,8 @@ object Campaign:
         .withPrettyRendering(2).toByteArray)
       (dir, samples)
 
-  /** An existing run, continued under the inputs it was pinned with, to its pinned sample count. */
-  private def resume(dir: Path, samples: Option[Int], current: CampaignPin): Either[String, (Path, Int)] =
+  /** An existing run, continued under the inputs it was pinned with, the sample count included. */
+  private def resume(dir: Path, samples: Int, current: CampaignPin): Either[String, (Path, Int)] =
     val file = dir.resolve("campaign.json")
     for
       _ <- Either.cond(Files.isRegularFile(file), (), s"$file: no such file; --resume takes a campaign run's directory")
@@ -132,16 +132,13 @@ object Campaign:
         Option.when(pinned.profile != current.profile)("the profile"),
         Option.when(pinned.build != current.build)("the build settings"),
         Option.when(pinned.feedback != current.feedback)("the feedback settings"),
-        Option.when(pinned.replyRules != current.replyRules)("the reply rules")
+        Option.when(pinned.replyRules != current.replyRules)("the reply rules"),
+        Option.when(pinned.samples.exists(_ != samples))("the sample count")
       ).flatten
       _ <- Either.cond(changed.isEmpty, (), s"$dir was run with different inputs (${changed.mkString(", ")} changed); " +
         "start a new run instead of resuming this one")
-      count <- (pinned.samples, samples) match
-        case (Some(n), None)    => Right(n)
-        case (None, Some(n))    => Either.cond(n > 0, n, s"the sample count must be positive, not $n")
-        case (Some(_), Some(_)) => Left(s"$dir pins its sample count, so resuming it takes none")
-        case (None, None)       => Left(s"$dir was pinned before sample counts were, so resuming it needs one")
-    yield (dir, count)
+      _ <- Either.cond(samples > 0, (), s"the sample count must be positive, not $samples")
+    yield (dir, samples)
 
   /** A campaign's pinned inputs, if it has been run. */
   def pinned(dir: Path): Option[CampaignPin] =
