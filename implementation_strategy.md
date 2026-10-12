@@ -2194,6 +2194,10 @@ A test placed under `src/` — under `src/test/`, or importing `org.junit`, whic
 there, and its errors would bury the domain's. The refusal is recorded among the
 files' problems, not fed back. Attempts before this change built such files, so
 their rounds are not directly comparable. *Decided — Shawn, 2026-10-11.*
+These rules are versioned, `Reply.Rules` (v1 before this change, v2 after),
+and every run pins the version, so a resume under other rules is refused; a
+test fails when what the rules return changes without a new version.
+*Decided — Shawn, 2026-10-11.*
 This is E1's first data point (`experiments.md`): rung R0–R1, one shot, one
 model; the attempt records must already carry what E1 needs (prompt version,
 sample, each feedback round's kind and outcome).

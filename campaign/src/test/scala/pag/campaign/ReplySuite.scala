@@ -108,3 +108,39 @@ class ReplySuite extends munit.FunSuite:
     val reply = files.toList.sorted.map((p, text) => block(s"java $p", text)).mkString("Here you go.\n\n", "\n\n", "\n")
     val r = Reply.files(reply)
     assertEquals((r.files, r.problems), (files, Nil))
+
+  // Reply.Rules names these rules in every campaign's pin, so a change to what `files` returns must change it.
+
+  /** Replies exercising every rule above, and the model's replies in the committed one-shot runs. */
+  val samples: List[String] =
+    val repo = Repo.root().fold(e => throw IllegalStateException(e), identity)
+    val committed = List("0.8B", "9B", "27B").flatMap { size =>
+      val dir = repo.resolve(s"results/e1-rung0-qwen3.5-$size")
+      Using.resource(Files.list(dir))(_.iterator.asScala.toList).sorted.map(_.resolve("attempt.json"))
+        .filter(Files.isRegularFile(_)).flatMap(f => Attempt.read(f).fold(e => fail(e), identity).reply).map(_.content)
+    }
+    List(
+      block("java src/pag/domains/gen/A.java", "class A {}") + "\n" + block("bash", "ls") + "\n" + block("java", "int x;"),
+      block("java", "src/B.java\nclass B {}") + "\n" + block("java", "// test/BTest.java\nclass BTest {}"),
+      block("java src/A.java", "v1") + "\n" + block("java src/A.java", "v2"),
+      block("java ../escape.java", "x") + "\n" + block("java /abs/X.java", "x") + "\n" + block("java src/x.txt", "x"),
+      block("java src/test/pag/ATest.java", "class ATest {}") + "\n" + block("java src/pag/BTest.java", junitTest),
+      block("java src/pag/CTest.java", "class CTest {}") + "\n" + block("java test/pag/CTest.java", junitTest),
+      block("java src/A.java", "class A {}") + "\n" + fence + "java src/B.java\nclass B {"
+    ) ++ committed
+
+  /** Everything `files` returns for every sample, hashed. */
+  def fingerprint: String =
+    val text = samples.map { reply =>
+      val r = Reply.files(reply)
+      (r.files.toList.sorted.map((p, t) => s"$p\n$t") ++ List(r.ignoredBlocks.toString) ++ r.problems).mkString("\u0000")
+    }.mkString("\u0001")
+    Prompt.sha256(text.getBytes("UTF-8"))
+
+  test("the samples include the replies of the 15 committed one-shot attempts"):
+    assertEquals(samples.size, 7 + 15)
+
+  // If this fails: when the rules changed, bump Reply.Rules and set its new fingerprint here; when only the samples
+  // changed, the fingerprint alone changes, under the same version.
+  test("Reply.Rules is the version whose fingerprint these rules give"):
+    assertEquals((Reply.Rules, fingerprint), ("v2", "6a2e3a22c1c94f944a9105c0a183f46c77de8962e314fd64485d2510a6297c0e"))

@@ -10,13 +10,19 @@ final case class ReplyFiles(files: Map[String, String], ignoredBlocks: Int, prob
   * asks — or, failing that, whose first line is the path alone, bare or as a
   * `//` comment, a common way to write it. The aim is to measure the domain, not
   * obedience to one way of labelling a file; the raw reply is always recorded,
-  * so older attempts can be read again the same way. The files come from a model and are written to disk, so a path must be
+  * so an attempt can be read again, under these rules or later ones. The files come from a model and are written to disk, so a path must be
   * relative, normalized, under `src/` or `test/`, and end in `.java`; anything
   * else is reported as a problem and never written. A test placed under `src/` —
   * under `src/test/`, or importing JUnit, which `src/` cannot see — is refused the
   * same way: it could never compile there, and its errors would bury the domain's.
   */
 object Reply:
+
+  /** The version of these rules, pinned by every campaign: a change to what `files` returns for some reply is a
+    * new version (ReplySuite checks it against a fingerprint). v1: before 2026-10-11, when tests under `src/`
+    * were written and built.
+    */
+  val Rules: String = "v2"
 
   private val SafePath = "(src|test)/[A-Za-z0-9_/.$-]+\\.java".r
   private val ImportsJUnit = "(?m)^\\s*import\\s+(static\\s+)?org\\.junit\\.".r

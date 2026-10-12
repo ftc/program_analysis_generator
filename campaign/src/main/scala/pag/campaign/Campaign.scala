@@ -22,7 +22,8 @@ final case class CampaignPin(
     profile: String,
     samples: Option[Int] = None, // added 2026-10-09, as are the next two; None: pinned before then
     build: Option[BuildPin] = None, // None: pinned before then, when builds had 5 minutes and one try
-    feedback: Option[FeedbackPin] = None // None: one shot
+    feedback: Option[FeedbackPin] = None, // None: one shot
+    replyRules: Option[String] = None // Reply.Rules; None: pinned before 2026-10-11, under v1
 )
 
 /** How domains are built (Build): the limit on each Gradle call, and how many tries a compile gets. */
@@ -79,7 +80,7 @@ object Campaign:
     for
       corpusHash <- corpusSha256(tools.corpus)
       current = CampaignPin(AgentRecord.of(agent), prompt.version, prompt.sha256, corpusHash, Attempt.Profile,
-        build = Some(CurrentBuild), feedback = feedback.map(_.pin))
+        build = Some(CurrentBuild), feedback = feedback.map(_.pin), replyRules = Some(Reply.Rules))
       run <- start match
         case Start.Fresh(name, samples) => fresh(results, name, samples, current, now())
         case Start.Resume(dir, samples) => resume(dir, samples, current)
@@ -130,7 +131,8 @@ object Campaign:
         Option.when(pinned.corpusSha256 != current.corpusSha256)("the corpus"),
         Option.when(pinned.profile != current.profile)("the profile"),
         Option.when(pinned.build != current.build)("the build settings"),
-        Option.when(pinned.feedback != current.feedback)("the feedback settings")
+        Option.when(pinned.feedback != current.feedback)("the feedback settings"),
+        Option.when(pinned.replyRules != current.replyRules)("the reply rules")
       ).flatten
       _ <- Either.cond(changed.isEmpty, (), s"$dir was run with different inputs (${changed.mkString(", ")} changed); " +
         "start a new run instead of resuming this one")

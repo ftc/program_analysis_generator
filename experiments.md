@@ -113,8 +113,8 @@ bash scripts/common.sh
    **Each run gets a directory of its own**, the campaign's name and its UTC
    start time, e.g. `results/e1fb-rung0-qwen3.5-9B-20261011T172600Z/`, printed
    when it starts; it pins the run's inputs (settings, prompt, corpus,
-   profile, sample count, build limits, and the feedback rounds, template and
-   history). Rerunning starts another directory and leaves every earlier run
+   profile, sample count, build limits, the feedback rounds, template and
+   history, and the reply rules). Rerunning starts another directory and leaves every earlier run
    as it was; nothing is reused or deleted. **If a run is interrupted**,
    continue it under the same inputs with
 

@@ -398,10 +398,17 @@ are comparable with each other. They are the agent settings, the prompt's
 version and hash, the corpus hash, the profile, the sample count, the **build
 pin** (the limit on each Gradle call and how many tries a compile gets), and
 the **feedback pin** (the most feedback rounds, what each round sends, and the
-feedback templates' version and hash; none for a one-shot run). Written when a
-run starts. `generate --resume` continues a run only if the current inputs
+feedback templates' version and hash; none for a one-shot run), and the
+**reply rules**' version. Written when a run starts. `generate --resume` continues a run only if the current inputs
 match its pin. Types `CampaignPin`, `BuildPin`, `FeedbackPin` (plan §14, §16
 item 25).
+
+**Reply rules** — how the campaign driver reads files out of a model's reply
+(`Reply.files`): which fenced blocks are files, which paths are refused, what a
+duplicate or a test under `src/` does. They decide what gets built, so the same
+reply can stop at a different stage under other rules. Versioned as
+`Reply.Rules` and pinned: v1 before 2026-10-11, v2 since, when a test under
+`src/` began to be refused (plan §14, Phase 10).
 
 **Campaign driver** — the codebase in `campaign/` that runs the loop. Separate
 from the engine on purpose: it drives `pag` by subprocess and exit code, so a

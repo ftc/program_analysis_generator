@@ -249,6 +249,26 @@ class CampaignSuite extends munit.FunSuite:
       .filter(_.getFileName.toString.startsWith("e1-")).flatMap(Campaign.pinned)
     assertEquals(pins.map(p => (p.build, p.feedback)), List.fill(3)((None, None)))
 
+  // The reply rules (Reply.Rules) are pinned too, and a resume under others is refused.
+
+  test("a new run pins this code's reply rules, visibly in campaign.json"):
+    withServer(200 -> completion("no files")) { s =>
+      withResults { results =>
+        val dir = fresh(s, results, 1)
+        assertEquals(Campaign.pinned(dir).flatMap(_.replyRules), Some("v2"))
+        assert(Files.readString(dir.resolve("campaign.json")).contains("\"replyRules\": \"v2\""))
+      }
+    }
+
+  test("resuming a run pinned with other reply rules is refused, as it is for the runs from before them"):
+    resumeAfterPinEdit("the reply rules", _.copy(replyRules = Some("v1")))
+    resumeAfterPinEdit("the reply rules", _.copy(replyRules = None))
+
+  test("the committed E1 pins have no reply rules: they ran under v1"):
+    val pins = Using.resource(Files.list(repo.resolve("results")))(_.iterator.asScala.toList).sorted
+      .filter(_.getFileName.toString.startsWith("e1-")).flatMap(Campaign.pinned)
+    assertEquals(pins.map(_.replyRules), List.fill(3)(None))
+
   test("a run with feedback rounds pins them, and resuming with another count, or none, is refused"):
     val templates = Feedback.load(repo, "feedback-build-v1").fold(e => fail(e), identity)
     def settings(n: Int): Option[FeedbackSettings] = Some(FeedbackSettings.of(n, templates).fold(e => fail(e), identity))
