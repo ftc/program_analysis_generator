@@ -496,14 +496,20 @@ inspection notes. No figures yet; acceptable against model size is the first,
 once the five sizes are run.
 
 - **`campaign report [--prefix e1-rung0-]`** reads every campaign whose name
-  starts with the prefix — **the latest run of each**, warning of the runs it
-  skips and of a run holding fewer attempts than its pinned sample count —
-  smallest model first (the size is read from the name),
-  and writes into `report/tables/`: `table1.tex`, `table2.tex`, `settings.tex`
-  (the settings each campaign actually ran with, its model's revision and
-  SHA-256, from its records, and when the run read started), `corpus.tex` (from the manifest), and
-  `prompt.txt` (the prompt exactly as sent, from the records). So the setup
-  section cannot disagree with what ran. Output is deterministic, so
+  starts with the prefix — **the latest run of each campaign and prompt**
+  (*Decided — Shawn, 2026-10-12*), warning of the runs it skips, of a run
+  holding fewer attempts than its pinned sample count, and of a run that does
+  not say which prompt it ran — smallest model first (the size is read from
+  the name). A run's prompt is the version and hash its `campaign.json` pins,
+  or, without one, its first attempt's. The tables name each run by its
+  campaign and a letter for its prompt, "e1fb-rung0-qwen3.5-27B with prompt
+  B"; letters go A, B, … in order of prompt version, within one report. It
+  writes into `report/tables/`: `table1.tex`, `table2.tex`, `settings.tex`
+  (the settings each run actually ran with, its model's revision and
+  SHA-256, from its records, and when the run read started), `corpus.tex`
+  (from the manifest), and `prompts.tex` with one `prompt-<letter>.txt` per
+  prompt (each exactly as sent, from the records, under its letter, version
+  and hash). So the setup section cannot disagree with what ran. Output is deterministic, so
   regenerating unchanged results changes nothing in git; an inspection naming no
   attempt read is warned of. The generated files hold only the tables; captions
   live in `report.tex`.
@@ -516,11 +522,11 @@ once the five sizes are run.
 
 ### Table 1 — one shot, rung 0, the smoke corpus
 
-One row per attempt; models grouped, smallest first.
+One row per attempt, under a heading naming its run (campaign and prompt);
+runs grouped, smallest model first.
 
 | column                         | meaning                                                                                                                                                                                          |
 |--------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Model                          | the campaign's model, from its name                                                                                                                                                              |
 | Sample                         | which of the N samples                                                                                                                                                                           |
 | Stopped at                     | where it stopped: no reply, timed out, ran out of tokens, no files in the reply, did not compile, did not load — or evaluated                                                                    |
 | Files                          | source files read from the reply                                                                                                                                                                 |
@@ -533,9 +539,9 @@ One row per attempt; models grouped, smallest first.
 | Time                           | the attempt's wall-clock time                                                                                                                                                                    |
 | Closest domain, By eye, Accept | Shawn's inspection                                                                                                                                                                               |
 
-### Table 2 — per model
+### Table 2 — per run
 
-Attempts; acceptable by each bar ("2/5" mechanical; accepted out of those
+One row per run (campaign and prompt): attempts; acceptable by each bar ("2/5" mechanical; accepted out of those
 inspected); unsound attempts; the median *proved* among the mechanically
 acceptable; and how many stopped at each stage.
 

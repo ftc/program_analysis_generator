@@ -46,7 +46,7 @@ object Main:
         ),
       cmd("report")
         .action((_, a) => a.copy(command = "report"))
-        .text("write Tables 1 and 2 and the prompt into report/tables/ from the campaigns' records")
+        .text("write Tables 1 and 2 and the prompts into report/tables/ from the campaigns' records")
         .children(
           opt[String]("prefix").valueName("<prefix>").action((p, a) => a.copy(prefix = p))
             .text("the campaigns to include: names starting with this (default e1-rung0-)"),
@@ -76,7 +76,7 @@ object Main:
           case Left(e) => System.err.println(s"campaign: $e"); sys.exit(1)
           case Right((out, warnings)) =>
             warnings.foreach(w => System.err.println(s"campaign: warning: $w"))
-            println(s"wrote table1.tex, table2.tex, settings.tex, corpus.tex and prompt.txt in $out")
+            println(s"wrote table1.tex, table2.tex, settings.tex, corpus.tex, prompts.tex and prompt-<letter>.txt in $out")
       case Some(a) if a.command == "status" =>
         Repo.root() match
           case Left(e)     => System.err.println(s"campaign: $e"); sys.exit(1)

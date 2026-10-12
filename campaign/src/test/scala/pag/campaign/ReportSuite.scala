@@ -70,13 +70,21 @@ class ReportSuite extends munit.FunSuite:
       assertEquals(Report.campaigns(dir, "e1-rung0-").map(_.model), List("qwen3.5-0.8b", "qwen3.5-4b", "qwen3.5-27b"))
     }
 
-  test("Table 1: one row per attempt, with its stop, cells, proved, and the inspection where there is one"):
+  /** Table 1's rows under the run headed `descriptor` (LaTeX-escaped), up to the next run or the table's end. */
+  def rowsUnder(t: String, descriptor: String): List[String] =
+    t.linesIterator.dropWhile(!_.contains(s"\\textbf{$descriptor}")).drop(1)
+      .takeWhile(l => !l.startsWith("\\multicolumn") && l != "\\bottomrule").toList
+
+  test("Table 1: one row per attempt under its run, with its stop, cells, proved, and the inspection if any"):
     withResults(campaigns) { dir =>
       val t = Report.table1(Report.campaigns(dir, "e1-rung0-"), inspections)
-      assert(t.contains("qwen3.5-27b & 1 & evaluated & 4 & yes & 9/10 & yes & R & A & R & 2 &"), t)
-      assert(t.contains("& intervals & looks sound & yes \\\\"), t)
-      assert(t.contains("qwen3.5-27b & 2 & evaluated & 4 & yes & 9/10 & yes & R & $\\times$ & A & 1 &"), t)
-      assert(t.contains("qwen3.5-0.8b & 1 & no files in the reply & 0 & no &  & no &  &  &  &  &"), t)
+      val big = rowsUnder(t, "e1-rung0-qwen3.5-27b with prompt A")
+      assertEquals(big.size, 3, t)
+      assert(big(0).startsWith("1 & evaluated & 4 & yes & 9/10 & yes & R & A & R & 2 &"), t)
+      assert(big(0).endsWith("& intervals & looks sound & yes \\\\"), t)
+      assert(big(1).startsWith("2 & evaluated & 4 & yes & 9/10 & yes & R & $\\times$ & A & 1 &"), t)
+      assert(rowsUnder(t, "e1-rung0-qwen3.5-0.8b with prompt A").head
+        .startsWith("1 & no files in the reply & 0 & no &  & no &  &  &  &  &"), t)
       assert(t.contains("signs\\_ish"), "inspection text is escaped")
       assert(!t.contains("phase10-check"), t)
     }
@@ -85,10 +93,10 @@ class ReportSuite extends munit.FunSuite:
     withResults(campaigns) { dir =>
       val t = Report.table2(Report.campaigns(dir, "e1-rung0-"), inspections)
       // 27b: attempt 1 mechanically acceptable (proves 2); attempt 2 unsound; attempt 3 no files
-      assert(t.contains("qwen3.5-27b & 3 & 1/3 & 1/1 & 1 & 2 & 0 & 0 & 0 & 1 & 0 & 0 \\\\"), t)
+      assert(t.contains("e1-rung0-qwen3.5-27b with prompt A & 3 & 1/3 & 1/1 & 1 & 2 & 0 & 0 & 0 & 1 & 0 & 0 \\\\"), t)
       // 4b: both acceptable, proving 1 and 2: median 1.5; one inspected, rejected
-      assert(t.contains("qwen3.5-4b & 2 & 2/2 & 0/1 & 0 & 1.5 &"), t)
-      assert(t.contains("qwen3.5-0.8b & 2 & 0/2 & 0/0 & 0 &  & 0 & 0 & 0 & 2 & 0 & 0 \\\\"), t)
+      assert(t.contains("e1-rung0-qwen3.5-4b with prompt A & 2 & 2/2 & 0/1 & 0 & 1.5 &"), t)
+      assert(t.contains("e1-rung0-qwen3.5-0.8b with prompt A & 2 & 0/2 & 0/0 & 0 &  & 0 & 0 & 0 & 2 & 0 & 0 \\\\"), t)
     }
 
   test("write: tables and prompt written, deterministic, the inspection file untouched, stray keys warned of"):
@@ -101,7 +109,7 @@ class ReportSuite extends munit.FunSuite:
       val out = dir.resolve("tables")
       val warnings = Report.write(dir, "e1-rung0-", inspectionFile, corpus, out).fold(e => fail(e), identity)
       assertEquals(warnings, List("inspection.json names e1-rung0-gone/attempt-001, which is not among the campaigns read"))
-      val files = List("table1.tex", "table2.tex", "settings.tex", "corpus.tex", "prompt.txt")
+      val files = List("table1.tex", "table2.tex", "settings.tex", "corpus.tex", "prompt-A.txt", "prompts.tex")
       val first = files.map(f => Files.readString(out.resolve(f)))
       Report.write(dir, "e1-rung0-", inspectionFile, corpus, out)
       assertEquals(files.map(f => Files.readString(out.resolve(f))), first)
@@ -112,7 +120,7 @@ class ReportSuite extends munit.FunSuite:
   test("the settings table is read from the records, and the corpus table from the manifest"):
     withResults(campaigns) { dir =>
       val s = Report.settings(Report.campaigns(dir, "e1-rung0-"))
-      assert(s.contains("qwen3.5-27b & 0.2 & default & default & default & default & default & default & 1800 s"), s)
+      assert(s.contains("e1-rung0-qwen3.5-27b with prompt A & 0.2 & default & default & default & default & default & default & 1800 s"), s)
       val c = Report.corpusTable(Corpus.read(corpus).fold(e => fail(e), identity))
       assert(c.contains("Loop2 & 4 & yes & 2 & nothing: reachable"), c)
       assert(c.contains("Const2 & 0 & yes & no input"), c)
@@ -134,7 +142,7 @@ class ReportSuite extends munit.FunSuite:
       assertEquals(p.exitCode, Some(0), p.stdout.takeRight(3000))
       assert(Files.size(report.resolve("build/report.pdf")) > 0)
       val log = Files.readString(report.resolve("build/report.log"))
-      for f <- List("settings.tex", "corpus.tex", "table1.tex", "table2.tex", "prompt.txt") do
+      for f <- List("settings.tex", "corpus.tex", "table1.tex", "table2.tex", "prompts.tex") do
         assert(log.contains(s"pag-report: included $f"), s"the build did not include $f, so the report shows a placeholder")
       assert(!log.contains("Missing character"), "a character the fonts lack: " +
         log.linesIterator.filter(_.contains("Missing character")).take(5).mkString("\n"))
@@ -160,7 +168,7 @@ class ReportSuite extends munit.FunSuite:
     val noCompile = evaluated(1, List("A", "A", "A"), Tests.DidNotCompile("BrokenTest.java:3: error"))
     withResults(Map("e1-rung0-qwen3.5-27b" -> List(noCompile))) { dir =>
       val t = Report.table1(Report.campaigns(dir, "e1-rung0-"), inspections)
-      assert(t.contains("qwen3.5-27b & 1 & evaluated & 4 & yes & did not compile & yes & A & A & A & 0 &"), t)
+      assert(t.contains("1 & evaluated & 4 & yes & did not compile & yes & A & A & A & 0 &"), t)
     }
 
   // Runs: every rerun has its own directory, <campaign>-<UTC start>, and the report reads the latest of each campaign.
@@ -241,6 +249,73 @@ class ReportSuite extends munit.FunSuite:
     )) { dir =>
       val s = Report.settings(Report.campaigns(dir, "e1-rung0-"))
       assert(s.contains("Run started \\\\"), s)
-      assert(s.linesIterator.exists(l => l.startsWith("qwen3.5-4b &") && l.endsWith("& 2026-10-10 09:30Z \\\\")), s)
-      assert(s.linesIterator.exists(l => l.startsWith("qwen3.5-9b &") && l.endsWith("& 2026-10-08 21:05Z \\\\")), s)
+      assert(s.linesIterator.exists(l => l.startsWith("e1-rung0-qwen3.5-4b with prompt A &") &&
+        l.endsWith("& 2026-10-10 09:30Z \\\\")), s)
+      assert(s.linesIterator.exists(l => l.startsWith("e1-rung0-qwen3.5-9b with prompt A &") &&
+        l.endsWith("& 2026-10-08 21:05Z \\\\")), s)
     }
+
+  // A run is a campaign with a prompt: the report reads the latest run of each pair and names its prompt by a letter.
+
+  /** `r` as if run with another prompt. */
+  def withPrompt(r: AttemptRecord, version: String): AttemptRecord =
+    r.copy(prompt = r.prompt.copy(version = version, sha256 = version.reverse))
+
+  test("one campaign run with two prompts: both runs read, each named by its prompt's letter, none skipped"):
+    withResults(Map(
+      "e1fb-rung0-qwen3.5-27B-20261012T013725Z" -> List(withPrompt(failed(1), "generator-v2")),
+      "e1fb-rung0-qwen3.5-27B-20261012T171404Z" -> List(withPrompt(evaluated(1, List("R", "A", "R")), "generator-v3"))
+    )) { dir =>
+      val (cs, warnings) = Report.latestRuns(dir, "e1fb-rung0-")
+      val letters = Report.promptLetters(cs)
+      assertEquals(cs.map(c => (c.run, Report.descriptor(c, letters))), List(
+        "e1fb-rung0-qwen3.5-27B-20261012T013725Z" -> "e1fb-rung0-qwen3.5-27B with prompt A",
+        "e1fb-rung0-qwen3.5-27B-20261012T171404Z" -> "e1fb-rung0-qwen3.5-27B with prompt B"))
+      assertEquals(warnings, Nil)
+      val t = Report.table1(cs, Inspections())
+      assertEquals(rowsUnder(t, "e1fb-rung0-qwen3.5-27B with prompt B").map(_.take(13)), List("1 & evaluated"))
+    }
+
+  test("the latest run of each campaign and prompt: an older run with the same prompt is skipped and named"):
+    withResults(Map(
+      "e1-rung0-qwen3.5-9b-20261009T100000Z" -> List(withPrompt(failed(1), "generator-v2")),
+      "e1-rung0-qwen3.5-9b-20261010T100000Z" -> List(withPrompt(failed(1), "generator-v2")),
+      "e1-rung0-qwen3.5-9b-20261008T100000Z" -> List(withPrompt(failed(1), "generator-v3"))
+    )) { dir =>
+      val (cs, warnings) = Report.latestRuns(dir, "e1-rung0-")
+      assertEquals(cs.map(c => (c.run, c.prompt.version)), List(
+        "e1-rung0-qwen3.5-9b-20261010T100000Z" -> "generator-v2", "e1-rung0-qwen3.5-9b-20261008T100000Z" -> "generator-v3"))
+      assertEquals(warnings, List("e1-rung0-qwen3.5-9b: read run e1-rung0-qwen3.5-9b-20261010T100000Z, " +
+        "skipped e1-rung0-qwen3.5-9b-20261009T100000Z"))
+    }
+
+  test("a run's prompt is its pin's when it has one, and a run saying nothing of its prompt is warned of, not read"):
+    withResults(Map(
+      "e1-rung0-qwen3.5-4b-20261010T000000Z" -> List(failed(1)),
+      "e1-rung0-qwen3.5-9b-20261010T000000Z" -> Nil
+    )) { dir =>
+      pin(dir, "e1-rung0-qwen3.5-4b-20261010T000000Z", 1)
+      Files.createDirectories(dir.resolve("e1-rung0-qwen3.5-9b-20261010T000000Z"))
+      val (cs, warnings) = Report.latestRuns(dir, "e1-rung0-")
+      assertEquals(cs.map(c => (c.run, c.prompt)), List("e1-rung0-qwen3.5-4b-20261010T000000Z" -> PromptKey("v", "s")))
+      assertEquals(warnings, List("e1-rung0-qwen3.5-9b-20261010T000000Z: neither its campaign.json nor an attempt " +
+        "says which prompt it ran, so it is not read"))
+    }
+
+  test("the appendix: each prompt under its letter with its version and hash, its text as its records sent it"):
+    withResults(Map(
+      "e1-rung0-qwen3.5-4b" -> List(withPrompt(failed(1), "generator-v2")),
+      "e1-rung0-qwen3.5-9b" -> List(withPrompt(failed(1), "generator-v3"))
+    )) { dir =>
+      val out = dir.resolve("tables")
+      Report.write(dir, "e1-rung0-", dir.resolve("absent.json"), corpus, out).fold(e => fail(e), identity)
+      val tex = Files.readString(out.resolve("prompts.tex"))
+      assert(tex.contains("\\subsection*{Prompt A: \\texttt{generator-v2}}\nSHA-256 \\texttt{2v-rotareneg}."), tex)
+      assert(tex.contains("{tables/prompt-B.txt}"), tex)
+      assertEquals(Files.readString(out.resolve("prompt-B.txt")),
+        base.prompt.messages.map(m => s"=== ${m.role} ===\n${m.content}").mkString("\n\n") + "\n")
+    }
+
+  test("a run pinned but with no attempts yet: its prompt is listed, without text"):
+    assertEquals(Report.promptsTex(List((PromptKey("v", "s"), "A", false))).linesIterator.toList.last,
+      "No attempt of these runs recorded its text.")

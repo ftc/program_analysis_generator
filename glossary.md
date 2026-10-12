@@ -390,8 +390,9 @@ profile, api version, corpora and agent configs. The unit that makes results
 comparable; everything produced records which campaign produced it. Each run of
 a campaign has a directory of its own, `results/<campaign>-<UTC start>/`, and
 nothing is replaced or deleted; the report reads the latest run of each campaign
-(plan §14, *Decided — Shawn, 2026-10-09*). Directories from before then are
-named after the campaign alone.
+(plan §14, *Decided — Shawn, 2026-10-09*) and prompt, naming it "<campaign>
+with prompt <letter>" (`experiments.md`, The report; *Decided — Shawn,
+2026-10-12*). Directories from before then are named after the campaign alone.
 
 **Pin** — a run's `campaign.json`: the inputs it holds fixed, so its attempts
 are comparable with each other. They are the agent settings, the prompt's

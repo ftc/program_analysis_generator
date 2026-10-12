@@ -1,6 +1,6 @@
 % The experimental report (experiments.md, "The report").
 % Build:  cd report && latexmk -lualatex -outdir=build report.tex
-% Tables: sbt "campaign/run report" writes tables/*.tex and tables/prompt.txt from
+% Tables: sbt "campaign/run report" writes tables/*.tex and tables/prompt-*.txt from
 %         the attempt records; never edit those by hand. Shawn's inspection lives
 %         in inspection.json, which the report reads and never writes.
 \documentclass[11pt]{article}
@@ -55,7 +55,8 @@
 \begin{landscape}
 \begin{table}[p]
   \centering
-  \caption{One row per attempt. Cells: R refuted, A alarm, $\times$ refuted a
+  \caption{One row per attempt, under its run: the campaign, and the prompt
+    (Appendix~\ref{app:prompt}). Cells: R refuted, A alarm, $\times$ refuted a
     reachable target (unsound), I did not converge, E domain failure, H hung.
     The last three columns are Shawn's inspection.}
   \label{tab:attempts}
@@ -65,7 +66,7 @@
 
 \begin{table}[ht]
   \centering
-  \caption{Per model. Mechanical: evaluated, not unsound, proves at least one
+  \caption{Per run: campaign and prompt. Mechanical: evaluated, not unsound, proves at least one
     target. Inspection: accepted out of those inspected. Median proved: among
     the mechanically acceptable. The rest: where attempts stopped.}
   \label{tab:models}
@@ -76,8 +77,9 @@
 % TODO: written by hand, from the inspection notes.
 
 \appendix
-\section{The prompt}\label{app:prompt}
-Exactly as sent, from the attempt records.
-\generated{prompt.txt}{\VerbatimInput[fontsize=\scriptsize,breaklines,breakanywhere]{tables/prompt.txt}}
+\section{The prompts}\label{app:prompt}
+Each prompt the runs used, exactly as sent, from the attempt records. The
+tables name a run by its campaign and the letter of its prompt here.
+\generated{prompts.tex}{\input{tables/prompts.tex}}
 
 \end{document}
