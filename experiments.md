@@ -37,8 +37,9 @@ bash scripts/common.sh
    ```
 
    The first time for a model it downloads and converts it, which takes a
-   while; after that it starts serving at once. It prints the **model file**,
-   `~/models/<Model>-GGUF/<…>.source.json`, which step 2 needs. Check:
+   while; after that it starts serving at once. It writes and prints the
+   **provenance record**, `config/models/<Model>-Q8_0-llamacpp-<commit>.json`,
+   which step 2 needs and step 5 commits. Check:
 
    - If it refuses because the llama.cpp checkout and `llama-server` are at
      different commits, bring them to the same commit (the checkout is
@@ -47,14 +48,14 @@ bash scripts/common.sh
    - `curl -s http://localhost:8933/slots` shows **one slot** with `n_ctx` of
      at least 65,536.
    - `curl -s http://localhost:8933/v1/models` reports the GGUF's path as the
-     model id: the model file's path with `.gguf` for `.source.json`.
+     model id: the record's `path`.
 
 2. **Start the campaign**, inside `tmux` (`tmux new -s e1`; detach with
    Ctrl-b d, reattach with `tmux attach -t e1`). A campaign takes hours, and an
    SSH disconnect would kill a plain shell along with the attempt in progress.
 
    ```
-   sbt "campaign/run generate --experiment config/<arm>.json --model <the model file>"
+   sbt "campaign/run generate --experiment config/<arm>.json --model <the provenance record>"
    ```
 
    | arm                         | experiment file          | campaigns and report prefix |
@@ -71,7 +72,7 @@ bash scripts/common.sh
    **If a run is interrupted**, continue it with the same two files:
 
    ```
-   sbt "campaign/run generate --experiment config/<arm>.json --model <the model file> --resume results/<that directory>"
+   sbt "campaign/run generate --experiment config/<arm>.json --model <the provenance record> --resume results/<that directory>"
    ```
 
    It runs only the missing samples. If it refuses because an input has
@@ -101,8 +102,8 @@ bash scripts/common.sh
 
    Check its warnings: runs skipped, runs short of their samples, and
    inspections naming no attempt it read. It replaces what is in
-   `report/tables/`. Then commit `results/`, `report/inspection.json` and
-   `report/tables/` on the server and push. Inspecting can happen anywhere
+   `report/tables/`. Then commit `results/`, `config/models/`,
+   `report/inspection.json` and `report/tables/` on the server and push. Inspecting can happen anywhere
    after pulling, as long as `inspection.json` is committed back.
 
 ### The inspection rubric
@@ -369,7 +370,7 @@ model's licence, before running**:
 **Identifying a model.** A Hugging Face repository URL is a pointer, not an
 identity: one repository holds many quantization files, and repositories are
 re-uploaded under the same name (for chat-template or tokenizer fixes, say). So
-each model's model file is a `source` block (plan §10): the URL and the **file** say
+each model's provenance record holds a `source` block (plan §10): the URL and the **file** say
 where to get it, the **revision** pins the upload, and the file's **SHA-256**
 says which bytes it was — the one identifier that holds wherever the file lives
 and whatever it is called. The model is not the whole configuration: the chat

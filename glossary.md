@@ -402,11 +402,14 @@ such as E1's rung 0 one shot (`config/e1-rung0.json`) or with build feedback
 (`config/e1fb-rung0.json`). No flag or model overrides it. Its base name is the
 first part of the campaign's name (plan §10, *Decided — Shawn, 2026-10-12*).
 
-**Model file** — `<gguf>.source.json`, written by `scripts/serve_model.sh`
-beside the GGUF it made: the model's `source` block (url, file, revision,
-sha256). The model id a campaign sends is the GGUF's path; the model's name,
-the url's last segment with its first letter lowered (`qwen3.8-27B`), is the
-second part of the campaign's name (plan §10).
+**Provenance record** — `config/models/<GGUF base name>.json`, written by
+`scripts/serve_model.sh` for each GGUF it makes and committed: the model's
+`source` block (url, file, revision, sha256) and `path`, the GGUF's absolute
+path, which is the model id a campaign sends. The model's name, the url's last
+segment with its first letter lowered (`qwen3.8-27B`), is the second part of
+the campaign's name. Not the GGUF itself, which is too large to commit and is
+identified by its SHA-256 (plan §10, *Decided — Shawn, 2026-10-12*; called the
+*model file* until then).
 
 **Pin** — a run's `campaign.json`: the inputs it holds fixed, so its attempts
 are comparable with each other. They are the agent settings, the prompt's

@@ -147,7 +147,7 @@ corpora/
 results/
   <campaign>/              durable per-attempt records, so a campaign resumes
 report/                    the experimental report: LaTeX, generated tables, manual inspection notes
-config/                    experiment files (§10)
+config/                    experiment files, and provenance records in models/ (§10)
 docker/                    compose files and mount definitions
 ```
 
@@ -1464,11 +1464,18 @@ settings in flags.
   `campaign generate` has no flags that override them, and no model gets
   settings of its own — a model that needs different settings is a different
   arm, with its own file.
-- **The model file** is the `<gguf>.source.json` that `scripts/serve_model.sh`
-  writes beside the GGUF: its `source` block (below). The model id sent to
-  the server is the GGUF's path, the model file's directory plus its `file`,
-  which is what llama-server reports at `/v1/models` when no `--alias` is
-  given. The script writes nothing under `config/`.
+- **The provenance record** is the JSON `scripts/serve_model.sh` writes for
+  each GGUF it makes, committed as `config/models/<GGUF base name>.json`: the
+  `source` block (below) and `path`, the GGUF's absolute path on the server.
+  `path` is the model id sent to the server, which is what llama-server
+  reports at `/v1/models` when no `--alias` is given; its file name must be
+  the record's `file`. One record per GGUF, so rebuilding a model with a newer
+  llama.cpp adds a record and never replaces one that earlier runs used.
+
+**Every input and output of an experiment is in the repository** (*Decided —
+Shawn, 2026-10-12*): the experiment file and the provenance record under
+`config/`, the prompts, the corpus, and the runs under `results/`. The GGUF
+itself is too large to commit; its record identifies it by SHA-256.
 
 ```json
 { "prompt": "generator-v3",
@@ -1483,11 +1490,11 @@ settings in flags.
 
 ```
 campaign generate --experiment config/e1fb-rung0.json \
-                  --model ~/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.source.json
+                  --model config/models/Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.json
 ```
 
 **The campaign's name is derived, not typed:** the experiment file's base name,
-a hyphen, and the model's name — the last segment of the model file's `url`
+a hyphen, and the model's name — the last segment of the provenance record's `url`
 with its first letter lowered. The example above is campaign
 `e1fb-rung0-qwen3.8-27B`, matching the names the earlier campaigns were given
 by hand. `--resume <dir>` takes the same two files and refuses if they do not
@@ -1498,12 +1505,13 @@ refactored then.
 
 **`source` says where a model came from and which bytes it is**: the download
 URL, the file, the repository revision and the file's SHA-256, written once
-per model by `serve_model.sh` (or by hand for a model it did not make). The campaign copies it into every attempt record without
+per GGUF by `serve_model.sh` into its provenance record (or by hand for a model
+it did not make). The campaign copies it into every attempt record without
 interpreting it — a placeholder for a fuller provenance scheme being designed
 separately, which can replace it. Each attempt also records, automatically, the
 request parameters it sent and what the server reported about the model at the
 time (`/v1/models`, and llama.cpp's `/props` if present), so an unrecorded swap
-of the model file still shows as a changed size or parameter count (E3 in
+of the GGUF still shows as a changed size or parameter count (E3 in
 `experiments.md`). *Decided — Shawn, 2026-10-06.*
 
 **Config is JSON**, read with the same Borer codecs as every record (§13). A
@@ -2202,8 +2210,8 @@ no start time in their names and stay as they are. An
 unreadable `campaign.json` is still an error: nothing is deleted on a guess. The commit is not pinned:
 committing the attempts or the inspection notes moves `HEAD`, and resuming must
 still work; each attempt's envelope records its own commit. Suggested naming,
-one campaign per model: `e1-rung0-<model>` (derived from the experiment and
-model files since 2026-10-12, §10). *Decided — Shawn, 2026-10-07*; the
+one campaign per model: `e1-rung0-<model>` (derived from the experiment file
+and provenance record since 2026-10-12, §10). *Decided — Shawn, 2026-10-07*; the
 module keeps the name `campaign`, the glossary's *Campaign* being the unit of
 work and the module "the campaign driver".
 

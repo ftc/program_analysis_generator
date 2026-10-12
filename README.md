@@ -680,10 +680,10 @@ sbt "cli/run run <classes-dir> --inputs 10 --trace"   # run it on the IR interpr
 ./scripts/unreachable.sh   # the interval domain refutes a target, printing its invariant map
 ./scripts/reachable.sh     # ...cannot refute a reachable one, and a run reaches it
 bash scripts/common.sh     # build what a campaign needs, including the pag launcher
-sbt "campaign/run generate --experiment config/<arm>.json --model <gguf>.source.json"
+sbt "campaign/run generate --experiment config/<arm>.json --model config/models/<gguf>.json"
                                 # run the experiment file's samples on that model, in a new
                                 # results/<arm>-<model>-<UTC start>/
-sbt "campaign/run generate --experiment config/<arm>.json --model <gguf>.source.json --resume results/<dir>"
+sbt "campaign/run generate --experiment config/<arm>.json --model config/models/<gguf>.json --resume results/<dir>"
                                 # continue an interrupted run under its pinned inputs
 sbt "campaign/run status --every 5"   # watch the most recent run; --campaign <name>-<start> picks another
                                 # watch a running campaign: progress, live generation, finished attempts, warnings
