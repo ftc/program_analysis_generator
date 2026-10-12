@@ -36,12 +36,12 @@ class ConfigSuite extends munit.FunSuite:
 
   test("the example config is refused until its placeholders are filled in"):
     val repo = Repo.root().fold(e => fail(e), identity)
-    val r = CampaignConfig.read(repo.resolve("config/e1-rung0-qwen3.5.example.json"))
+    val r = CampaignConfig.read(repo.resolve("config/qwen.example.json"))
     assert(r.left.exists(e => e.contains("placeholders") && e.contains("<sha256sum of the GGUF>")), r)
 
   test("once filled in, the example parses to the chosen settings"):
     val repo = Repo.root().fold(e => fail(e), identity)
-    val filled = java.nio.file.Files.readString(repo.resolve("config/e1-rung0-qwen3.5.example.json"))
+    val filled = java.nio.file.Files.readString(repo.resolve("config/qwen.example.json"))
       .replaceAll("\"<[^\"]*>\"", "\"filled\"")
     val g = CampaignConfig.parse(filled).fold(e => fail(e), _.agents.generator)
     assertEquals((g.temperature, g.topP, g.topK, g.minP, g.presencePenalty, g.thinking, g.maxTokens, g.timeoutSeconds),

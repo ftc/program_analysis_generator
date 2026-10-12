@@ -15,8 +15,8 @@
 # taking the revision from the pin file written before the download, so the
 # record never names a revision the GGUF was not made from.
 #
-# For a Qwen/Qwen3.5-<size> repository it then writes the model id and the
-# source block into config/e1-rung0-qwen3.5-<size>.json (step 2), copying the
+# For a Qwen/Qwen3.<n>-<size> repository it then writes the model id and the
+# source block into config/qwen3.<n>-<size>.json (step 2), copying the
 # example config first if that file does not exist yet.
 #
 # The converter must come from the same llama.cpp commit as llama-server, so
@@ -124,14 +124,15 @@ fi
 echo "== source block ($SOURCE):"
 cat "$SOURCE"
 
-# For a Qwen3.5 size, write the model id and source block into its E1 config,
-# config/e1-rung0-qwen3.5-<size>.json: an existing config keeps its other
+# For a Qwen3 model, write the model id and source block into its config,
+# config/qwen3.<n>-<size>.json, the repository name with its first letter
+# lowered (Qwen3.8-27B gives qwen3.8-27B.json): an existing config keeps its other
 # fields; a missing one starts from the example. llama-server reports the -m
 # path as the model id when no --alias is given.
 case "$REPO" in
-  Qwen/Qwen3.5-*)
-    CONFIG="$ROOT/config/e1-rung0-qwen3.5-${NAME#Qwen3.5-}.json"
-    python3 - "$CONFIG" "$ROOT/config/e1-rung0-qwen3.5.example.json" "$GGUF" "$SOURCE" > "$CONFIG.part" <<'EOF'
+  Qwen/Qwen3.*)
+    CONFIG="$ROOT/config/q${NAME#Q}.json"
+    python3 - "$CONFIG" "$ROOT/config/qwen.example.json" "$GGUF" "$SOURCE" > "$CONFIG.part" <<'EOF'
 import json, os, sys
 config, example, model, source = sys.argv[1:]
 with open(config if os.path.exists(config) else example) as f:
@@ -149,7 +150,7 @@ EOF
     mv "$CONFIG.part" "$CONFIG"
     echo "== wrote model and source into $CONFIG"
     ;;
-  *) echo "== not a Qwen/Qwen3.5 repository; write its config by hand" ;;
+  *) echo "== not a Qwen/Qwen3 repository; write its config by hand" ;;
 esac
 
 echo "== serving on port $PORT; check: curl -s http://localhost:$PORT/slots"

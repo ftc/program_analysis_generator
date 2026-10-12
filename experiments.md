@@ -50,8 +50,12 @@ bash scripts/common.sh
    `source` URL from the table in *The first run*:
 
    ```
-   bash scripts/serve_model.sh https://huggingface.co/Qwen/Qwen3.5-<size>
+   bash scripts/serve_model.sh https://huggingface.co/Qwen/<Model>
    ```
+
+   `<Model>` is the repository's name from the table, e.g. `Qwen3.8-27B`;
+   below, `<model>` is that name with its first letter lowered,
+   `qwen3.8-27B`, which names the model's config and campaigns.
 
    The script pins the repository's current **revision** (its commit on
    Hugging Face), downloads it, converts it with llama.cpp's converter to a
@@ -79,21 +83,25 @@ bash scripts/common.sh
    Check that `curl -s http://localhost:8933/slots` shows **one slot** with
    `n_ctx` of at least 65,536.
 2. **Check its config.** Before serving, the script writes
-   `config/e1-rung0-qwen3.5-<size>.json`, copied from
-   `config/e1-rung0-qwen3.5.example.json` if it does not exist yet, with the
+   `config/<model>.json`, copied from
+   `config/qwen.example.json` if it does not exist yet, with the
    model id (the GGUF's path, which llama-server reports at
    `curl -s http://localhost:8933/v1/models` when no `--alias` is given) and
    the `source` block from its `.source.json`. An existing config keeps its
    other fields; the script says so on stderr when it replaces a filled-in
-   model or source. Check that the id matches `/v1/models`. `campaign`
+   model or source. It does this for any `Qwen/Qwen3.*` repository; for
+   another, it says so and the config is written by hand. Check that the id
+   matches `/v1/models`. `campaign`
    refuses a config that still has a placeholder. The config holds only the
    model, the server and the sampling settings, so the one-shot campaigns
-   used the same file.
+   used the same file. Configs are named after the model, not the
+   experiment or rung; the campaign name carries those (*Decided — Shawn,
+   2026-10-12*).
 3. **Run it**, in a `tmux` window (`tmux new -s e1`; detach with Ctrl-b d,
    reattach with `tmux attach -t e1`):
 
    ```
-   sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --campaign e1fb-rung0-qwen3.5-<size> --samples 5 --feedback-rounds 3"
+   sbt "campaign/run generate --config config/<model>.json --campaign e1fb-rung0-<model> --samples 5 --feedback-rounds 3"
    ```
 
    One campaign per model, named `e1fb-rung0-<model>`. The name keeps it apart
@@ -120,7 +128,7 @@ bash scripts/common.sh
    continue it under the same inputs with
 
    ```
-   sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --resume results/<that directory> --feedback-rounds 3"
+   sbt "campaign/run generate --config config/<model>.json --resume results/<that directory> --feedback-rounds 3"
    ```
 
    which runs only the samples without an `attempt.json`, rewrites none, and
@@ -258,7 +266,7 @@ was served and configured as in steps 1 and 2 of *Running E1, step by step*,
 then, after `bash scripts/common.sh`,
 
 ```
-sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --campaign e1-rung0-qwen3.5-<size> --samples 5"
+sbt "campaign/run generate --config config/qwen3.5-<size>.json --campaign e1-rung0-qwen3.5-<size> --samples 5"
 sbt "campaign/run status --campaign e1-rung0-qwen3.5-<size> --every 5"
 ```
 

@@ -13,7 +13,7 @@
       "timeoutSeconds": 2700,
       "retries": 3,
       "source": {
-        "url": "<https://huggingface.co/Qwen/Qwen3.5-<size>>",
+        "url": "<https://huggingface.co/Qwen/<model>>",
         "file": "<your Q8 GGUF's file name, with the llama.cpp commit used>",
         "revision": "<the repository's commit on Hugging Face>",
         "sha256": "<sha256sum of the GGUF>"
