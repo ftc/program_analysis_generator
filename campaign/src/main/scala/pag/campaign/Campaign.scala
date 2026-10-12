@@ -110,7 +110,7 @@ object Campaign:
       // "." and ".." would name results/ itself or its parent
       _ <- Either.cond(name.matches("[A-Za-z0-9._-]+") && !name.matches("\\.+"), (),
         s"campaign name '$name': use letters, digits, '.', '_' and '-'")
-      _ <- Either.cond(samples > 0, (), s"--samples must be positive, not $samples")
+      _ <- Either.cond(samples > 0, (), s"the sample count must be positive, not $samples")
       _ <- Either.cond(!Files.exists(dir), (), s"$dir already exists; start again in a second")
     yield
       Files.createDirectories(dir)
@@ -138,9 +138,9 @@ object Campaign:
         "start a new run instead of resuming this one")
       count <- (pinned.samples, samples) match
         case (Some(n), None)    => Right(n)
-        case (None, Some(n))    => Either.cond(n > 0, n, s"--samples must be positive, not $n")
-        case (Some(_), Some(_)) => Left(s"$dir pins its sample count; resume it without --samples")
-        case (None, None)       => Left(s"$dir was pinned before sample counts were; resume it with --samples")
+        case (None, Some(n))    => Either.cond(n > 0, n, s"the sample count must be positive, not $n")
+        case (Some(_), Some(_)) => Left(s"$dir pins its sample count, so resuming it takes none")
+        case (None, None)       => Left(s"$dir was pinned before sample counts were, so resuming it needs one")
     yield (dir, count)
 
   /** A campaign's pinned inputs, if it has been run. */

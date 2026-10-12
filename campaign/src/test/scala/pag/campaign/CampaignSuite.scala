@@ -145,24 +145,24 @@ class CampaignSuite extends munit.FunSuite:
       }
     }
 
-  test("a run pinned before sample counts were needs --samples to resume, and only then"):
+  test("a run pinned before sample counts were needs a sample count to resume, and only then"):
     import Campaign.given
     withServer(200 -> completion("no files")) { s =>
       withResults { results =>
         val dir = fresh(s, results, 1)
         val pin = dir.resolve("campaign.json")
         Files.write(pin, Json.encode(Campaign.pinned(dir).get.copy(samples = None)).toByteArray)
-        assert(generate(s, results, Start.Resume(dir, None)).left.exists(_.contains("resume it with --samples")))
+        assert(generate(s, results, Start.Resume(dir, None)).left.exists(_.contains("resuming it needs one")))
         val (_, out) = generate(s, results, Start.Resume(dir, Some(2))).fold(e => fail(e), identity)
         assertEquals(out.collect { case SampleOutcome.Ran(r) => r.attempt }, List("attempt-002"))
       }
     }
 
-  test("a run that pins its sample count refuses --samples on resuming"):
+  test("a run that pins its sample count refuses another on resuming"):
     withServer(200 -> completion("no files")) { s =>
       withResults { results =>
         val dir = fresh(s, results, 1)
-        assert(generate(s, results, Start.Resume(dir, Some(5))).left.exists(_.contains("without --samples")))
+        assert(generate(s, results, Start.Resume(dir, Some(5))).left.exists(_.contains("resuming it takes none")))
       }
     }
 
