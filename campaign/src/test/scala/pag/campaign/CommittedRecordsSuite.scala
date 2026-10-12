@@ -19,6 +19,11 @@ class CommittedRecordsSuite extends munit.FunSuite:
       all.iterator.asScala.filter(_.getFileName.toString == "attempt.json").toList.sorted
     }
 
+  /** Records stored in the flat schema 1, which has no "schema" key (the rule `Attempt.read` uses).
+    * Nothing writes schema 1 any more, so this set is fixed.
+    */
+  val schema1: List[Path] = records.filter(f => !Files.readString(f).contains("\"schema\""))
+
   /** As stored: the flat schema 1, its summary and cells included. */
   def stored(f: Path): AttemptRecordV1.Attempt =
     import AttemptRecordV1.given
@@ -26,21 +31,22 @@ class CommittedRecordsSuite extends munit.FunSuite:
 
   def read(f: Path): AttemptRecord = Attempt.read(f).fold(e => fail(e), identity)
 
-  test("there are committed records to check: the 15 E1 attempts (the pipeline check finished none)"):
-    assertEquals(records.size, 15)
+  test("there are committed records to check: the 15 schema-1 E1 attempts (the pipeline check finished none)"):
+    assertEquals(schema1.size, 15)
 
-  test("every committed attempt.json reads, as schema 1"):
+  test("every committed attempt.json reads, in the schema its file declares"):
     assertEquals(records.flatMap(f => Attempt.read(f).left.toOption), Nil)
-    assert(records.forall(f => read(f).schema == 1))
+    for f <- records do
+      assertEquals(read(f).schema, if schema1.contains(f) then 1 else AttemptRecord.Schema, f)
 
   test("converting changes nothing they say: the derived summary equals the stored one, cells included"):
-    for f <- records do
+    for f <- schema1 do
       val s = stored(f).summary
       assertEquals(read(f).summary, Summary(s.outOfTokens, s.files, s.builds, s.testsRun, s.testsFailed, s.loads,
         s.cells, s.proved, s.unsound, s.testsCompiled), f)
 
   test("the reply, the files and every target's result survive conversion unchanged"):
-    for f <- records do
+    for f <- schema1 do
       val (old, now) = (stored(f), read(f))
       assertEquals(now.reply, old.reply, f)
       assertEquals(now.files.map(_.written), old.files.map(_.written), f)
@@ -48,7 +54,7 @@ class CommittedRecordsSuite extends munit.FunSuite:
       assertEquals(now.build.map(_.last.log), old.build.map(_.compileLog), f)
 
   test("records from before 2026-10-09: one compile try, and whether the tests compiled not recorded"):
-    val built = records.map(read).flatMap(_.build)
+    val built = schema1.map(read).flatMap(_.build)
     assertEquals(built.size, 13)
     assert(built.forall(_.earlier.isEmpty))
     assert(built.collect { case BuildRecord.Compiled(_, _, t, _) => t }.forall(_.isInstanceOf[Tests.CompileNotRecorded]))
@@ -87,6 +93,6 @@ class CommittedRecordsSuite extends munit.FunSuite:
     finally Using.resource(Files.walk(dir))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
 
   test("records from before rounds convert to one round, which sent the record's prompt"):
-    for f <- records do
+    for f <- schema1 do
       val r = read(f)
       assertEquals((r.rounds, r.conversation.last.sent), (1, stored(f).prompt.messages), f)

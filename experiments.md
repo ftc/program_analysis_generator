@@ -99,8 +99,9 @@ bash scripts/common.sh
    One campaign per model, named `e1fb-rung0-<model>`. The name keeps it apart
    from the one-shot campaign `e1-rung0-<model>`: the report reads only the
    latest run of each name, so a shared name would hide the one-shot run.
-   `generate` uses the current prompt, `generator-v2`, unless `--prompt` says
-   otherwise.
+   `generate` uses the current prompt, `generator-v3`, unless `--prompt` says
+   otherwise. The first feedback campaign,
+   `e1fb-rung0-qwen3.5-27B-20261012T013725Z`, used `generator-v2`.
 
    When a domain fails to compile, its javac errors (or that the compiler ran
    out of time) go back to the model and it answers again, up to three times;
@@ -342,7 +343,7 @@ fails — one rung at a time, recorded with the attempt, so the answer includes
 
 | rung | adds                                                                                                                               | prompt         |
 |------|------------------------------------------------------------------------------------------------------------------------------------|----------------|
-| 0    | the reply format, a general task (prove `reach` calls unreachable, soundly; what to track is the model's choice), and the contract | `generator-v2` |
+| 0    | the reply format, a general task (prove `reach` calls unreachable, soundly; what to track is the model's choice), and the contract | `generator-v3` |
 | 1    | which step shapes actually occur (the profile: assignments of constants, locals and `+ − *`; the six comparisons; `randInt`)       |                |
 | 2    | the domain named ("intervals")                                                                                                     |                |
 | 3    | a worked example of another domain (`ref-sign` and its tests)                                                                      |                |
@@ -354,6 +355,21 @@ Rung 0 was first `generator-v1`, whose reply-format example named its file
 same. The reply parser also accepts the path on a block's first line (bare or
 as a `//` comment) as well as after the fence: a reply in that form is a
 format slip, not a failed task. *Decided — Shawn, 2026-10-08.*
+
+`generator-v3` (2026-10-11) adds three sections to `generator-v2`'s user
+message and keeps its system message. Under v2, 9B and 27B failed to compile
+mostly on a few Java naming rules rather than on the task. The most common was
+a nested state type named in the class header (`Domain<State>`), followed by
+the contract's nested records left unqualified (`Assign` for `Step.Assign`)
+and record fields read without their accessors. Every domain that did build
+proved nothing: none ever returned bottom. The three sections are: how the
+backward analysis runs and when it proves a target; the soundness condition,
+as a backward Hoare triple; and a skeleton class with a list of those Java
+pitfalls. None of them names a kind of domain or works an example (the
+`PromptSuite` check holds for v3 as for v1 and v2). v3 redefines rung 0; the
+v2 campaigns stay on record as the earlier rung-0 baseline, and a comparison
+across the two says which prompt each side used. *Decided — Shawn,
+2026-10-11.*
 
 Rungs 1–4 are written when rung 0's results call for them. Context added
 *before* an attempt is a different thing from the feedback given *after* one

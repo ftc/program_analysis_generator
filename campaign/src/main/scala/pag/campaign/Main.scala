@@ -10,7 +10,7 @@ import scopt.OParser
 object Main:
 
   final case class Args(command: String = "", config: Option[Path] = None, campaign: Option[String] = None,
-      resume: Option[Path] = None, samples: Option[Int] = None, feedbackRounds: Int = 0, prompt: String = "generator-v2", every: Option[Int] = None, prefix: String = "e1-rung0-",
+      resume: Option[Path] = None, samples: Option[Int] = None, feedbackRounds: Int = 0, prompt: String = "generator-v3", every: Option[Int] = None, prefix: String = "e1-rung0-",
       out: Option[Path] = None)
 
   private val parser: OParser[Unit, Args] =
@@ -33,7 +33,7 @@ object Main:
           opt[Int]("feedback-rounds").valueName("N").action((n, a) => a.copy(feedbackRounds = n))
             .text("after a domain fails to compile, send its errors back and ask again, up to N times (default 0)"),
           opt[String]("prompt").valueName("<version>").action((v, a) => a.copy(prompt = v))
-            .text("campaign/prompts/<version>/ (default generator-v2)")
+            .text("campaign/prompts/<version>/ (default generator-v3)")
         ),
       cmd("status")
         .action((_, a) => a.copy(command = "status"))

@@ -13,8 +13,8 @@ class PromptSuite extends munit.FunSuite:
   val repo: Path = Repo.root().fold(e => throw IllegalStateException(e), identity)
 
   /** Every version stays checked: v1 is superseded but its campaign's records refer to it. */
-  val versions: List[String] = List("generator-v1", "generator-v2")
-  val current: String = "generator-v2"
+  val versions: List[String] = List("generator-v1", "generator-v2", "generator-v3")
+  val current: String = "generator-v3"
 
   def generator(version: String): Prompt = Prompt.assemble(repo, version).fold(e => fail(e), identity)
 
@@ -40,10 +40,28 @@ class PromptSuite extends munit.FunSuite:
         assert(!all.contains(text), s"the prompt contains '$text'")
 
   test("v2 differs from v1 only in the example's file name, a placeholder rather than a class name"):
-    val Seq(v1, v2) = versions.map(v => Files.readString(repo.resolve(s"campaign/prompts/$v/system.md"))): @unchecked
+    val Seq(v1, v2) = List("generator-v1", "generator-v2").map(v => Files.readString(repo.resolve(s"campaign/prompts/$v/system.md"))): @unchecked
     assertEquals(v2, v1.replace("Example.java", "<YourDomain>.java"))
     assertEquals(Files.readString(repo.resolve("campaign/prompts/generator-v2/user.md")),
       Files.readString(repo.resolve("campaign/prompts/generator-v1/user.md")))
+
+  test("v3 keeps v2's system message"):
+    assertEquals(Files.readString(repo.resolve("campaign/prompts/generator-v3/system.md")),
+      Files.readString(repo.resolve("campaign/prompts/generator-v2/system.md")))
+
+  test("v3's skeleton, its placeholder filled in, compiles against the contract"):
+    val user = generator("generator-v3").messages(1).content
+    val skeleton = "```java\n(?s)(.*?)\n```".r.findAllMatchIn(user).map(_.group(1))
+      .filter(_.contains("implements Domain<<YourDomain>.State>")).toList
+    assertEquals(skeleton.size, 1, "exactly one skeleton block")
+    val source = skeleton.head.replace("<YourDomain>", "SkeletonDomain")
+    val errors = compile(Map("pag/domains/gen/SkeletonDomain.java" -> source))
+    assertEquals(errors, Nil)
+
+  test("the compile check itself rejects the mistake the skeleton guards against"):
+    val source = "package pag.domains.gen;\nimport pag.api.*;\n" +
+      "public abstract class Bad implements Domain<State> { public static final class State {} }"
+    assert(compile(Map("pag/domains/gen/Bad.java" -> source)).exists(_.contains("cannot find symbol")))
 
   test("assembling twice gives the same hash"):
     assertEquals(generator(current).sha256, generator(current).sha256)
@@ -68,6 +86,30 @@ class PromptSuite extends munit.FunSuite:
 
   test("a missing template is an error"):
     assert(Prompt.assemble(repo, "generator-v0").left.exists(_.contains("missing prompt input")))
+
+  /** javac's errors compiling `sources` (path -> text) together with `engine/api`'s sources. */
+  def compile(sources: Map[String, String]): List[String] =
+    val dir = Files.createTempDirectory("skeleton")
+    try
+      val written = sources.toList.map { (path, text) =>
+        val f = dir.resolve("src").resolve(path)
+        Files.createDirectories(f.getParent)
+        Files.writeString(f, text)
+      }
+      val api = Using.resource(Files.walk(repo.resolve("engine/api/src/main/java"))) { files =>
+        files.iterator.asScala.filter(_.toString.endsWith(".java")).toList
+      }
+      val javac = javax.tools.ToolProvider.getSystemJavaCompiler
+      val diagnostics = javax.tools.DiagnosticCollector[javax.tools.JavaFileObject]()
+      Using.resource(javac.getStandardFileManager(diagnostics, null, null)) { fm =>
+        val units = fm.getJavaFileObjectsFromPaths((written ++ api).asJava)
+        val options = List("--release", "21", "-d", dir.resolve("out").toString).asJava
+        javac.getTask(null, fm, diagnostics, options, null, units).call()
+      }
+      diagnostics.getDiagnostics.asScala.toList
+        .filter(_.getKind == javax.tools.Diagnostic.Kind.ERROR)
+        .map(d => s"${d.getSource.getName}:${d.getLineNumber}: ${d.getMessage(null)}")
+    finally Using.resource(Files.walk(dir))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
 
   /** The files the prompt reads, copied into a temporary repository and deleted after. */
   def withRepoCopy[A](body: Path => A): A =
