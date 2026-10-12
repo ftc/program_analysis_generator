@@ -12,9 +12,18 @@ class FeedbackSuite extends munit.FunSuite:
 
   val repo: Path = Repo.root().fold(e => throw IllegalStateException(e), identity)
 
-  /** Where the GPU server built the committed attempts' domains. */
-  def serverDomain(campaign: String, attempt: String): Path =
-    Paths.get(s"/home/s/Documents/source/program_analysis_generator/results/$campaign/$attempt/domain")
+  /** Where the record's final domain was built, as its compile log names it. The record fixes the
+    * path below the checkout: schema 1 built in `<attempt>/domain`, schema 2 in one folder per round
+    * (`Attempt.run`), the record's build being the last round's. The log supplies only where that
+    * checkout was, from the start of a javac error line. None if no line names that folder.
+    */
+  def builtDomain(r: AttemptRecord): Option[Path] =
+    val below = s"results/${r.campaign}/${r.attempt}/" + (if r.schema == 1 then "domain" else s"round-${r.rounds}/domain")
+    s"""(?m)^(/[^\\s:]*?)/\\Q$below\\E/""".r
+      .findFirstMatchIn(r.build.get.last.log).map(m => Paths.get(m.group(1)).resolve(below))
+
+  def builtDomainOrFail(r: AttemptRecord): Path =
+    builtDomain(r).getOrElse(fail(s"${r.campaign}/${r.attempt}: no javac error line names its domain folder"))
 
   // Any indentation: Gradle's repeat of the report is indented, and must not get through.
   val Header: scala.util.matching.Regex = """(?m)^\s*\S.*\.java:\d+: error: """.r
@@ -27,22 +36,33 @@ class FeedbackSuite extends munit.FunSuite:
       .flatMap(r => r.build.filter(b => !b.compiled).map(b => r -> """(?m)^(\d+) errors?$""".r
         .findFirstMatchIn(b.last.log).fold(-1)(_.group(1).toInt)))
 
-  test("the committed failed builds are the 12 known from findings.md"):
-    assertEquals(failedBuilds.size, 12)
+  test("the committed failed builds include the 12 schema-1 ones known from findings.md"):
+    assertEquals(failedBuilds.count(_._1.schema == 1), 12)
     assert(failedBuilds.forall(_._2 > 0), failedBuilds.map((r, n) => s"${r.campaign}/${r.attempt}: $n"))
 
   test("every committed failed build: each of javac's errors once, no absolute paths, within the cap"):
     for (r, count) <- failedBuilds do
       val name = s"${r.campaign}/${r.attempt}"
-      val text = Feedback.errors(r.build.get.last.log, serverDomain(r.campaign, r.attempt)).getOrElse(fail(s"$name: none"))
+      val text = Feedback.errors(r.build.get.last.log, builtDomainOrFail(r)).getOrElse(fail(s"$name: none"))
       assertEquals(Header.findAllMatchIn(text).size, count, name)
       assert(!text.contains("/home/"), s"$name:\n$text")
       assert(text.getBytes(UTF_8).length <= Feedback.Cap, name)
       assert(text.endsWith(s"$count error" + (if count == 1 then "" else "s")), name)
 
+  test("the build folder comes from the record and the log, wherever the checkout was"):
+    val r = failedBuilds.map(_._1).find(_.schema != 1).getOrElse(fail("no schema-2 failed build committed"))
+    val below = s"results/${r.campaign}/${r.attempt}/round-${r.rounds}/domain"
+    val log = s"/srv/elsewhere/checkout/$below/src/pag/domains/gen/D.java:3: error: x\n1 error\n"
+    val moved = r.copy(conversation = r.conversation.copy(last = r.conversation.last.copy(exchange = r.exchange match
+      case Exchange.Replied(reply, files, Some(b: BuildRecord.Failed)) =>
+        Exchange.Replied(reply, files, Some(b.copy(last = b.last.copy(log = log))))
+      case other => fail(s"not a failed build: $other"))))
+    assertEquals(builtDomain(moved), Some(Paths.get(s"/srv/elsewhere/checkout/$below")))
+    assertEquals(Feedback.errors(log, builtDomainOrFail(moved)), Some("src/pag/domains/gen/D.java:3: error: x\n1 error"))
+
   test("Qwen3.5-9B sample 2, worked by hand: its five errors in javac's order, carets kept"):
     val r = failedBuilds.map(_._1).find(r => r.campaign == "e1-rung0-qwen3.5-9B" && r.attempt == "attempt-002").get
-    val text = Feedback.errors(r.build.get.last.log, serverDomain(r.campaign, r.attempt)).get
+    val text = Feedback.errors(r.build.get.last.log, builtDomainOrFail(r)).get
     val f = "src/pag/domains/gen/IntervalDomain.java"
     val (carets, rest) = text.linesIterator.toList.partition(_.trim == "^")
     assertEquals(carets.size, 5)

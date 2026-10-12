@@ -1,0 +1,4 @@
+# The download tool for scripts/serve_model.sh, pinned. The converter's own
+# packages come from the llama.cpp checkout, so they match its commit
+# (scripts/python_env.sh).
+huggingface_hub[cli]==0.36.2
