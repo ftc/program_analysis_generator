@@ -25,7 +25,7 @@ object Main:
           opt[Path]("experiment").required().valueName("<file>").action((p, a) => a.copy(experiment = Some(p)))
             .text("the experiment file, config/<arm>.json: every setting of the run (implementation_strategy.md §10)"),
           opt[Path]("model").required().valueName("<file>").action((p, a) => a.copy(model = Some(p)))
-            .text("the model file, <gguf>.source.json, written by scripts/serve_model.sh"),
+            .text("the provenance record, config/models/<gguf>.json, written by scripts/serve_model.sh"),
           opt[Path]("resume").valueName("<dir>").action((d, a) => a.copy(resume = Some(d)))
             .text("continue an interrupted run of the same files, results/<arm>-<model>-<start>/, under its pin")
         ),

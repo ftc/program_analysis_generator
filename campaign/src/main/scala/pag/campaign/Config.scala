@@ -1,10 +1,10 @@
 package pag.campaign
 
 /** Where a model came from and which bytes it is (implementation_strategy.md
-  * §10): the model file, written once per model by `scripts/serve_model.sh`
-  * (or by hand for a model it did not make), and copied into every attempt record
-  * uninterpreted — a placeholder for a fuller provenance scheme. A field left
-  * None was not entered.
+  * §10): the source block of a provenance record, written once per GGUF by
+  * `scripts/serve_model.sh` (or by hand for a model it did not make), and copied
+  * into every attempt record uninterpreted — a placeholder for a fuller
+  * provenance scheme. A field left None was not entered.
   */
 final case class ModelSource(
     url: Option[String] = None,

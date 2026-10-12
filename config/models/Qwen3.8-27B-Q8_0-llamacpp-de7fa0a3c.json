@@ -1,0 +1,7 @@
+{
+  "url": "https://huggingface.co/Qwen/Qwen3.8-27B",
+  "file": "Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.gguf",
+  "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+  "sha256": "8ec6796ccd26eec0ff4c302e25f0680e3413c55be466915c91e9c99bacdc82a3",
+  "path": "/home/s/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.gguf"
+}

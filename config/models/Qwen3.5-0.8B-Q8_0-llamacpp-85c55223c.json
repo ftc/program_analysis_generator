@@ -1,0 +1,7 @@
+{
+  "url": "https://huggingface.co/Qwen/Qwen3.5-0.8B",
+  "file": "Qwen3.5-0.8B-Q8_0-llamacpp-85c55223c.gguf",
+  "revision": "2fc06364715b967f1860aea9cf38778875588b17",
+  "sha256": "9115c53f0a0b29f086e19066ff0d4305a6a5c66d88ee5eb3bcf74de27e5da7b9",
+  "path": "/home/s/models/Qwen3.5-0.8B-GGUF/Qwen3.5-0.8B-Q8_0-llamacpp-85c55223c.gguf"
+}

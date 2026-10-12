@@ -8,10 +8,10 @@
 # BF16 GGUF with llama.cpp's converter, quantized to Q8_0 with llama-quantize,
 # and the download and BF16 intermediate deleted. The result lands in
 #   ~/models/<name>-GGUF/<name>-Q8_0-llamacpp-<commit>.gguf
-# beside <same>.source.json, the model file a campaign is run with (its
-# `source` block: url, file, revision, sha256; implementation_strategy.md
-# §10). If the GGUF and its record already exist, it skips straight to
-# serving. If the GGUF exists but its record does not (a run stopped while
+# and its provenance record, the file a campaign is run with, in the repository
+# at config/models/<same>.json, to be committed (implementation_strategy.md
+# §10): url, file, revision, sha256, and path, the GGUF's absolute path. If the
+# GGUF and its record already exist, it skips straight to serving. If the GGUF exists but its record does not (a run stopped while
 # hashing), it hashes the GGUF and writes the record without reconverting,
 # taking the revision from the pin file written before the download, so the
 # record never names a revision the GGUF was not made from.
@@ -51,25 +51,26 @@ esac
 OUTDIR="$MODELS/$NAME-GGUF"
 FILE="$NAME-Q8_0-llamacpp-$COMMIT.gguf"
 GGUF="$OUTDIR/$FILE"
-SOURCE="${GGUF%.gguf}.source.json"
+RECORD="$ROOT/config/models/${FILE%.gguf}.json"
 PIN="$OUTDIR/.${FILE%.gguf}.revision" # the revision being converted, written before downloading
 BF16="$OUTDIR/.$NAME-BF16.gguf"
 
 # Hashes the GGUF and writes its record; written whole, then renamed, so a
 # partial record never counts as done.
-write_source() {
+write_record() {
   echo "== sha256"
   local sha256
   sha256="$(sha256sum "$GGUF" | cut -d' ' -f1)"
-  python3 - "$URL" "$FILE" "$1" "$sha256" > "$SOURCE.part" <<'EOF'
+  mkdir -p "$(dirname "$RECORD")"
+  python3 - "$URL" "$FILE" "$1" "$sha256" "$GGUF" > "$RECORD.part" <<'EOF'
 import json, sys
-url, file, revision, sha256 = sys.argv[1:]
-print(json.dumps({"url": url, "file": file, "revision": revision, "sha256": sha256}, indent=2))
+url, file, revision, sha256, path = sys.argv[1:]
+print(json.dumps({"url": url, "file": file, "revision": revision, "sha256": sha256, "path": path}, indent=2))
 EOF
-  mv "$SOURCE.part" "$SOURCE"
+  mv "$RECORD.part" "$RECORD"
 }
 
-if [ -f "$GGUF" ] && [ -f "$SOURCE" ]; then
+if [ -f "$GGUF" ] && [ -f "$RECORD" ]; then
   echo "== $GGUF exists; skipping conversion"
 elif [ -f "$GGUF" ]; then
   # Converted, but stopped before its record was written: hash it, do not reconvert.
@@ -89,7 +90,7 @@ elif [ -f "$GGUF" ]; then
     fi
   fi
   echo "== $GGUF exists without its record; recording it (revision $REVISION)"
-  write_source "$REVISION"
+  write_record "$REVISION"
   echo "== deleting the download and the BF16 intermediate"
   rm -rf "$MODELS"/.download-"$NAME"-* "$BF16" "$PIN"
 else
@@ -112,16 +113,16 @@ else
   llama-quantize "$BF16" "$GGUF.part" Q8_0
   mv "$GGUF.part" "$GGUF"
 
-  write_source "$REVISION"
+  write_record "$REVISION"
 
   echo "== deleting the download and the BF16 intermediate"
   rm -rf "$DOWNLOAD" "$BF16" "$PIN"
 fi
 
-echo "== source block:"
-cat "$SOURCE"
+echo "== provenance record:"
+cat "$RECORD"
 
-echo "== model file, for campaign generate --model: $SOURCE"
+echo "== provenance record, for campaign generate --model (commit it): $RECORD"
 
 echo "== serving on port $PORT; check: curl -s http://localhost:$PORT/slots"
 exec llama-server -m "$GGUF" -c 65536 -np 1 --port "$PORT" -ngl all "$@" --host 0.0.0.0

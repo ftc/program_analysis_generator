@@ -8,7 +8,7 @@ import io.bullet.borer.NullOptions.given
 import io.bullet.borer.derivation.MapBasedCodecs.*
 
 /** How the generator is asked, from an experiment file: `AgentConfig` without the model and its source, which
-  * come from the model file. The fields that are not options have no default, so the file must state them.
+  * come from the provenance record. The fields that are not options have no default, so the file must state them.
   */
 final case class GeneratorSettings(
     baseUrl: String,
@@ -32,7 +32,21 @@ final case class ExperimentAgents(generator: GeneratorSettings)
 /** An experiment file as written (implementation_strategy.md §10): every experimental parameter of one arm. */
 final case class ExperimentFile(prompt: String, samples: Int, feedbackRounds: Int = 0, agents: ExperimentAgents)
 
-/** A campaign to run: an experiment file applied to a model file (implementation_strategy.md §10). */
+/** A provenance record as written (implementation_strategy.md §10): the model's source block, and `path`, where its
+  * GGUF is on the server. Every field is optional here so that a missing one is reported by name.
+  */
+final case class ProvenanceRecord(
+    url: Option[String] = None,
+    file: Option[String] = None,
+    revision: Option[String] = None,
+    sha256: Option[String] = None,
+    path: Option[String] = None
+)
+
+/** A provenance record read and checked: the model's name, the GGUF's path (the model id) and its source. */
+final case class Model(name: String, gguf: Path, source: ModelSource)
+
+/** A campaign to run: an experiment file applied to a provenance record (implementation_strategy.md §10). */
 final case class Experiment(campaign: String, agent: AgentConfig, prompt: String, samples: Int, feedbackRounds: Int):
 
   /** A new run, or the run in `dir` continued. A resumed run must be of this campaign, and if it pins a sample
@@ -54,7 +68,7 @@ object Experiment:
   given Codec[GeneratorSettings] = deriveCodec[GeneratorSettings]
   given Codec[ExperimentAgents] = deriveCodec[ExperimentAgents]
   given Codec[ExperimentFile] = deriveCodec[ExperimentFile]
-  given Codec[ModelSource] = deriveCodec[ModelSource]
+  given Codec[ProvenanceRecord] = deriveCodec[ProvenanceRecord]
 
   /** The keys an object may hold, and the shapes of those that are objects themselves. */
   private final case class Shape(keys: Set[String], nested: Map[String, Shape] = Map.empty)
@@ -64,24 +78,36 @@ object Experiment:
 
   private val ExperimentShape: Shape = Shape(keysOf[ExperimentFile], Map(
     "agents" -> Shape(keysOf[ExperimentAgents], Map("generator" -> Shape(keysOf[GeneratorSettings])))))
-  private val ModelShape: Shape = Shape(keysOf[ModelSource])
+  private val RecordShape: Shape = Shape(keysOf[ProvenanceRecord])
 
-  /** Reads both files. The campaign's name is the experiment file's base name and the model's name: the last
-    * segment of its url, first letter lowered. The model id is the GGUF's absolute path, as llama-server reports it.
+  /** Reads both files and checks that the GGUF is there. The campaign's name is the experiment file's base name and
+    * the model's name. The model id is the GGUF's absolute path, as llama-server reports it.
     */
-  def read(experimentFile: Path, modelFile: Path): Either[String, Experiment] =
+  def read(experimentFile: Path, recordFile: Path): Either[String, Experiment] =
     for
-      e <- decode[ExperimentFile](experimentFile, ExperimentShape, "the model comes from the model file")
+      e <- decode[ExperimentFile](experimentFile, ExperimentShape, "the model comes from the provenance record")
       _ <- Either.cond(e.samples > 0, (), s"$experimentFile: samples must be positive, not ${e.samples}")
-      m <- decode[ModelSource](modelFile, ModelShape, "a model file is a source block: url, file, revision, sha256")
-      url <- m.url.toRight(s"$modelFile: no url")
-      file <- m.file.toRight(s"$modelFile: no file")
-      gguf = modelFile.toAbsolutePath.normalize.resolveSibling(file)
-      _ <- Either.cond(Files.isRegularFile(gguf), (), s"$modelFile names $file, but there is no $gguf")
-      model = url.stripSuffix("/").split('/').last
-      _ <- Either.cond(model.nonEmpty, (), s"$modelFile: no model name in url $url")
-    yield Experiment(s"${experimentFile.getFileName.toString.stripSuffix(".json")}-${model.head.toLower}${model.tail}",
-      e.agents.generator.agent(gguf.toString, m), e.prompt, e.samples, e.feedbackRounds)
+      m <- model(recordFile)
+      _ <- Either.cond(Files.isRegularFile(m.gguf), (), s"$recordFile: there is no GGUF at ${m.gguf}")
+    yield Experiment(s"${experimentFile.getFileName.toString.stripSuffix(".json")}-${m.name}",
+      e.agents.generator.agent(m.gguf.toString, m.source), e.prompt, e.samples, e.feedbackRounds)
+
+  /** Reads a provenance record, without looking for its GGUF. Its `path` must be absolute and end in its `file`. The
+    * model's name is the last segment of its url, first letter lowered.
+    */
+  def model(recordFile: Path): Either[String, Model] =
+    for
+      r <- decode[ProvenanceRecord](recordFile, RecordShape,
+        "a provenance record holds url, file, revision, sha256 and path")
+      url <- r.url.toRight(s"$recordFile: no url")
+      file <- r.file.toRight(s"$recordFile: no file")
+      path <- r.path.toRight(s"$recordFile: no path")
+      gguf = Path.of(path)
+      _ <- Either.cond(gguf.isAbsolute && gguf.getFileName.toString == file, (),
+        s"$recordFile: path $path must be absolute and name its file, $file")
+      name = url.stripSuffix("/").split('/').last
+      _ <- Either.cond(name.nonEmpty, (), s"$recordFile: no model name in url $url")
+    yield Model(s"${name.head.toLower}${name.tail}", gguf, ModelSource(r.url, r.file, r.revision, r.sha256))
 
   /** Decodes `file`, first refusing any key `shape` does not allow: the decoder would ignore it silently. */
   private def decode[T: Codec](file: Path, shape: Shape, hint: String): Either[String, T] =

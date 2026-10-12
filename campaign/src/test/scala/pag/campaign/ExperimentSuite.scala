@@ -6,8 +6,9 @@ import scala.util.Using
 
 import io.bullet.borer.Json
 
-/** An experiment file applied to a model file (implementation_strategy.md §10): every setting from the experiment
-  * file, the model from the model file, nothing else; unknown keys refused; the campaign's name derived from both.
+/** An experiment file applied to a provenance record (implementation_strategy.md §10): every setting from the
+  * experiment file, the model from the record, nothing else; unknown keys refused; the campaign's name derived from
+  * both.
   */
 class ExperimentSuite extends munit.FunSuite:
 
@@ -18,23 +19,25 @@ class ExperimentSuite extends munit.FunSuite:
   val experiment: String =
     s"""{"prompt":"generator-v3","samples":5,"feedbackRounds":3,"agents":{"generator":{$generator}}}"""
 
+  /** `$GGUF` stands for the GGUF's absolute path, which `withFiles` fills in. */
   val model: String =
     """{"url":"https://huggingface.co/Qwen/Qwen3.8-27B","file":"Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.gguf",
-      |"revision":"1d4bf0f2","sha256":"8ec6796c"}""".stripMargin
+      |"revision":"1d4bf0f2","sha256":"8ec6796c","path":"$GGUF"}""".stripMargin
 
-  /** A scratch directory holding `config/e1fb-rung0.json`, a model file and the GGUF it names, deleted afterwards.
-    * The body gets the directory, the experiment file and the model file.
+  /** A scratch directory holding `config/e1fb-rung0.json`, a provenance record in `config/models/`, and the GGUF it
+    * names in `models/`, deleted afterwards. The body gets the directory, the experiment file and the record.
     */
   def withFiles[A](experimentJson: String = experiment, modelJson: String = model, gguf: Boolean = true)(
       body: (Path, Path, Path) => A): A =
-    val dir = Files.createTempDirectory("experiment")
+    val dir = Files.createTempDirectory("experiment").toAbsolutePath
     try
       val e = Files.createDirectories(dir.resolve("config")).resolve("e1fb-rung0.json")
-      val models = Files.createDirectories(dir.resolve("models/Qwen3.8-27B-GGUF"))
-      val m = models.resolve("Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.source.json")
+      val m = Files.createDirectories(dir.resolve("config/models")).resolve("Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.json")
+      val ggufPath = Files.createDirectories(dir.resolve("models/Qwen3.8-27B-GGUF"))
+        .resolve("Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.gguf")
       Files.writeString(e, experimentJson)
-      Files.writeString(m, modelJson)
-      if gguf then Files.writeString(models.resolve("Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.gguf"), "")
+      Files.writeString(m, modelJson.replace("$GGUF", ggufPath.toString))
+      if gguf then Files.writeString(ggufPath, "")
       body(dir, e, m)
     finally Using.resource(Files.walk(dir))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
 
@@ -42,10 +45,10 @@ class ExperimentSuite extends munit.FunSuite:
     withFiles(experimentJson, modelJson, gguf)((_, e, m) =>
       Experiment.read(e, m).fold(identity, x => fail(s"expected a refusal, got $x")))
 
-  test("every setting from the experiment file, the model and its source from the model file"):
+  test("every setting from the experiment file, the model and its source from the provenance record"):
     withFiles() { (dir, e, m) =>
       val x = Experiment.read(e, m).fold(err => fail(err), identity)
-      val gguf = dir.toAbsolutePath.resolve("models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.gguf")
+      val gguf = dir.resolve("models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.gguf")
       assertEquals(x, Experiment("e1fb-rung0-qwen3.8-27B",
         AgentConfig("http://localhost:8933/v1", gguf.toString, None, 0.6, Some(0.95), Some(20), Some(0.0), Some(0.0),
           Some(true), Some(32768), 2700, 3,
@@ -91,16 +94,33 @@ class ExperimentSuite extends munit.FunSuite:
   test("a sample count that is not positive is refused"):
     assert(refused(experimentJson = experiment.replace("\"samples\":5", "\"samples\":0")).contains("samples"))
 
-  test("a model file without url or file, or with an unknown key, is refused"):
+  test("a provenance record without url, file or path, or with an unknown key, is refused"):
     assert(refused(modelJson = """{"file":"Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.gguf"}""").contains("no url"))
     assert(refused(modelJson = """{"url":"https://huggingface.co/Qwen/Qwen3.8-27B"}""").contains("no file"))
+    assert(refused(modelJson = model.replace(",\"path\":\"$GGUF\"", "")).contains("no path"))
     assert(refused(modelJson = model.replace("\"revision\"", "\"temperature\":0.6,\"revision\""))
       .contains("unknown temperature"))
 
-  test("a model file naming a GGUF that is not there is refused"):
-    assert(refused(gguf = false).contains("there is no"))
+  test("a path that is relative, or does not end in the record's file, is refused"):
+    assert(refused(modelJson = model.replace("$GGUF", "Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.gguf"))
+      .contains("must be absolute"))
+    assert(refused(modelJson = model.replace("$GGUF", "/home/s/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K_XL.gguf"))
+      .contains("must be absolute and name its file"))
 
-  test("a missing experiment or model file is refused, by path"):
+  test("a provenance record whose GGUF is not there is refused"):
+    assert(refused(gguf = false).contains("there is no GGUF"))
+
+  test("every committed provenance record reads, named after its GGUF, with a revision and hash"):
+    val repo = Repo.root().fold(e => fail(e), identity)
+    val records = Using.resource(Files.list(repo.resolve("config/models")))(_.iterator.asScala.toList)
+    assert(records.nonEmpty)
+    records.foreach { r =>
+      val m = Experiment.model(r).fold(e => fail(e), identity)
+      assertEquals(m.gguf.getFileName.toString, r.getFileName.toString.stripSuffix(".json") + ".gguf", r.toString)
+      assert(m.source.revision.isDefined && m.source.sha256.isDefined, r.toString)
+    }
+
+  test("a missing experiment file or provenance record is refused, by path"):
     withFiles() { (dir, e, m) =>
       assertEquals(Experiment.read(dir.resolve("none.json"), m), Left(s"no file at ${dir.resolve("none.json")}"))
       assertEquals(Experiment.read(e, dir.resolve("none.json")), Left(s"no file at ${dir.resolve("none.json")}"))
