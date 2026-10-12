@@ -8,16 +8,13 @@
 # BF16 GGUF with llama.cpp's converter, quantized to Q8_0 with llama-quantize,
 # and the download and BF16 intermediate deleted. The result lands in
 #   ~/models/<name>-GGUF/<name>-Q8_0-llamacpp-<commit>.gguf
-# beside <same>.source.json: the config's `source` block (url, file, revision,
-# sha256). If the GGUF and its record already exist, it skips straight to
+# beside <same>.source.json, the model file a campaign is run with (its
+# `source` block: url, file, revision, sha256; implementation_strategy.md
+# §10). If the GGUF and its record already exist, it skips straight to
 # serving. If the GGUF exists but its record does not (a run stopped while
 # hashing), it hashes the GGUF and writes the record without reconverting,
 # taking the revision from the pin file written before the download, so the
 # record never names a revision the GGUF was not made from.
-#
-# For a Qwen/Qwen3.<n>-<size> repository it then writes the model id and the
-# source block into config/qwen3.<n>-<size>.json (step 2), copying the
-# example config first if that file does not exist yet.
 #
 # The converter must come from the same llama.cpp commit as llama-server, so
 # the commit in the file name is the one that made and serves it. Set
@@ -121,37 +118,10 @@ else
   rm -rf "$DOWNLOAD" "$BF16" "$PIN"
 fi
 
-echo "== source block ($SOURCE):"
+echo "== source block:"
 cat "$SOURCE"
 
-# For a Qwen3 model, write the model id and source block into its config,
-# config/qwen3.<n>-<size>.json, the repository name with its first letter
-# lowered (Qwen3.8-27B gives qwen3.8-27B.json): an existing config keeps its other
-# fields; a missing one starts from the example. llama-server reports the -m
-# path as the model id when no --alias is given.
-case "$REPO" in
-  Qwen/Qwen3.*)
-    CONFIG="$ROOT/config/q${NAME#Q}.json"
-    python3 - "$CONFIG" "$ROOT/config/qwen.example.json" "$GGUF" "$SOURCE" > "$CONFIG.part" <<'EOF'
-import json, os, sys
-config, example, model, source = sys.argv[1:]
-with open(config if os.path.exists(config) else example) as f:
-    c = json.load(f)
-with open(source) as f:
-    s = json.load(f)
-g = c["agents"]["generator"]
-for key, old, new in [("model", g.get("model"), model), ("source", g.get("source"), s)]:
-    if old is not None and old != new and "<" not in json.dumps(old):
-        print(f"replacing {key}: {json.dumps(old)}", file=sys.stderr)
-g["model"] = model
-g["source"] = s
-print(json.dumps(c, indent=2))
-EOF
-    mv "$CONFIG.part" "$CONFIG"
-    echo "== wrote model and source into $CONFIG"
-    ;;
-  *) echo "== not a Qwen/Qwen3 repository; write its config by hand" ;;
-esac
+echo "== model file, for campaign generate --model: $SOURCE"
 
 echo "== serving on port $PORT; check: curl -s http://localhost:$PORT/slots"
 exec llama-server -m "$GGUF" -c 65536 -np 1 --port "$PORT" -ngl all "$@" --host 0.0.0.0
