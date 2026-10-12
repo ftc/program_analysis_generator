@@ -55,15 +55,15 @@ bash scripts/common.sh
 
    `<Model>` is the repository's name from the table, e.g. `Qwen3.8-27B`;
    below, `<model>` is that name with its first letter lowered,
-   `qwen3.8-27B`, which names the model's config and campaigns.
+   `qwen3.8-27B`, which names the model's campaigns.
 
    The script pins the repository's current **revision** (its commit on
    Hugging Face), downloads it, converts it with llama.cpp's converter to a
    BF16 GGUF and quantizes that to Q8_0, then deletes the download and the
    BF16 file. The result is
    `~/models/<model>-GGUF/<model>-Q8_0-llamacpp-<commit>.gguf`, named after
-   the llama.cpp commit that made it. Beside it, `<same>.source.json` holds the
-   config's `source` block: URL, file, revision and SHA-256. The script then
+   the llama.cpp commit that made it. Beside it, `<same>.source.json` is the
+   **model file**: its `source` block, URL, file, revision and SHA-256. The script then
    runs
 
    ```
@@ -82,33 +82,28 @@ bash scripts/common.sh
 
    Check that `curl -s http://localhost:8933/slots` shows **one slot** with
    `n_ctx` of at least 65,536.
-2. **Check its config.** Before serving, the script writes
-   `config/<model>.json`, copied from
-   `config/qwen.example.json` if it does not exist yet, with the
-   model id (the GGUF's path, which llama-server reports at
-   `curl -s http://localhost:8933/v1/models` when no `--alias` is given) and
-   the `source` block from its `.source.json`. An existing config keeps its
-   other fields; the script says so on stderr when it replaces a filled-in
-   model or source. It does this for any `Qwen/Qwen3.*` repository; for
-   another, it says so and the config is written by hand. Check that the id
-   matches `/v1/models`. `campaign`
-   refuses a config that still has a placeholder. The config holds only the
-   model, the server and the sampling settings, so the one-shot campaigns
-   used the same file. Configs are named after the model, not the
-   experiment or rung; the campaign name carries those (*Decided — Shawn,
-   2026-10-12*).
+2. **Check the two files the run reads** (§10 of the plan). The **model
+   file** is `<the Q8 GGUF>.source.json`, which the script has just printed;
+   the model id the campaign sends is the GGUF's path, so check that it
+   matches `curl -s http://localhost:8933/v1/models` (llama-server reports the
+   `-m` path when no `--alias` is given). The **experiment file**,
+   `config/e1fb-rung0.json`, holds every setting of this campaign: the
+   endpoint, the sampling settings (*The run settings*, below), the prompt
+   version, the sample count and the feedback rounds. Nothing is set by flag
+   or per model. *Decided — Shawn, 2026-10-12.*
 3. **Run it**, in a `tmux` window (`tmux new -s e1`; detach with Ctrl-b d,
    reattach with `tmux attach -t e1`):
 
    ```
-   sbt "campaign/run generate --config config/<model>.json --campaign e1fb-rung0-<model> --samples 5 --feedback-rounds 3"
+   sbt "campaign/run generate --experiment config/e1fb-rung0.json --model <the model file>"
    ```
 
-   One campaign per model, named `e1fb-rung0-<model>`. The name keeps it apart
+   One campaign per model, named `e1fb-rung0-<model>`, from the two files'
+   names. The name keeps it apart
    from the one-shot campaign `e1-rung0-<model>`: the report reads only the
    latest run of each name, so a shared name would hide the one-shot run.
-   `generate` uses the current prompt, `generator-v3`, unless `--prompt` says
-   otherwise. The first feedback campaign,
+   The experiment file names the prompt, `generator-v3`. The first feedback
+   campaign,
    `e1fb-rung0-qwen3.5-27B-20261012T013725Z`, used `generator-v2`.
 
    When a domain fails to compile, its javac errors (or that the compiler ran
@@ -128,12 +123,11 @@ bash scripts/common.sh
    continue it under the same inputs with
 
    ```
-   sbt "campaign/run generate --config config/<model>.json --resume results/<that directory> --feedback-rounds 3"
+   sbt "campaign/run generate --experiment config/e1fb-rung0.json --model <the model file> --resume results/<that directory>"
    ```
 
    which runs only the samples without an `attempt.json`, rewrites none, and
-   refuses if any pinned input has changed — `--feedback-rounds` included, so
-   it must be given again.
+   refuses if any pinned input has changed, either file included.
 4. **Watch it**, in a second `tmux` window (Ctrl-b c):
 
    ```
@@ -201,7 +195,8 @@ a generation's gain from size. It too is a Q8 GGUF Shawn makes from the official
 (*Record*, below), so its results are not comparable with that run's.
 
 **The run settings.** Chosen by Claude at Shawn's delegation, 2026-10-07, and
-written into the example config. Expected to change: every attempt records the
+written into the experiment files `config/e1-rung0.json` and
+`config/e1fb-rung0.json` (the example config until 2026-10-12). Expected to change: every attempt records the
 settings it ran with, and a campaign pins them.
 
 | setting                                                  | value                   | why                                                                                                                                                                                                                                         |
@@ -262,11 +257,12 @@ across sizes as a measure of quality.
 **How the one-shot campaigns were run.** A record of what ran, 2026-10-08 and
 2026-10-09: the campaigns `e1-rung0-qwen3.5-0.8B`, `e1-rung0-qwen3.5-9B` and
 `e1-rung0-qwen3.5-27B` (results and conclusions in `findings.md`). The model
-was served and configured as in steps 1 and 2 of *Running E1, step by step*,
-then, after `bash scripts/common.sh`,
+was served as in step 1 of *Running E1, step by step* and configured by a
+per-model config file holding both the model and the run settings (the scheme
+before experiment files, 2026-10-12), then, after `bash scripts/common.sh`,
 
 ```
-sbt "campaign/run generate --config config/qwen3.5-<size>.json --campaign e1-rung0-qwen3.5-<size> --samples 5"
+sbt "campaign/run generate --config config/e1-rung0-qwen3.5-<size>.json --campaign e1-rung0-qwen3.5-<size> --samples 5"
 sbt "campaign/run status --campaign e1-rung0-qwen3.5-<size> --every 5"
 ```
 
@@ -284,8 +280,8 @@ the records:
 - records in schema 1, which today's code reads and converts.
 
 To run a one-shot campaign with today's harness, use the commands of *Running
-E1, step by step* with the campaign named `e1-rung0-<model>` and no
-`--feedback-rounds` (on a resume too); its report is
+E1, step by step* with the experiment file `config/e1-rung0.json`, which has
+no feedback rounds; its report is
 `sbt "campaign/run report"`, whose default prefix is `e1-rung0-`.
 
 ### The inspection rubric
@@ -474,7 +470,7 @@ model's licence, before running**:
 **Identifying a model.** A Hugging Face repository URL is a pointer, not an
 identity: one repository holds many quantization files, and repositories are
 re-uploaded under the same name (for chat-template or tokenizer fixes, say). So
-each model's config carries a `source` (plan §10): the URL and the **file** say
+each model's model file is a `source` block (plan §10): the URL and the **file** say
 where to get it, the **revision** pins the upload, and the file's **SHA-256**
 says which bytes it was — the one identifier that holds wherever the file lives
 and whatever it is called. The model is not the whole configuration: the chat

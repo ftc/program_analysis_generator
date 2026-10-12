@@ -9,8 +9,8 @@ import scopt.OParser
 /** The campaign driver's entry point (implementation_strategy.md §12). */
 object Main:
 
-  final case class Args(command: String = "", config: Option[Path] = None, campaign: Option[String] = None,
-      resume: Option[Path] = None, samples: Option[Int] = None, feedbackRounds: Int = 0, prompt: String = "generator-v3", every: Option[Int] = None, prefix: String = "e1-rung0-",
+  final case class Args(command: String = "", experiment: Option[Path] = None, model: Option[Path] = None,
+      campaign: Option[String] = None, resume: Option[Path] = None, every: Option[Int] = None, prefix: String = "e1-rung0-",
       out: Option[Path] = None)
 
   private val parser: OParser[Unit, Args] =
@@ -22,18 +22,12 @@ object Main:
         .action((_, a) => a.copy(command = "generate"))
         .text("run a campaign's samples: ask the generator, build, evaluate on the smoke corpus, record")
         .children(
-          opt[Path]("config").required().valueName("<file>").action((p, a) => a.copy(config = Some(p)))
-            .text("the campaign config (JSON, implementation_strategy.md §10)"),
-          opt[String]("campaign").valueName("<name>").action((n, a) => a.copy(campaign = Some(n)))
-            .text("start a new run in results/<name>-<UTC start>/, e.g. e1-rung0-<model>; nothing earlier is touched"),
+          opt[Path]("experiment").required().valueName("<file>").action((p, a) => a.copy(experiment = Some(p)))
+            .text("the experiment file, config/<arm>.json: every setting of the run (implementation_strategy.md §10)"),
+          opt[Path]("model").required().valueName("<file>").action((p, a) => a.copy(model = Some(p)))
+            .text("the model file, <gguf>.source.json, written by scripts/serve_model.sh"),
           opt[Path]("resume").valueName("<dir>").action((d, a) => a.copy(resume = Some(d)))
-            .text("continue an interrupted run, results/<name>-<start>/, under the inputs it was pinned with"),
-          opt[Int]("samples").valueName("N").action((n, a) => a.copy(samples = Some(n)))
-            .text("how many attempts a new run holds (default 1); a resumed run keeps its pinned count"),
-          opt[Int]("feedback-rounds").valueName("N").action((n, a) => a.copy(feedbackRounds = n))
-            .text("after a domain fails to compile, send its errors back and ask again, up to N times (default 0)"),
-          opt[String]("prompt").valueName("<version>").action((v, a) => a.copy(prompt = v))
-            .text("campaign/prompts/<version>/ (default generator-v3)")
+            .text("continue an interrupted run of the same files, results/<arm>-<model>-<start>/, under its pin")
         ),
       cmd("status")
         .action((_, a) => a.copy(command = "status"))
@@ -55,8 +49,6 @@ object Main:
         ),
       checkConfig(a =>
         if a.command.isEmpty then failure("no command given")
-        else if a.command == "generate" && a.campaign.isDefined == a.resume.isDefined then
-          failure("generate takes exactly one of --campaign (a new run) and --resume (an interrupted one)")
         else success)
     )
 
@@ -85,12 +77,12 @@ object Main:
         val outcome = for
           repo <- Repo.root()
           tools <- locate(repo)
-          config <- CampaignConfig.read(a.config.get)
-          prompt <- Prompt.assemble(repo, a.prompt)
-          agent = config.agents.generator
-          feedback <- Option.when(a.feedbackRounds != 0)(a.feedbackRounds).fold(Right(None))(n =>
+          experiment <- Experiment.read(a.experiment.get, a.model.get)
+          prompt <- Prompt.assemble(repo, experiment.prompt)
+          agent = experiment.agent
+          feedback <- Option.when(experiment.feedbackRounds != 0)(experiment.feedbackRounds).fold(Right(None))(n =>
             Feedback.load(repo, FeedbackTemplateVersion).flatMap(FeedbackSettings.of(n, _)).map(Some(_)))
-          start = a.resume.fold(Start.Fresh(a.campaign.get, a.samples.getOrElse(1)))(Start.Resume(_, a.samples))
+          start <- experiment.start(a.resume)
           done <- Campaign.generate(start, agent, ChatClient(agent), prompt, tools, repo.resolve("results"), report,
             println, feedback = feedback)
         yield done

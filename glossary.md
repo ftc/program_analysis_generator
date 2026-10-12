@@ -394,6 +394,20 @@ nothing is replaced or deleted; the report reads the latest run of each campaign
 with prompt <letter>" (`experiments.md`, The report; *Decided — Shawn,
 2026-10-12*). Directories from before then are named after the campaign alone.
 
+**Experiment file** — the JSON a campaign is run from, holding every
+experimental parameter and nothing about the model: the endpoint, sampling
+settings, thinking, token budget, timeout and retries, prompt version, sample
+count and feedback rounds. One per **arm** — one variant of an experiment,
+such as E1's rung 0 one shot (`config/e1-rung0.json`) or with build feedback
+(`config/e1fb-rung0.json`). No flag or model overrides it. Its base name is the
+first part of the campaign's name (plan §10, *Decided — Shawn, 2026-10-12*).
+
+**Model file** — `<gguf>.source.json`, written by `scripts/serve_model.sh`
+beside the GGUF it made: the model's `source` block (url, file, revision,
+sha256). The model id a campaign sends is the GGUF's path; the model's name,
+the url's last segment with its first letter lowered (`qwen3.8-27B`), is the
+second part of the campaign's name (plan §10).
+
 **Pin** — a run's `campaign.json`: the inputs it holds fixed, so its attempts
 are comparable with each other. They are the agent settings, the prompt's
 version and hash, the corpus hash, the profile, the sample count, the **build

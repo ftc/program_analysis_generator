@@ -147,7 +147,7 @@ corpora/
 results/
   <campaign>/              durable per-attempt records, so a campaign resumes
 report/                    the experimental report: LaTeX, generated tables, manual inspection notes
-config/                    run configurations
+config/                    experiment files (§10)
 docker/                    compose files and mount definitions
 ```
 
@@ -1451,21 +1451,54 @@ An agent asked to write a domain and then attack it has no reason to attack hard
 The generator and adversary are configured separately so they can be different
 models — which the paragraph above requires anyway.
 
+**A campaign is run from two files, each with one owner.** *Decided — Shawn,
+2026-10-12*, replacing one config file per model, which mixed the model's
+facts with the experiment's settings and left the rest of the experiment's
+settings in flags.
+
+- **The experiment file** holds every experimental parameter and nothing about
+  the model: the endpoint, the sampling settings, thinking, `maxTokens`, the
+  timeout and retries, the prompt version, the sample count and the feedback
+  rounds. One hand-written file per experiment arm, committed under `config/`,
+  e.g. `config/e1fb-rung0.json`. It is the only source of these parameters:
+  `campaign generate` has no flags that override them, and no model gets
+  settings of its own — a model that needs different settings is a different
+  arm, with its own file.
+- **The model file** is the `<gguf>.source.json` that `scripts/serve_model.sh`
+  writes beside the GGUF: its `source` block (below). The model id sent to
+  the server is the GGUF's path, the model file's directory plus its `file`,
+  which is what llama-server reports at `/v1/models` when no `--alias` is
+  given. The script writes nothing under `config/`.
+
 ```json
-{ "agents": {
-    "generator": { "baseUrl": "http://localhost:8933/v1",
-                   "model": "/home/s/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q6_K_XL.gguf",
-                   "apiKeyEnv": "PAG_GENERATOR_KEY", "temperature": 0.2,
-                   "source": { "url": "https://huggingface.co/unsloth/Qwen3.8-27B-GGUF",
-                               "file": "Qwen3.8-27B-UD-Q6_K_XL.gguf",
-                               "revision": null, "sha256": null } },
-    "adversary": { "baseUrl": "https://api.example.com/v1", "model": "...",
-                   "apiKeyEnv": "PAG_ADVERSARY_KEY", "temperature": 0.9 } } }
+{ "prompt": "generator-v3",
+  "samples": 5,
+  "feedbackRounds": 3,
+  "agents": {
+    "generator": { "baseUrl": "http://localhost:8933/v1", "apiKeyEnv": "PAG_GENERATOR_KEY",
+                   "temperature": 0.6, "topP": 0.95, "topK": 20, "minP": 0.0,
+                   "presencePenalty": 0.0, "thinking": true, "maxTokens": 32768,
+                   "timeoutSeconds": 2700, "retries": 3 } } }
 ```
 
+```
+campaign generate --experiment config/e1fb-rung0.json \
+                  --model ~/models/Qwen3.8-27B-GGUF/Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.source.json
+```
+
+**The campaign's name is derived, not typed:** the experiment file's base name,
+a hyphen, and the model's name — the last segment of the model file's `url`
+with its first letter lowered. The example above is campaign
+`e1fb-rung0-qwen3.8-27B`, matching the names the earlier campaigns were given
+by hand. `--resume <dir>` takes the same two files and refuses if they do not
+match the run's pin (§14). The run's pin still records the resolved settings,
+model and source, so the records and the report do not change. The adversary's
+model is configured when the adversary is built; the shape above will be
+refactored then.
+
 **`source` says where a model came from and which bytes it is**: the download
-URL, the file, the repository revision and the file's SHA-256, entered by hand
-once per model. The campaign copies it into every attempt record without
+URL, the file, the repository revision and the file's SHA-256, written once
+per model by `serve_model.sh` (or by hand for a model it did not make). The campaign copies it into every attempt record without
 interpreting it — a placeholder for a fuller provenance scheme being designed
 separately, which can replace it. Each attempt also records, automatically, the
 request parameters it sent and what the server reported about the model at the
@@ -1480,8 +1513,8 @@ the algorithm, which config is not. *Decided — Shawn, 2026-10-06.* The client
 speaks the OpenAI-compatible `/v1/chat/completions` API, which Ollama, vLLM and
 hosted models all serve.
 
-Credentials are named by environment variable, never written to the config file
-and never to the repo. Every result records which agent config produced
+Credentials are named by environment variable, never written to the experiment
+file and never to the repo. Every result records which agent config produced
 it, so a campaign can be attributed to the models that ran it.
 
 ## 11. The command line
@@ -2169,7 +2202,8 @@ no start time in their names and stay as they are. An
 unreadable `campaign.json` is still an error: nothing is deleted on a guess. The commit is not pinned:
 committing the attempts or the inspection notes moves `HEAD`, and resuming must
 still work; each attempt's envelope records its own commit. Suggested naming,
-one campaign per model: `e1-rung0-<model>`. *Decided — Shawn, 2026-10-07*; the
+one campaign per model: `e1-rung0-<model>` (derived from the experiment and
+model files since 2026-10-12, §10). *Decided — Shawn, 2026-10-07*; the
 module keeps the name `campaign`, the glossary's *Campaign* being the unit of
 work and the module "the campaign driver".
 
@@ -2409,7 +2443,8 @@ framework, library, or the OS.
     domain compiled after four small edits. Proposed, and approved with the
     decisions below:
     - **`--feedback-rounds N`** on `campaign generate`, default 0 (one shot,
-      unchanged), pinned in `campaign.json`. When a build fails, the errors go
+      unchanged), pinned in `campaign.json`. (*Replaced — Shawn, 2026-10-12:*
+      `feedbackRounds` in the experiment file, §10.) When a build fails, the errors go
       back in a new user message and the model replies again, until the build
       passes or the rounds run out; whatever builds last is evaluated as now.
       Unlike the `compile_and_test` tool (item 24), the harness decides when to
@@ -2464,6 +2499,8 @@ framework, library, or the OS.
 
     - **3 rounds,** for the first campaign. `--feedback-rounds` still defaults
       to 0, so a campaign without it stays one shot (open question 1).
+      (Since 2026-10-12, an experiment file without `feedbackRounds` is one
+      shot, §10.)
     - **The feedback message** (open question 4) holds the javac errors and
       nothing else: file:line, the message, the caret lines. Paths are
       relative to the domain directory. The text is capped near 8 KB, with a
