@@ -1,0 +1,12 @@
+{
+  "campaign": "e1fb-rung0-qwen3.8-27B-20261012T235217Z",
+  "samplesRequested": 5,
+  "attempt": "attempt-004",
+  "stage": "asking the model (round 1 of 4)",
+  "stageStartedAt": "2026-10-13T00:52:41.019943711Z",
+  "attemptStartedAt": "2026-10-13T00:52:41.018713100Z",
+  "timeoutSeconds": 2700,
+  "updatedAt": "2026-10-13T00:52:41.019953351Z",
+  "running": true,
+  "startedAt": "2026-10-12T23:52:17.097680813Z"
+}

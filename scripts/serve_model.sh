@@ -122,7 +122,20 @@ fi
 echo "== provenance record:"
 cat "$RECORD"
 
-echo "== provenance record, for campaign generate --model (commit it): $RECORD"
-
 echo "== serving on port $PORT; check: curl -s http://localhost:$PORT/slots"
-exec llama-server -m "$GGUF" -c 65536 -np 1 --port "$PORT" -ngl all "$@" --host 0.0.0.0
+# In the background, so the record's path can be printed once the server is up,
+# below its loading log. A non-interactive shell starts background jobs with
+# Ctrl-C ignored, so the trap passes it on; it also stops the server if this
+# script exits.
+llama-server -m "$GGUF" -c 131072 -np 1 --port "$PORT" -ngl all "$@" --host 0.0.0.0 &
+SERVER=$!
+trap 'kill "$SERVER" 2>/dev/null || true' EXIT INT TERM HUP
+
+# /health answers 503 while the model loads and 200 once it is ready.
+until curl -fsS -o /dev/null "http://localhost:$PORT/health" 2>/dev/null; do
+  kill -0 "$SERVER" 2>/dev/null || { wait "$SERVER" || exit $?; exit 1; } # it stopped before it was ready
+  sleep 2
+done
+echo "== server ready; provenance record, for campaign generate --model (commit it):"
+echo "   $RECORD"
+wait "$SERVER"
