@@ -127,7 +127,7 @@ echo "== serving on port $PORT; check: curl -s http://localhost:$PORT/slots"
 # below its loading log. A non-interactive shell starts background jobs with
 # Ctrl-C ignored, so the trap passes it on; it also stops the server if this
 # script exits.
-llama-server -m "$GGUF" -c 131072 -np 1 --port "$PORT" -ngl all "$@" --host 0.0.0.0 &
+llama-server -m "$GGUF" -c 262144 -np 1 --port "$PORT" -ngl all "$@" --host 0.0.0.0 &
 SERVER=$!
 trap 'kill "$SERVER" 2>/dev/null || true' EXIT INT TERM HUP
 

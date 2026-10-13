@@ -46,7 +46,8 @@ bash scripts/common.sh
      `LLAMA_CPP`, default `~/software/llama.cpp`). **Upgrade llama.cpp before
      a ladder, not partway through**: every size should run on the same server.
    - `curl -s http://localhost:8933/slots` shows **one slot** with `n_ctx` of
-     131,072 (at least 85,300 for the 81,920-token arm).
+     262,144, the model's trained context (at least 85,300 for the
+     81,920-token arm and 249,100 for the 245,760-token arm).
    - `curl -s http://localhost:8933/v1/models` reports the GGUF's path as the
      model id: the record's `path`.
    - `curl -s http://localhost:8933/props | python3 -c "import json,sys;
@@ -69,11 +70,17 @@ bash scripts/common.sh
    | rung 0, one shot            | `config/e1-rung0.json`   | `e1-rung0-`                 |
    | rung 0, build feedback      | `config/e1fb-rung0.json` | `e1fb-rung0-`               |
    | rung 0, build feedback, `maxTokens` 81,920 | `config/e1fb82k-rung0.json` | `e1fb82k-rung0-` |
+   | rung 0, build feedback, `maxTokens` 245,760 | `config/e1fb240k-rung0.json` | `e1fb240k-rung0-` |
 
-   Prompt plus reply must fit in the server's `-c`, 131,072 by default since
-   2026-10-12 (65,536 before, enough only for the 32,768 arms). The 81,920
-   arm's timeout is 5,400 s: 81,920 tokens at about 27 tokens/s is about 50
-   minutes, plus margin.
+   Prompt plus reply must fit in the server's `-c`, 262,144 by default since
+   2026-10-13 (65,536 until 2026-10-12, enough only for the 32,768 arms; then
+   131,072, enough for the 81,920 arm). The 81,920 arm's timeout is 5,400 s:
+   81,920 tokens at about 27 tokens/s is about 50 minutes, plus margin. Its
+   first two Qwen3.8-27B attempts averaged 25.8 tokens/s and ran out of
+   tokens. The 245,760 arm is the most the context allows, leaving 16,384
+   tokens for the prompt (round 1's is 3,307; feedback rounds stay near 10k).
+   Its timeout is 14,400 s: about 2.8 hours at an estimated 24 tokens/s, plus
+   margin.
 
    Every setting of the run is in the experiment file; to change one, edit the
    file or add an arm (§10). It prints the run's directory,
@@ -196,7 +203,7 @@ every attempt records the settings it ran with, and a campaign pins them.
 | build limit, compile tries                               | 2 minutes; 3 tries      | each Gradle call, the domain's own tests included. A compile that fails without javac errors is tried again; one with javac errors is not. Added 2026-10-09; earlier campaigns ran with 5 minutes and one try                               |
 | samples                                                  | 5 per size              | a first table quickly; more for the cheap small sizes if noisy                                                                                                                                                                              |
 | seed                                                     | unset                   | samples should differ; GPU arithmetic is not bit-reproducible anyway                                                                                                                                                                        |
-| llama.cpp `-c` (server)                                  | 131,072                 | covers prompt plus budget up to the 81,920-token arm, with a smaller KV cache than the full 262,144; 65,536 until 2026-10-12, raised by Shawn                                                                                                |
+| llama.cpp `-c` (server)                                  | 262,144                 | the model's trained context, the most llama.cpp allows; covers prompt plus budget for every arm. 65,536 until 2026-10-12, then 131,072; raised by Shawn, 2026-10-13                                                                     |
 | llama.cpp `-np` (server)                                 | 1                       | runs are one request at a time; extra slots only let other requests share the GPUs (noise in timings), and may divide `-c` between them. Other users wait; give them a second server on another port                                        |
 | llama.cpp `--reasoning-budget`                           | unset                   | `maxTokens` caps thinking and answer together; a separate cap is a later variation                                                                                                                                                          |
 
