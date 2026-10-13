@@ -139,6 +139,19 @@ class ExperimentSuite extends munit.FunSuite:
       }
     }
 
+  test("the v4 arm is the 81,920 arm with generator-v4, and the limit its prompt states is its maxTokens"):
+    val repo = Repo.root().fold(e => fail(e), identity)
+    withFiles() { (_, _, m) =>
+      val Seq(base, v4) = List("e1fb82k-rung0", "e1fb82k-rung0-v4")
+        .map(arm => Experiment.read(repo.resolve(s"config/$arm.json"), m).fold(e => fail(e), identity)): @unchecked
+      assertEquals(v4.agent, base.agent)
+      assertEquals((v4.prompt, v4.samples, v4.feedbackRounds), ("generator-v4", base.samples, base.feedbackRounds))
+      assertEquals(v4.campaign, "e1fb82k-rung0-v4-qwen3.8-27B")
+      val user = Prompt.assemble(repo, v4.prompt).fold(e => fail(e), _.messages(1).content)
+      val stated = "limited to ([\\d,]+) tokens".r.findFirstMatchIn(user).map(_.group(1).replace(",", "").toInt)
+      assertEquals(stated, v4.agent.maxTokens)
+    }
+
   // Starting a run
 
   def experimentFor(samples: Int): Experiment =

@@ -71,6 +71,7 @@ bash scripts/common.sh
    | rung 0, build feedback      | `config/e1fb-rung0.json` | `e1fb-rung0-`               |
    | rung 0, build feedback, `maxTokens` 81,920 | `config/e1fb82k-rung0.json` | `e1fb82k-rung0-` |
    | rung 0, build feedback, `maxTokens` 245,760 | `config/e1fb240k-rung0.json` | `e1fb240k-rung0-` |
+   | rung 0 with process guidance (`generator-v4`), build feedback, `maxTokens` 81,920 | `config/e1fb82k-rung0-v4.json` | `e1fb82k-rung0-v4-` |
 
    Prompt plus reply must fit in the server's `-c`, 262,144 by default since
    2026-10-13 (65,536 until 2026-10-12, enough only for the 32,768 arms; then
@@ -313,6 +314,18 @@ pitfalls. None of them names a kind of domain or works an example (the
 v2 campaigns stay on record as the earlier rung-0 baseline, and a comparison
 across the two says which prompt each side used. *Decided — Shawn,
 2026-10-11.*
+
+`generator-v4` (2026-10-13) is a variation on rung 0, not a new rung: v3 plus
+one section, *How to work*, before *Your reply*. It states the token limit
+(81,920, thinking and answer together) and that a reply cut off is not built,
+asks for the code to be written once in the reply rather than drafted in the
+thinking, and asks for cases to go in the JUnit tests rather than be checked
+by hand. It names no domain and gives no size target, and v3's "the more …
+the better" stays. The reason: on `e1fb82k-rung0` four of Qwen3.8-27B's five
+attempts ran out of tokens, mostly on whole-file drafts in the thinking and
+hand-checked cases (`misc.md` §9). Because the limit is in the text, v4 goes
+with the 81,920 arm only; `ExperimentSuite` checks the two agree.
+*Decided — Shawn, 2026-10-13.*
 
 Rungs 1–4 are written when rung 0's results call for them. Context added
 *before* an attempt is a different thing from the feedback given *after* one

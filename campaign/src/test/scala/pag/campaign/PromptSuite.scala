@@ -13,8 +13,8 @@ class PromptSuite extends munit.FunSuite:
   val repo: Path = Repo.root().fold(e => throw IllegalStateException(e), identity)
 
   /** Every version stays checked: v1 is superseded but its campaign's records refer to it. */
-  val versions: List[String] = List("generator-v1", "generator-v2", "generator-v3")
-  val current: String = "generator-v3"
+  val versions: List[String] = List("generator-v1", "generator-v2", "generator-v3", "generator-v4")
+  val current: String = "generator-v4"
 
   def generator(version: String): Prompt = Prompt.assemble(repo, version).fold(e => fail(e), identity)
 
@@ -49,14 +49,28 @@ class PromptSuite extends munit.FunSuite:
     assertEquals(Files.readString(repo.resolve("campaign/prompts/generator-v3/system.md")),
       Files.readString(repo.resolve("campaign/prompts/generator-v2/system.md")))
 
-  test("v3's skeleton, its placeholder filled in, compiles against the contract"):
-    val user = generator("generator-v3").messages(1).content
-    val skeleton = "```java\n(?s)(.*?)\n```".r.findAllMatchIn(user).map(_.group(1))
-      .filter(_.contains("implements Domain<<YourDomain>.State>")).toList
-    assertEquals(skeleton.size, 1, "exactly one skeleton block")
-    val source = skeleton.head.replace("<YourDomain>", "SkeletonDomain")
-    val errors = compile(Map("pag/domains/gen/SkeletonDomain.java" -> source))
-    assertEquals(errors, Nil)
+  test("v3's prompt is unchanged: its hash is the one its campaigns recorded"):
+    assertEquals(generator("generator-v3").sha256, "ccdfeebef66b775ce3df0e7f747b0b49ce94615e585835405bfe2d2169dd9bbe")
+
+  test("v4 keeps v3's system message"):
+    assertEquals(Files.readString(repo.resolve("campaign/prompts/generator-v4/system.md")),
+      Files.readString(repo.resolve("campaign/prompts/generator-v3/system.md")))
+
+  test("v4's user message is v3's with one section, how to work, before the reply section"):
+    val Seq(v3, v4) = List("generator-v3", "generator-v4").map(v => Files.readString(repo.resolve(s"campaign/prompts/$v/user.md"))): @unchecked
+    val section = "(?s)# How to work\n.*?\n\n(?=# Your reply\n)".r.findFirstIn(v4).getOrElse(fail("no section"))
+    assertEquals(v4.replace(section, ""), v3)
+    assertEquals("(?m)^# ".r.findAllIn(section).size, 1, "exactly one heading added")
+
+  for version <- List("generator-v3", "generator-v4") do
+    test(s"$version's skeleton, its placeholder filled in, compiles against the contract"):
+      val user = generator(version).messages(1).content
+      val skeleton = "```java\n(?s)(.*?)\n```".r.findAllMatchIn(user).map(_.group(1))
+        .filter(_.contains("implements Domain<<YourDomain>.State>")).toList
+      assertEquals(skeleton.size, 1, "exactly one skeleton block")
+      val source = skeleton.head.replace("<YourDomain>", "SkeletonDomain")
+      val errors = compile(Map("pag/domains/gen/SkeletonDomain.java" -> source))
+      assertEquals(errors, Nil)
 
   test("the compile check itself rejects the mistake the skeleton guards against"):
     val source = "package pag.domains.gen;\nimport pag.api.*;\n" +

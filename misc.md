@@ -335,3 +335,51 @@ written by the analysis designers, and only the fixed point is checked. Here the
 domain is generated and untrusted, so a second, empirical layer — the adversary
 and its reaching runs — covers the operations the certifier must take on faith.
 That combination is the part to contrast in a related-work section.
+
+---
+
+## 9. Reducing token use (2026-10-13)
+
+From reading the reasoning in `results/e1fb82k-rung0-qwen3.8-27B-20261013T030126Z`
+(Qwen3.8-27B, `generator-v3`, 81,920 tokens). Four of five attempts ran out of
+tokens: three while still thinking, one partway into its answer. The fifth
+used 78,037 tokens in round 1 and 74,325 in its one build-feedback round.
+The tokens went on:
+
+- **Ambitious designs.** Fourier–Motzkin, zones, unions of intervals with
+  linear propagation; the one that built was 1,458 lines. The prompt's "the
+  more … the better" invites this and nothing bounds it.
+- **Code drafted in the thinking.** Two to five whole-file drafts per trace,
+  the first 40–65% of the way in, then written again as the answer.
+- **Hand-checking cases.** 300–600 "Good." / "Sound." sentences per trace.
+- **The build-fix round.** Eight trivial `javac` errors cost 74k tokens: a
+  re-audit of the whole design, four more drafts, and every file re-sent
+  because the template asks for that.
+
+Process guidance in the prompt (what the domain should be is still left to
+the model) is being tried first. The other ideas, parked:
+
+1. **State the budget.** Tell the model that thinking and answer share a cap
+   of N tokens and that a cut-off reply scores nothing; it cannot see
+   `maxTokens` otherwise. A change to rung 0's prompt.
+2. **Cheaper build-feedback rounds.** Thinking off for build-feedback rounds
+   only (`chat_template_kwargs: {"enable_thinking": false}`); "fix only these
+   errors, do not redesign" in `feedback-build`; optionally accept only the
+   files that changed. Leaves rung 0's prompt alone.
+3. **`--reasoning-budget` on llama-server.** Already a later variation in
+   `experiments.md`. Check how the pinned build (b11514) handles a token
+   count before relying on it; older builds took only -1 or 0.
+4. **Thinking off**, or **the domain in pieces** (`experiments.md`, *Also
+   try*). Both shrink each request; the first is already a planned variation.
+5. **`presencePenalty` above 0**, against repetition. Read what the Qwen3.8
+   card says about it before trying; not checked here. Low confidence.
+6. **A bigger budget.** The 245,760-token arm (`config/e1fb240k-rung0.json`)
+   may let more attempts finish, at up to about 2.7 hours each.
+
+Smaller prompt wording, cheap to fix in the same pass:
+
+- "`entails` must return true whenever its answer is true" puzzled four of six
+  traces.
+- One trace wondered whether `reach(id)` arrives as a `Step.Call`.
+- The contract's comments cite `implementation_strategy.md` sections and
+  "lift = false", which the model cannot see.
