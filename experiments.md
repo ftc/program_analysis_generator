@@ -49,6 +49,12 @@ bash scripts/common.sh
      at least 65,536.
    - `curl -s http://localhost:8933/v1/models` reports the GGUF's path as the
      model id: the record's `path`.
+   - `curl -s http://localhost:8933/props | python3 -c "import json,sys;
+     print(json.load(sys.stdin).get('build_info'))"` prints
+     `b<number>-de7fa0a3c`. E1's experiment files require llama.cpp
+     `de7fa0a3c` (`"llamaCpp"`), and `generate` refuses any other build, or a
+     server that reports none. Each run pins the build, and stops if the
+     server's build changes partway.
 
 2. **Start the campaign**, inside `tmux` (`tmux new -s e1`; detach with
    Ctrl-b d, reattach with `tmux attach -t e1`). A campaign takes hours, and an

@@ -397,7 +397,8 @@ with prompt <letter>" (`experiments.md`, The report; *Decided — Shawn,
 **Experiment file** — the JSON a campaign is run from, holding every
 experimental parameter and nothing about the model: the endpoint, sampling
 settings, thinking, token budget, timeout and retries, prompt version, sample
-count and feedback rounds. One per **arm** — one variant of an experiment,
+count and feedback rounds, and, optionally, `llamaCpp`, the llama.cpp commit
+its server must be built from. One per **arm** — one variant of an experiment,
 such as E1's rung 0 one shot (`config/e1-rung0.json`) or with build feedback
 (`config/e1fb-rung0.json`). No flag or model overrides it. Its base name is the
 first part of the campaign's name (plan §10, *Decided — Shawn, 2026-10-12*).
@@ -416,8 +417,11 @@ are comparable with each other. They are the agent settings, the prompt's
 version and hash, the corpus hash, the profile, the sample count, the **build
 pin** (the limit on each Gradle call and how many tries a compile gets), and
 the **feedback pin** (the most feedback rounds, what each round sends, and the
-feedback templates' version and hash; none for a one-shot run), and the
-**reply rules**' version. Written when a run starts. `generate --resume` continues a run only if the current inputs
+feedback templates' version and hash; none for a one-shot run), the
+**reply rules**' version, and the **server build** (llama.cpp's `build_info`,
+`b<number>-<commit>`, from its `/props`; none from a server that reports
+none). Written when a run starts; the server build is checked again before
+each sample. `generate --resume` continues a run only if the current inputs
 match its pin. Types `CampaignPin`, `BuildPin`, `FeedbackPin` (plan §14, §16
 item 25).
 

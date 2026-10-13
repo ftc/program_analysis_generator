@@ -118,3 +118,18 @@ class ChatClientSuite extends munit.FunSuite:
       assertEquals(client(s.baseUrl)._1.models(), Right("""{"data":[{"id":"m.gguf"}]}"""))
       assertEquals(s.received.head.path, "/v1/models")
     }
+
+  test("serverBuild() reads build_info from /props, which lives beside /v1, not under it"):
+    val server = FakeServer(List(200 -> "unused"), props = () => Some("""{"total_slots":1,"build_info":"b10726-85c55223c"}"""))
+    try
+      assertEquals(client(server.baseUrl)._1.serverBuild(), Some("b10726-85c55223c"))
+      assertEquals(server.received.map(_.path), List("/props"))
+    finally server.stop()
+
+  test("serverBuild() is None without /props, or without build_info in it"):
+    withServer(200 -> "unused") { s => assertEquals(client(s.baseUrl)._1.serverBuild(), None) }
+    val server = FakeServer(List(200 -> "unused"), props = () => Some("""{"total_slots":1}"""))
+    try assertEquals(client(server.baseUrl)._1.serverBuild(), None) finally server.stop()
+
+  test("serverBuild() is None when nothing answers"):
+    assertEquals(client("http://127.0.0.1:1/v1", retries = 0)._1.serverBuild(), None)

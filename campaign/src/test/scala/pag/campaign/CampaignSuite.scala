@@ -285,3 +285,86 @@ class CampaignSuite extends munit.FunSuite:
         assert(run(Start.Resume(dir, 1), settings(3)).isRight, "the same settings resume")
       }
     }
+
+  // The llama.cpp build: pinned, held for the whole run, and required by an experiment that names one.
+
+  def props(build: String): String = s"""{"total_slots":1,"build_info":"$build"}"""
+
+  /** A server answering without files, whose /props reports `builds` in turn, repeating the last. */
+  def withBuilds[A](builds: String*)(body: FakeServer => A): A =
+    val calls = java.util.concurrent.atomic.AtomicInteger(0) // counts /props requests, from the server's thread
+    val server = FakeServer(List(200 -> completion("no files")),
+      props = () => Some(props(builds(math.min(calls.getAndIncrement(), builds.size - 1)))))
+    try body(server) finally server.stop()
+
+  def generateRequiring(server: FakeServer, results: Path, start: Start, llamaCpp: Option[String]
+  ): Either[String, (Path, List[SampleOutcome])] =
+    val agent = AgentConfig(server.baseUrl, "m.gguf", temperature = 0.2, retries = 0)
+    Campaign.generate(start, agent, ChatClient(agent), prompt, tools(), results, now = () => at, llamaCpp = llamaCpp)
+
+  test("a new run pins the server's build; a server reporting none pins none"):
+    withBuilds("b10726-de7fa0a3c") { s =>
+      withResults { results =>
+        val dir = fresh(s, results, 1)
+        assertEquals(Campaign.pinned(dir).flatMap(_.serverBuild), Some("b10726-de7fa0a3c"))
+        assert(Files.readString(dir.resolve("campaign.json")).contains("\"serverBuild\": \"b10726-de7fa0a3c\""))
+      }
+    }
+    withServer(200 -> completion("no files")) { s =>
+      withResults(results => assertEquals(Campaign.pinned(fresh(s, results, 1)).flatMap(_.serverBuild), None))
+    }
+
+  test("resuming under another server build is refused, as it is for runs pinned before builds were"):
+    resumeAfterPinEdit("the server build", _.copy(serverBuild = Some("b10000-85c55223c")))
+    withBuilds("b10726-de7fa0a3c") { s =>
+      withResults { results =>
+        import Campaign.given
+        val dir = fresh(s, results, 1)
+        Files.write(dir.resolve("campaign.json"), Json.encode(Campaign.pinned(dir).get.copy(serverBuild = None)).toByteArray)
+        val out = generate(s, results, Start.Resume(dir, 1))
+        assert(out.left.exists(_.contains("the server build changed")), out)
+      }
+    }
+
+  test("a server whose build changes partway stops the run; the attempts finished are kept and resume finishes it"):
+    // /props calls: the start, then before each new sample; the third reports another build.
+    withBuilds("b10726-de7fa0a3c", "b10726-de7fa0a3c", "b10000-85c55223c") { s =>
+      withResults { results =>
+        val out = generate(s, results, Start.Fresh("e1-test", 3))
+        val dir = results.resolve("e1-test-20261009T172600Z")
+        assert(out.left.exists(e => e.contains("stopped before attempt-002") && e.contains("b10000-85c55223c")), out)
+        assert(Files.isRegularFile(dir.resolve("attempt-001/attempt.json")))
+        assert(!Files.exists(dir.resolve("attempt-002")))
+        assertEquals(chats(s), 1)
+        assert(Files.readString(dir.resolve("status.json")).contains("the server's build changed"))
+      }
+    }
+    withBuilds("b10726-de7fa0a3c") { s =>
+      withResults { results =>
+        val dir = fresh(s, results, 1)
+        val (_, out) = generate(s, results, Start.Resume(dir, 1)).fold(e => fail(e), identity)
+        assertEquals(out, List(SampleOutcome.Kept("attempt-001")), "the same build resumes")
+      }
+    }
+
+  test("an experiment requiring a build runs only on it: matched by abbreviated commit, refused otherwise"):
+    withBuilds("b10726-de7fa0a3c") { s =>
+      withResults { results =>
+        assert(generateRequiring(s, results, Start.Fresh("e1-a", 1), Some("de7fa0a3c")).isRight)
+        assert(generateRequiring(s, results, Start.Fresh("e1-b", 1), Some("de7fa0a")).isRight, "a shorter hash")
+        val wrong = generateRequiring(s, results, Start.Fresh("e1-c", 1), Some("85c55223c"))
+        assert(wrong.left.exists(_.contains("the server is built from de7fa0a3c")), wrong)
+        assert(!Files.exists(results.resolve("e1-c-20261009T172600Z")), "refused before the run's directory exists")
+      }
+    }
+    withServer(200 -> completion("no files")) { s =>
+      withResults { results =>
+        val none = generateRequiring(s, results, Start.Fresh("e1-d", 1), Some("de7fa0a3c"))
+        assert(none.left.exists(_.contains("the server reports no build")), none)
+      }
+    }
+
+  test("the build check on its own: a commit too short to tell, or a build_info without a commit, is refused"):
+    assert(Campaign.requireBuild(Some("de7fa0a3c"), Some("b10726-de7fa")).isLeft, "6 characters")
+    assert(Campaign.requireBuild(Some("de7fa0a3c"), Some("b10726")).isLeft)
+    assertEquals(Campaign.requireBuild(None, None), Right(()))

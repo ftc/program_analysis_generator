@@ -1510,9 +1510,24 @@ it did not make). The campaign copies it into every attempt record without
 interpreting it — a placeholder for a fuller provenance scheme being designed
 separately, which can replace it. Each attempt also records, automatically, the
 request parameters it sent and what the server reported about the model at the
-time (`/v1/models`, and llama.cpp's `/props` if present), so an unrecorded swap
-of the GGUF still shows as a changed size or parameter count (E3 in
-`experiments.md`). *Decided — Shawn, 2026-10-06.*
+time (`/v1/models`), so an unrecorded swap of the GGUF still shows in the
+model's id (E3 in `experiments.md`). *Decided — Shawn, 2026-10-06.* (Until
+2026-10-12 this said each attempt also recorded llama.cpp's `/props`; none
+ever did, and llama.cpp's `/v1/models` leaves the size and parameter count
+empty, as the committed records show.)
+
+**The llama.cpp build is pinned.** *Decided — Shawn, 2026-10-12.* A run pins
+the server's build, the `build_info` that llama.cpp's `/props` reports
+(`b<number>-<commit>`, the commit `llama-server --version` prints), as
+`serverBuild` in `campaign.json`. A resume under another build is refused, and
+a server whose build changes partway stops the run, keeping the attempts it
+finished. An experiment file may name the commit its server must be built
+from, `"llamaCpp": "<commit>"`; `generate` then refuses any other build, or a
+server reporting none. E1's experiment files name `de7fa0a3c`, the build every
+E1 run so far used, so the ladder runs on one llama.cpp; upgrading it is a
+deliberate change between experiments, not partway through one. Read from
+llama.cpp's source (`tools/server/server-context.cpp`, `get_res_props`;
+`common/build-info.cpp.in`, `llama_build_info`) on 2026-10-12, at `master`.
 
 **Config is JSON**, read with the same Borer codecs as every record (§13). A
 config is read once, or once every few minutes, so its format has no

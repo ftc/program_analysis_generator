@@ -13,10 +13,11 @@ final case class Received(method: String, path: String, authorization: Option[St
 /** An OpenAI-compatible endpoint for tests, on the JDK's own HTTP server: it
   * answers each chat request with the next scripted (status, body), repeating
   * the last, and keeps what it received. A `/models` request is answered with
-  * the next one without using it up, so scripts list only the chat replies.
+  * the next one without using it up, so scripts list only the chat replies. A `/props` request is answered with
+  * `props`, or 404 without one, as a server other than llama.cpp would.
   * Mutable by nature — it observes requests.
   */
-final class FakeServer(script: List[(Int, String)], delayMs: Long = 0):
+final class FakeServer(script: List[(Int, String)], delayMs: Long = 0, props: () => Option[String] = () => None):
   private val server: HttpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
   private val pending: ConcurrentLinkedQueue[(Int, String)] = ConcurrentLinkedQueue(script.asJava)
   private val log: ConcurrentLinkedQueue[Received] = ConcurrentLinkedQueue()
@@ -26,8 +27,11 @@ final class FakeServer(script: List[(Int, String)], delayMs: Long = 0):
     log.add(Received(exchange.getRequestMethod, exchange.getRequestURI.getPath,
       Option(exchange.getRequestHeaders.getFirst("Authorization")), body))
     if delayMs > 0 then Thread.sleep(delayMs) // a slow model: received, then answered late
-    val models = exchange.getRequestURI.getPath.endsWith("/models")
-    val (status, reply) = if pending.size > 1 && !models then pending.poll() else pending.peek()
+    val path = exchange.getRequestURI.getPath
+    val models = path.endsWith("/models")
+    val (status, reply) =
+      if path.endsWith("/props") then props().fold((404, "Not Found"))(200 -> _)
+      else if pending.size > 1 && !models then pending.poll() else pending.peek()
     val bytes = reply.getBytes(UTF_8)
     exchange.sendResponseHeaders(status, bytes.length.toLong)
     exchange.getResponseBody.write(bytes)

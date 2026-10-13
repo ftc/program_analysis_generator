@@ -30,7 +30,8 @@ final case class GeneratorSettings(
 final case class ExperimentAgents(generator: GeneratorSettings)
 
 /** An experiment file as written (implementation_strategy.md §10): every experimental parameter of one arm. */
-final case class ExperimentFile(prompt: String, samples: Int, feedbackRounds: Int = 0, agents: ExperimentAgents)
+final case class ExperimentFile(prompt: String, samples: Int, feedbackRounds: Int = 0, agents: ExperimentAgents,
+    llamaCpp: Option[String] = None) // the llama.cpp commit the server must be built from; None: any server
 
 /** A provenance record as written (implementation_strategy.md §10): the model's source block, and `path`, where its
   * GGUF is on the server. Every field is optional here so that a missing one is reported by name.
@@ -47,7 +48,8 @@ final case class ProvenanceRecord(
 final case class Model(name: String, gguf: Path, source: ModelSource)
 
 /** A campaign to run: an experiment file applied to a provenance record (implementation_strategy.md §10). */
-final case class Experiment(campaign: String, agent: AgentConfig, prompt: String, samples: Int, feedbackRounds: Int):
+final case class Experiment(campaign: String, agent: AgentConfig, prompt: String, samples: Int, feedbackRounds: Int,
+    llamaCpp: Option[String]):
 
   /** A new run, or the run in `dir` continued. A resumed run must be of this campaign; its pin, the sample count
     * included, is checked by `Campaign.generate`.
@@ -82,10 +84,12 @@ object Experiment:
     for
       e <- decode[ExperimentFile](experimentFile, ExperimentShape, "the model comes from the provenance record")
       _ <- Either.cond(e.samples > 0, (), s"$experimentFile: samples must be positive, not ${e.samples}")
+      _ <- e.llamaCpp.filterNot(_.matches("[0-9a-f]{7,40}")).fold(Right(()))(c =>
+        Left(s"$experimentFile: llamaCpp must be a commit hash, at least 7 hex digits, not $c"))
       m <- model(recordFile)
       _ <- Either.cond(Files.isRegularFile(m.gguf), (), s"$recordFile: there is no GGUF at ${m.gguf}")
     yield Experiment(s"${experimentFile.getFileName.toString.stripSuffix(".json")}-${m.name}",
-      e.agents.generator.agent(m.gguf.toString, m.source), e.prompt, e.samples, e.feedbackRounds)
+      e.agents.generator.agent(m.gguf.toString, m.source), e.prompt, e.samples, e.feedbackRounds, e.llamaCpp)
 
   /** Reads a provenance record, without looking for its GGUF. Its `path` must be absolute and end in its `file`. The
     * model's name is the last segment of its url, first letter lowered.

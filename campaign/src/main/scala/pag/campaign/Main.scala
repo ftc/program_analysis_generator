@@ -84,7 +84,7 @@ object Main:
             Feedback.load(repo, FeedbackTemplateVersion).flatMap(FeedbackSettings.of(n, _)).map(Some(_)))
           start <- experiment.start(a.resume)
           done <- Campaign.generate(start, agent, ChatClient(agent), prompt, tools, repo.resolve("results"), report,
-            println, feedback = feedback)
+            println, feedback = feedback, llamaCpp = experiment.llamaCpp)
         yield done
         outcome match
           case Left(message)         => System.err.println(s"campaign: $message"); sys.exit(1)

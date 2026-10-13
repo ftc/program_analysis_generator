@@ -104,6 +104,19 @@ final class ChatClient(
       if response.statusCode == 200 then Right(response.body) else Left(s"HTTP ${response.statusCode}")
     catch case e: java.io.IOException => Left(s"no response: $e")
 
+  /** The server's build as llama.cpp's `/props` reports it, `build_info`: "b<number>-<commit>". `/props` lives
+    * beside `/v1`, not under it. None: no response, not HTTP 200, or no `build_info` (a server other than llama.cpp).
+    */
+  def serverBuild(): Option[String] =
+    try
+      val request = authorized(HttpRequest.newBuilder(URI.create(s"${base.stripSuffix("/v1")}/props")))
+        .timeout(Duration.ofSeconds(30)).GET().build()
+      val response = http.send(request, HttpResponse.BodyHandlers.ofString())
+      Option.when(response.statusCode == 200)(response.body)
+        .flatMap(b => Json.decode(b.getBytes("UTF-8")).to[Dom.Element].valueEither.toOption)
+        .flatMap(root => ChatClient.text(ChatClient.field(root, "build_info")))
+    catch case _: java.io.IOException => None
+
   private def authorized(b: HttpRequest.Builder): HttpRequest.Builder =
     agent.apiKeyEnv.flatMap(env).fold(b)(key => b.header("Authorization", s"Bearer $key"))
 
@@ -153,11 +166,11 @@ object ChatClient:
           ))
     }
 
-  private def field(e: Dom.Element, name: String): Option[Dom.Element] = e match
+  private[campaign] def field(e: Dom.Element, name: String): Option[Dom.Element] = e match
     case m: Dom.MapElem => m.toMap.collectFirst { case (Dom.StringElem(k), v) if k == name => v }
     case _              => None
 
-  private def text(e: Option[Dom.Element]): Option[String] = e.collect { case Dom.StringElem(s) => s }
+  private[campaign] def text(e: Option[Dom.Element]): Option[String] = e.collect { case Dom.StringElem(s) => s }
 
   private def number(e: Option[Dom.Element]): Option[Long] = e.collect {
     case Dom.IntElem(n)  => n.toLong

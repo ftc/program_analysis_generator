@@ -23,7 +23,9 @@ final case class CampaignPin(
     samples: Option[Int] = None, // added 2026-10-09, as are the next two; None: pinned before then
     build: Option[BuildPin] = None, // None: pinned before then, when builds had 5 minutes and one try
     feedback: Option[FeedbackPin] = None, // None: one shot
-    replyRules: Option[String] = None // Reply.Rules; None: pinned before 2026-10-11, under v1
+    replyRules: Option[String] = None, // Reply.Rules; None: pinned before 2026-10-11, under v1
+    // llama.cpp's build_info, e.g. "b10726-85c55223c"; None: pinned before 2026-10-12, or a server reporting none
+    serverBuild: Option[String] = None
 )
 
 /** How domains are built (Build): the limit on each Gradle call, and how many tries a compile gets. */
@@ -72,35 +74,69 @@ object Campaign:
   /** A run's start time in its directory name: UTC, to the second, sorting as text sorts. */
   val StartFormat: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC)
 
-  /** Runs the samples; returns the run's directory and what happened to each sample. */
+  /** Runs the samples; returns the run's directory and what happened to each sample. `llamaCpp`: the llama.cpp
+    * commit the experiment requires the server to be built from. A server whose build changes partway stops the run,
+    * keeping the attempts it finished.
+    */
   def generate(start: Start, agent: AgentConfig, client: ChatClient, prompt: Prompt, tools: Tools, results: Path,
       progress: SampleOutcome => Unit = _ => (), notice: String => Unit = _ => (), now: () => Instant = () => Instant.now(),
-      feedback: Option[FeedbackSettings] = None
+      feedback: Option[FeedbackSettings] = None, llamaCpp: Option[String] = None
   ): Either[String, (Path, List[SampleOutcome])] =
+    val serverBuild = client.serverBuild()
     for
+      _ <- requireBuild(llamaCpp, serverBuild)
       corpusHash <- corpusSha256(tools.corpus)
       current = CampaignPin(AgentRecord.of(agent), prompt.version, prompt.sha256, corpusHash, Attempt.Profile,
-        build = Some(CurrentBuild), feedback = feedback.map(_.pin), replyRules = Some(Reply.Rules))
+        build = Some(CurrentBuild), feedback = feedback.map(_.pin), replyRules = Some(Reply.Rules),
+        serverBuild = serverBuild)
       run <- start match
         case Start.Fresh(name, samples) => fresh(results, name, samples, current, now())
         case Start.Resume(dir, samples) => resume(dir, samples, current)
       (dir, samples) = run
-    yield
-      notice(s"campaign run $dir")
-      val name = dir.getFileName.toString
-      val status = StatusReporter(dir, name, samples, agent.timeoutSeconds)
-      val outcomes = (1 to samples).toList.map { sample =>
+      _ = notice(s"campaign run $dir")
+      name = dir.getFileName.toString
+      status = StatusReporter(dir, name, samples, agent.timeoutSeconds)
+      outcomes <- samplesFrom(1, samples, Nil) { sample =>
         val attemptDir = dir.resolve(f"attempt-$sample%03d")
         val outcome =
-          if Files.exists(attemptDir.resolve("attempt.json")) then SampleOutcome.Kept(attemptDir.getFileName.toString)
-          else
-            status.attempt(attemptDir.getFileName.toString)
-            SampleOutcome.Ran(Attempt.run(name, sample, agent, client, prompt, tools, attemptDir, status.stage, feedback))
-        progress(outcome)
+          if Files.exists(attemptDir.resolve("attempt.json")) then Right(SampleOutcome.Kept(attemptDir.getFileName.toString))
+          else client.serverBuild().filter(b => serverBuild.exists(_ != b)) match
+            case Some(changed) =>
+              status.stage("stopped: the server's build changed")
+              Left(s"stopped before ${attemptDir.getFileName}: the server's build changed from ${serverBuild.get} to " +
+                s"$changed; the attempts finished are kept, so resume $dir once the server is back on ${serverBuild.get}")
+            case None =>
+              status.attempt(attemptDir.getFileName.toString)
+              Right(SampleOutcome.Ran(Attempt.run(name, sample, agent, client, prompt, tools, attemptDir, status.stage,
+                feedback)))
+        outcome.foreach(progress)
         outcome
       }
+    yield
       status.finished()
       (dir, outcomes)
+
+  /** Runs `run` on samples `from` to `to` in order, stopping at the first that refuses. */
+  @scala.annotation.tailrec
+  private def samplesFrom(from: Int, to: Int, done: List[SampleOutcome])(run: Int => Either[String, SampleOutcome]
+  ): Either[String, List[SampleOutcome]] =
+    if from > to then Right(done.reverse)
+    else run(from) match
+      case Left(e)  => Left(e)
+      case Right(o) => samplesFrom(from + 1, to, o :: done)(run)
+
+  /** The build the experiment requires, if any, against the one the server reports: their commits must agree on
+    * the shorter's length (both are abbreviated hashes, at least 7 characters).
+    */
+  def requireBuild(llamaCpp: Option[String], serverBuild: Option[String]): Either[String, Unit] =
+    llamaCpp.fold(Right(())) { required =>
+      val commit = serverBuild.map(_.split("-", 2)).collect { case Array(_, c) => c }
+      commit match
+        case None => Left(s"the experiment requires llama.cpp $required, but the server reports no build " +
+            s"(${serverBuild.fold("no build_info from /props")(b => s"build_info $b")})")
+        case Some(c) if c.length >= 7 && (c.startsWith(required) || required.startsWith(c)) => Right(())
+        case Some(c) => Left(s"the experiment requires llama.cpp $required, but the server is built from $c")
+    }
 
   /** A new directory, `<name>-<start>`, pinned. Never an existing one: two starts in one second are refused. */
   private def fresh(results: Path, name: String, samples: Int, current: CampaignPin, at: Instant
@@ -133,6 +169,7 @@ object Campaign:
         Option.when(pinned.build != current.build)("the build settings"),
         Option.when(pinned.feedback != current.feedback)("the feedback settings"),
         Option.when(pinned.replyRules != current.replyRules)("the reply rules"),
+        Option.when(pinned.serverBuild != current.serverBuild)("the server build"),
         Option.when(pinned.samples.exists(_ != samples))("the sample count")
       ).flatten
       _ <- Either.cond(changed.isEmpty, (), s"$dir was run with different inputs (${changed.mkString(", ")} changed); " +

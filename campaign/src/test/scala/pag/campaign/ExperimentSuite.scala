@@ -52,7 +52,7 @@ class ExperimentSuite extends munit.FunSuite:
           Some(true), Some(32768), 2700, 3,
           ModelSource(Some("https://huggingface.co/Qwen/Qwen3.8-27B"), Some("Qwen3.8-27B-Q8_0-llamacpp-de7fa0a3c.gguf"),
             Some("1d4bf0f2"), Some("8ec6796c"))),
-        "generator-v3", 5, 3))
+        "generator-v3", 5, 3, None))
     }
 
   test("without feedbackRounds, one shot; the options left out are not sent"):
@@ -142,7 +142,7 @@ class ExperimentSuite extends munit.FunSuite:
   // Starting a run
 
   def experimentFor(samples: Int): Experiment =
-    Experiment("e1fb-rung0-qwen3.8-27B", AgentConfig("http://x/v1", "m.gguf", retries = 0), "generator-v3", samples, 3)
+    Experiment("e1fb-rung0-qwen3.8-27B", AgentConfig("http://x/v1", "m.gguf", retries = 0), "generator-v3", samples, 3, None)
 
   /** A run directory under a scratch results directory. */
   def withRun[A](name: String)(body: Path => A): A =
@@ -166,3 +166,21 @@ class ExperimentSuite extends munit.FunSuite:
         assert(experimentFor(5).start(Some(dir)).left.exists(_.contains("is not a run of campaign")), n)
       }
     }
+
+  // llamaCpp: the llama.cpp commit an arm requires its server to be built from.
+
+  test("llamaCpp is read from the experiment file; without it, any server"):
+    withFiles(experimentJson = experiment.replace("\"samples\":5,", "\"samples\":5,\"llamaCpp\":\"de7fa0a3c\",")) {
+      (_, e, m) => assertEquals(Experiment.read(e, m).map(_.llamaCpp), Right(Some("de7fa0a3c")))
+    }
+    withFiles() { (_, e, m) => assertEquals(Experiment.read(e, m).map(_.llamaCpp), Right(None)) }
+
+  test("llamaCpp must be a commit hash of at least 7 hex digits"):
+    for bad <- List("de7fa0", "master", "DE7FA0A3C") do
+      val r = refused(experimentJson = experiment.replace("\"samples\":5,", s"\"samples\":5,\"llamaCpp\":\"$bad\","))
+      assert(r.contains("llamaCpp must be a commit hash"), r)
+
+  test("E1's experiment files require llama.cpp de7fa0a3c, the build every committed run used"):
+    val repo = Repo.root().fold(e => fail(e), identity)
+    for arm <- List("e1-rung0", "e1fb-rung0") do
+      assert(Files.readString(repo.resolve(s"config/$arm.json")).contains("\"llamaCpp\": \"de7fa0a3c\""), arm)
