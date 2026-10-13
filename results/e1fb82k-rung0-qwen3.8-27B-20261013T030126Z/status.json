@@ -1,0 +1,12 @@
+{
+  "campaign": "e1fb82k-rung0-qwen3.8-27B-20261013T030126Z",
+  "samplesRequested": 5,
+  "attempt": null,
+  "stage": "finished",
+  "stageStartedAt": "2026-10-13T08:13:18.028885215Z",
+  "attemptStartedAt": null,
+  "timeoutSeconds": 5400,
+  "updatedAt": "2026-10-13T08:13:18.028901075Z",
+  "running": false,
+  "startedAt": "2026-10-13T03:01:26.136664734Z"
+}
