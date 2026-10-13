@@ -1510,11 +1510,11 @@ it did not make). The campaign copies it into every attempt record without
 interpreting it — a placeholder for a fuller provenance scheme being designed
 separately, which can replace it. Each attempt also records, automatically, the
 request parameters it sent and what the server reported about the model at the
-time (`/v1/models`), so an unrecorded swap of the GGUF still shows in the
-model's id (E3 in `experiments.md`). *Decided — Shawn, 2026-10-06.* (Until
-2026-10-12 this said each attempt also recorded llama.cpp's `/props`; none
-ever did, and llama.cpp's `/v1/models` leaves the size and parameter count
-empty, as the committed records show.)
+time (`/v1/models`, whose `meta` llama.cpp fills with the model's size and
+parameter count), so an unrecorded swap of the GGUF still shows as a changed
+size or parameter count (E3 in `experiments.md`). *Decided — Shawn,
+2026-10-06.* (Until 2026-10-12 this said each attempt also recorded
+llama.cpp's `/props`; none ever did.)
 
 **The llama.cpp build is pinned.** *Decided — Shawn, 2026-10-12.* A run pins
 the server's build, the `build_info` that llama.cpp's `/props` reports
@@ -2562,3 +2562,55 @@ framework, library, or the OS.
     Built in this order, one change each: the feedback messages; build
     retries; the pin and record fields; the loop in latest-only mode, with its
     flags; the report's "rounds used" column; full-history mode.
+
+    **Progress, 2026-10-13.** Built and committed: the feedback messages,
+    build retries, the pin and record fields, and the loop in latest-only
+    mode. Since 2026-10-12 the loop is set by `feedbackRounds` in the
+    experiment file (§10), not a flag. The first part of the report change
+    (4a) is in: the report reads the latest run of each campaign and prompt,
+    names it "<campaign> with prompt <letter>", and prints the prompts in an
+    appendix. What remains, in order:
+    1. **4b, the report for every arm.** **[decide]** Proposed 2026-10-13,
+       about 85 lines in `Report.scala` and `Main.scala`, with
+       `report/report.tex`, `ReportSuite` and `experiments.md`:
+       - **The arms come from `config/*.json`.** A run directory belongs to
+         the arm whose name plus `-` begins the directory's name, taking the
+         longest match, so `e1fb82k-rung0-…` is not put under a shorter arm.
+         Each arm with runs gets `report/tables/<arm>/` holding `table1.tex`,
+         `table2.tex` and `settings.tex`. A generated `arms.tex` has a section
+         per arm, and `report.tex` inputs it in place of its hand-written
+         Table 1 and 2 blocks. The corpus table and the prompts appendix stay
+         shared, so a prompt's letter means the same in every section. Runs
+         matching no arm, such as `phase10-check-…`, are skipped with a
+         warning. `campaign report` loses `--prefix` and keeps `--out`.
+       - **A Rounds column in Table 1,** only in feedback arms' sections.
+       - **Tokens are the completion tokens of every round's reply added
+         together.** For one shot that is the number shown today.
+       - **Table 2 for feedback arms** counts the attempts whose domain
+         compiled in round 1, round 2, and so on up to the pinned rounds
+         plus 1, then those that never compiled. The existing columns for
+         where attempts stopped still cover rounds that end some other way.
+       - **Settings columns from each run's `campaign.json`:** Build
+         ("2 min × 3"; "5 min × 1" when the pin lacks it), Feedback
+         ("3 rounds, latest, feedback-build-v1"; "none"), Reply rules ("v2";
+         "v1"), and llama.cpp (`serverBuild`; "not recorded"). A run without
+         a `campaign.json` gets blanks.
+       - **Invariant:** for one-shot arms, the rows of `table1.tex` and
+         `table2.tex` are unchanged, checked against fixtures. Every run
+         under `results/` appears in exactly one arm or is warned of.
+
+       Open questions: (a) one command writing every arm, with sections
+       generated (recommended), or keep `--prefix` and write a section into
+       `report.tex` by hand per arm? (b) The round-by-round counts
+       (recommended: Qwen3.5 27B with `generator-v3` used 2 to 4 rounds) or
+       two counts, "fixed by feedback" and "out of rounds"?
+    2. **The history setting moves to the experiment file.** The
+       `--feedback-history` flag above becomes a field, `feedbackHistory`,
+       since no flag overrides an experiment file. This is a docs change,
+       made before the code.
+    3. **Full-history mode,** with an over-long prompt recorded as its own
+       failure rather than sent. How llama.cpp counts and refuses an
+       over-long prompt is to be read from its source first.
+
+    Also open: whether `results/phase10-check-qwen3.8-27b/campaign.json`,
+    pinned in an older format, should be made readable.

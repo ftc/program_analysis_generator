@@ -193,7 +193,10 @@ class ExperimentSuite extends munit.FunSuite:
       val r = refused(experimentJson = experiment.replace("\"samples\":5,", s"\"samples\":5,\"llamaCpp\":\"$bad\","))
       assert(r.contains("llamaCpp must be a commit hash"), r)
 
-  test("E1's experiment files require llama.cpp de7fa0a3c, the build every committed run used"):
+  test("every E1 experiment file requires llama.cpp de7fa0a3c, the build every committed run used"):
     val repo = Repo.root().fold(e => fail(e), identity)
-    for arm <- List("e1-rung0", "e1fb-rung0") do
-      assert(Files.readString(repo.resolve(s"config/$arm.json")).contains("\"llamaCpp\": \"de7fa0a3c\""), arm)
+    val arms = Using.resource(Files.list(repo.resolve("config")))(_.iterator.asScala.toList)
+      .filter(f => f.getFileName.toString.matches("e1.*\\.json")).sorted
+    assert(arms.size >= 3, arms)
+    for arm <- arms do
+      assert(Files.readString(arm).contains("\"llamaCpp\": \"de7fa0a3c\""), arm)

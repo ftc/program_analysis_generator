@@ -2,6 +2,7 @@
   "prompt": "generator-v3",
   "samples": 5,
   "feedbackRounds": 3,
+  "llamaCpp": "de7fa0a3c",
   "agents": {
     "generator": {
       "baseUrl": "http://localhost:8933/v1",
