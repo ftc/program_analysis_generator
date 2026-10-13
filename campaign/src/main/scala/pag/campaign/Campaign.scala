@@ -3,8 +3,6 @@ package pag.campaign
 import java.nio.file.{Files, Path}
 import java.time.{Instant, ZoneOffset}
 import java.time.format.DateTimeFormatter
-import scala.jdk.CollectionConverters.*
-import scala.util.Using
 import io.bullet.borer.{Codec, Json}
 import io.bullet.borer.NullOptions.given
 import io.bullet.borer.derivation.MapBasedCodecs.*
