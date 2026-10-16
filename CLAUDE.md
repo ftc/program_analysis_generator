@@ -4,6 +4,10 @@ How changes are made in this repository. Read `README.md` for the idea,
 `implementation_strategy.md` for the plan, `experiments.md` for what the plan is
 for, and `glossary.md` for terms before changing code.
 
+## Reading the experiments
+Never read the `results` folder directly, always read the output of 
+`python3 scripts/strip_reasoning.py "$(mktemp -d)/results"`.
+
 ## One change at a time
 
 1. **One change adds one capability that is testable on its own.** It ends in
