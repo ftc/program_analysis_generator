@@ -72,6 +72,7 @@ bash scripts/common.sh
    | rung 0, build feedback, `maxTokens` 81,920 | `config/e1fb82k-rung0.json` | `e1fb82k-rung0-` |
    | rung 0, build feedback, `maxTokens` 245,760 | `config/e1fb240k-rung0.json` | `e1fb240k-rung0-` |
    | rung 0 with process guidance (`generator-v4`), build feedback, `maxTokens` 81,920 | `config/e1fb82k-rung0-v4.json` | `e1fb82k-rung0-v4-` |
+   | rung 0 with process guidance (`generator-v5`), build feedback, `maxTokens` 245,760 | `config/e1fb240k-rung0-v5.json` | `e1fb240k-rung0-v5-` |
 
    Prompt plus reply must fit in the server's `-c`, 262,144 by default since
    2026-10-13 (65,536 until 2026-10-12, enough only for the 32,768 arms; then
@@ -81,7 +82,7 @@ bash scripts/common.sh
    tokens. The 245,760 arm is the most the context allows, leaving 16,384
    tokens for the prompt (round 1's is 3,307; feedback rounds stay near 10k).
    Its timeout is 14,400 s: about 2.8 hours at an estimated 24 tokens/s, plus
-   margin.
+   margin. The `generator-v5` arm at the same limit has a timeout of 10,800 s.
 
    Every setting of the run is in the experiment file; to change one, edit the
    file or add an arm (§10). It prints the run's directory,
@@ -326,6 +327,12 @@ attempts ran out of tokens, mostly on whole-file drafts in the thinking and
 hand-checked cases (`misc.md` §9). Because the limit is in the text, v4 goes
 with the 81,920 arm only; `ExperimentSuite` checks the two agree.
 *Decided — Shawn, 2026-10-13.*
+
+`generator-v5` (2026-10-16) is `generator-v4` with the stated limit raised to
+245,760 tokens, and is otherwise the same, system message included. It goes
+with the 245,760 arm only, `config/e1fb240k-rung0-v5.json`. No test yet checks
+that its stated limit matches that arm's `maxTokens`, as the v4 test does.
+*Decided — Shawn, 2026-10-16.*
 
 Rungs 1–4 are written when rung 0's results call for them. Context added
 *before* an attempt is a different thing from the feedback given *after* one
