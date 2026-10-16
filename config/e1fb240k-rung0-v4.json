@@ -1,6 +1,7 @@
 {
-  "prompt": "generator-v4",
+  "prompt": "generator-v5",
   "samples": 5,
+  "llamaCpp": "de7fa0a3c",
   "feedbackRounds": 3,
   "agents": {
     "generator": {
@@ -12,7 +13,7 @@
       "presencePenalty": 0.0,
       "thinking": true,
       "maxTokens": 245760,
-      "timeoutSeconds": 5400,
+      "timeoutSeconds": 10800,
       "retries": 3
     }
   }

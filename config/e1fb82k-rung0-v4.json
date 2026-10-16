@@ -1,6 +1,7 @@
 {
   "prompt": "generator-v4",
   "samples": 5,
+  "llamaCpp": "de7fa0a3c",
   "feedbackRounds": 3,
   "agents": {
     "generator": {
