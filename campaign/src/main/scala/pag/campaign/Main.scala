@@ -10,8 +10,8 @@ import scopt.OParser
 object Main:
 
   final case class Args(command: String = "", experiment: Option[Path] = None, model: Option[Path] = None,
-      campaign: Option[String] = None, resume: Option[Path] = None, every: Option[Int] = None, prefix: String = "e1-rung0-",
-      out: Option[Path] = None)
+      campaign: Option[String] = None, resume: Option[Path] = None, every: Option[Int] = None,
+      arms: Option[List[String]] = None, out: Option[Path] = None)
 
   private val parser: OParser[Unit, Args] =
     val b = OParser.builder[Args]
@@ -40,10 +40,10 @@ object Main:
         ),
       cmd("report")
         .action((_, a) => a.copy(command = "report"))
-        .text("write Tables 1 and 2 and the prompts into report/tables/ from the campaigns' records")
+        .text("write each arm's Tables 1 and 2 and settings, and the prompts, into report/tables/ from the records")
         .children(
-          opt[String]("prefix").valueName("<prefix>").action((p, a) => a.copy(prefix = p))
-            .text("the campaigns to include: names starting with this (default e1-rung0-)"),
+          opt[Seq[String]]("arms").valueName("<arm>,...").action((as, a) => a.copy(arms = Some(as.toList)))
+            .text("the arms to report, named as config/<arm>.json (default every arm with runs)"),
           opt[Path]("out").valueName("<dir>").action((p, a) => a.copy(out = Some(p)))
             .text("where the tables go (default report/tables)")
         ),
@@ -61,14 +61,15 @@ object Main:
       case Some(a) if a.command == "report" =>
         val outcome = Repo.root().flatMap { repo =>
           val out = a.out.getOrElse(repo.resolve("report/tables"))
-          Report.write(repo.resolve("results"), a.prefix, repo.resolve("report/inspection.json"),
-            repo.resolve("corpora/smoke"), out).map(w => (out, w))
+          Report.write(repo.resolve("results"), Report.arms(repo.resolve("config")), a.arms,
+            repo.resolve("report/inspection.json"), repo.resolve("corpora/smoke"), out).map(w => (out, w))
         }
         outcome match
           case Left(e) => System.err.println(s"campaign: $e"); sys.exit(1)
-          case Right((out, warnings)) =>
-            warnings.foreach(w => System.err.println(s"campaign: warning: $w"))
-            println(s"wrote table1.tex, table2.tex, settings.tex, corpus.tex, prompts.tex and prompt-<letter>.txt in $out")
+          case Right((out, written)) =>
+            written.warnings.foreach(w => System.err.println(s"campaign: warning: $w"))
+            println(s"wrote tables for ${if written.arms.isEmpty then "no arm" else written.arms.mkString(", ")}, " +
+              s"and arms.tex, corpus.tex, prompts.tex and prompt-<letter>.txt, in $out")
       case Some(a) if a.command == "status" =>
         Repo.root() match
           case Left(e)     => System.err.println(s"campaign: $e"); sys.exit(1)

@@ -2599,11 +2599,16 @@ framework, library, or the OS.
          `table2.tex` are unchanged, checked against fixtures. Every run
          under `results/` appears in exactly one arm or is warned of.
 
-       Open questions: (a) one command writing every arm, with sections
-       generated (recommended), or keep `--prefix` and write a section into
-       `report.tex` by hand per arm? (b) The round-by-round counts
-       (recommended: Qwen3.5 27B with `generator-v3` used 2 to 4 rounds) or
-       two counts, "fixed by feedback" and "out of rounds"?
+       *Decided — Shawn, 2026-10-16:* (a) one command writes every arm,
+       its sections generated: `arms.tex` calls `report.tex`'s `\armtables`
+       once per arm, so the captions stay in `report.tex`. `--arms
+       <arm>,<arm>` names the arms to write; without it, every arm with
+       runs. An arm named in `--arms` with no experiment file is an error;
+       one with no runs is warned of. Runs matching no experiment file are
+       counted in a single warning, by campaign, not one line each.
+       (b) Table 2 counts round by round. Split in two changes: 4b-i, the
+       sections per arm (done); 4b-ii, the Rounds column, Table 2's rounds,
+       summed tokens and the settings columns.
     2. **The history setting moves to the experiment file.** The
        `--feedback-history` flag above becomes a field, `feedbackHistory`,
        since no flag overrides an experiment file. This is a docs change,

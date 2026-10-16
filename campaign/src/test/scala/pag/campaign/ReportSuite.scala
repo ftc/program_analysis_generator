@@ -80,8 +80,8 @@ class ReportSuite extends munit.FunSuite:
       val t = Report.table1(Report.campaigns(dir, "e1-rung0-"), inspections)
       val big = rowsUnder(t, "e1-rung0-qwen3.5-27b with prompt A")
       assertEquals(big.size, 3, t)
-      assert(big(0).startsWith("1 & evaluated & 4 & yes & 9/10 & yes & R & A & R & 2 &"), t)
-      assert(big(0).endsWith("& intervals & looks sound & yes \\\\"), t)
+      assert(big.head.startsWith("1 & evaluated & 4 & yes & 9/10 & yes & R & A & R & 2 &"), t)
+      assert(big.head.endsWith("& intervals & looks sound & yes \\\\"), t)
       assert(big(1).startsWith("2 & evaluated & 4 & yes & 9/10 & yes & R & $\\times$ & A & 1 &"), t)
       assert(rowsUnder(t, "e1-rung0-qwen3.5-0.8b with prompt A").head
         .startsWith("1 & no files in the reply & 0 & no &  & no &  &  &  &  &"), t)
@@ -107,11 +107,14 @@ class ReportSuite extends munit.FunSuite:
       Files.write(inspectionFile, Json.encode(withStray).toByteArray)
       val before = Files.readAllBytes(inspectionFile)
       val out = dir.resolve("tables")
-      val warnings = Report.write(dir, "e1-rung0-", inspectionFile, corpus, out).fold(e => fail(e), identity)
-      assertEquals(warnings, List("inspection.json names e1-rung0-gone/attempt-001, which is not among the campaigns read"))
-      val files = List("table1.tex", "table2.tex", "settings.tex", "corpus.tex", "prompt-A.txt", "prompts.tex")
+      val warnings = Report.write(dir, List("e1-rung0"), None, inspectionFile, corpus, out).fold(e => fail(e), identity)
+        .warnings
+      assertEquals(warnings, List("skipped 1 run matching no experiment file in config/: phase10-check (1)",
+        "inspection.json names e1-rung0-gone/attempt-001, which is not among the campaigns read"))
+      val files = List("e1-rung0/table1.tex", "e1-rung0/table2.tex", "e1-rung0/settings.tex", "corpus.tex",
+        "prompt-A.txt", "prompts.tex")
       val first = files.map(f => Files.readString(out.resolve(f)))
-      Report.write(dir, "e1-rung0-", inspectionFile, corpus, out)
+      Report.write(dir, List("e1-rung0"), None, inspectionFile, corpus, out)
       assertEquals(files.map(f => Files.readString(out.resolve(f))), first)
       assert(java.util.Arrays.equals(Files.readAllBytes(inspectionFile), before), "the inspection file was written")
       assert(first(4).startsWith("=== system ===\n") && first(4).contains("=== user ===\n# Task"), first(4))
@@ -135,14 +138,15 @@ class ReportSuite extends munit.FunSuite:
       val report = Files.createDirectories(dir.resolve("report"))
       Files.copy(repo.resolve("report/report.tex"), report.resolve("report.tex"))
       Files.write(report.resolve("inspection.json"), Json.encode(inspections).toByteArray)
-      Report.write(dir, "e1-rung0-", report.resolve("inspection.json"), corpus, report.resolve("tables"))
+      Report.write(dir, List("e1-rung0"), None, report.resolve("inspection.json"), corpus, report.resolve("tables"))
         .fold(e => fail(e), identity)
       val p = Processes.run(List("latexmk", "-lualatex", "-outdir=build", "-interaction=nonstopmode",
         "-halt-on-error", s"-cd", report.resolve("report.tex").toString), scala.concurrent.duration.DurationInt(3).minutes)
       assertEquals(p.exitCode, Some(0), p.stdout.takeRight(3000))
       assert(Files.size(report.resolve("build/report.pdf")) > 0)
       val log = Files.readString(report.resolve("build/report.log"))
-      for f <- List("settings.tex", "corpus.tex", "table1.tex", "table2.tex", "prompts.tex") do
+      for f <- List("arms.tex", "e1-rung0/settings.tex", "corpus.tex", "e1-rung0/table1.tex", "e1-rung0/table2.tex",
+          "prompts.tex") do
         assert(log.contains(s"pag-report: included $f"), s"the build did not include $f, so the report shows a placeholder")
       assert(!log.contains("Missing character"), "a character the fonts lack: " +
         log.linesIterator.filter(_.contains("Missing character")).take(5).mkString("\n"))
@@ -237,8 +241,8 @@ class ReportSuite extends munit.FunSuite:
         val t = Report.table1(Report.campaigns(dir, "e1-rung0-"), ins)
         assert(t.contains("& intervals &") && !t.contains("signs"), t)
         Files.write(dir.resolve("inspection.json"), Json.encode(ins).toByteArray)
-        val warnings = Report.write(dir, "e1-rung0-", dir.resolve("inspection.json"), corpus, dir.resolve("tables"))
-          .fold(e => fail(e), identity)
+        val warnings = Report.write(dir, List("e1-rung0"), None, dir.resolve("inspection.json"), corpus,
+          dir.resolve("tables")).fold(e => fail(e), identity).warnings
         assert(warnings.contains(s"inspection.json names $older/attempt-001, which is not among the campaigns read"), warnings)
     }
 
@@ -308,7 +312,7 @@ class ReportSuite extends munit.FunSuite:
       "e1-rung0-qwen3.5-9b" -> List(withPrompt(failed(1), "generator-v3"))
     )) { dir =>
       val out = dir.resolve("tables")
-      Report.write(dir, "e1-rung0-", dir.resolve("absent.json"), corpus, out).fold(e => fail(e), identity)
+      Report.write(dir, List("e1-rung0"), None, dir.resolve("absent.json"), corpus, out).fold(e => fail(e), identity)
       val tex = Files.readString(out.resolve("prompts.tex"))
       assert(tex.contains("\\subsection*{Prompt A: \\texttt{generator-v2}}\nSHA-256 \\texttt{2v-rotareneg}."), tex)
       assert(tex.contains("{tables/prompt-B.txt}"), tex)
@@ -319,3 +323,86 @@ class ReportSuite extends munit.FunSuite:
   test("a run pinned but with no attempts yet: its prompt is listed, without text"):
     assertEquals(Report.promptsTex(List((PromptKey("v", "s"), "A", false))).linesIterator.toList.last,
       "No attempt of these runs recorded its text.")
+
+  // Arms: one section per experiment file, config/<arm>.json, each with its own tables.
+
+  test("the arms are the experiment files' base names, sorted; the provenance records and other files are not"):
+    val config = Files.createTempDirectory("config")
+    try
+      for f <- List("e1fb-rung0.json", "e1-rung0.json", "notes.txt") do Files.writeString(config.resolve(f), "{}")
+      Files.writeString(Files.createDirectories(config.resolve("models")).resolve("m.json"), "{}")
+      assertEquals(Report.arms(config), List("e1-rung0", "e1fb-rung0"))
+    finally Using.resource(Files.walk(config))(_.iterator.asScala.toList.reverse.foreach(Files.delete))
+
+  val arms: List[String] = List("e1-rung0", "e1fb82k-rung0", "e1fb82k-rung0-v4")
+
+  test("a campaign belongs to the longest arm whose name and a dash begin its own"):
+    assertEquals(Report.armOf("e1fb82k-rung0-v4-qwen3.8-27B", arms), Some("e1fb82k-rung0-v4"))
+    assertEquals(Report.armOf("e1fb82k-rung0-qwen3.8-27B", arms), Some("e1fb82k-rung0"))
+    assertEquals(Report.armOf("e1-rung0-qwen3.5-9B", arms), Some("e1-rung0"))
+    assertEquals(Report.armOf("e1fb-rung0-qwen3.5-9B", arms), None, "e1 is not a prefix of e1fb-")
+    assertEquals(Report.armOf("e1fb82k-rung0", arms), None, "an arm's name alone names no model")
+    assertEquals(Report.armOf("phase10-check-qwen3.8-27b", arms), None)
+
+  /** `campaign report` into `dir/tables`: what it wrote. */
+  def writeArms(dir: Path, chosen: Option[List[String]], ins: Inspections = Inspections()): Report.Written =
+    import Report.given
+    Files.write(dir.resolve("inspection.json"), Json.encode(ins).toByteArray)
+    Report.write(dir, arms, chosen, dir.resolve("inspection.json"), corpus, dir.resolve("tables"))
+      .fold(e => fail(e), identity)
+
+  def table(dir: Path, arm: String, file: String): String = Files.readString(dir.resolve("tables").resolve(arm).resolve(file))
+
+  test("an arm with no longer arm sharing its name gets exactly the tables reading its prefix gives"):
+    withResults(campaigns) { dir =>
+      writeArms(dir, None, inspections)
+      val cs = Report.campaigns(dir, "e1-rung0-")
+      assertEquals(table(dir, "e1-rung0", "table1.tex"), Report.table1(cs, inspections))
+      assertEquals(table(dir, "e1-rung0", "table2.tex"), Report.table2(cs, inspections))
+      assertEquals(table(dir, "e1-rung0", "settings.tex"), Report.settings(cs))
+    }
+
+  val overlapping: Map[String, List[AttemptRecord]] = Map(
+    "e1fb82k-rung0-qwen3.8-27B-20261013T010115Z" -> List(withPrompt(failed(1), "generator-v3")),
+    "e1fb82k-rung0-v4-qwen3.8-27B-20261014T000000Z" -> List(withPrompt(evaluated(1, List("R", "A", "R")), "generator-v4")),
+    "phase10-check-qwen3.8-27b" -> List(failed(1)),
+    "e1fb-rung0-qwen3.5-9B-20261012T000000Z" -> List(failed(1))
+  )
+
+  test("each run in its own arm's section only, prompt letters shared, unmatched runs counted in one warning"):
+    withResults(overlapping) { dir =>
+      val written = writeArms(dir, None)
+      assertEquals(written.arms, List("e1fb82k-rung0", "e1fb82k-rung0-v4"), "e1-rung0 has no runs, so no section")
+      val shorter = table(dir, "e1fb82k-rung0", "table1.tex")
+      val longer = table(dir, "e1fb82k-rung0-v4", "table1.tex")
+      assert(shorter.contains("e1fb82k-rung0-qwen3.8-27B with prompt A") && !shorter.contains("v4"), shorter)
+      assert(longer.contains("e1fb82k-rung0-v4-qwen3.8-27B with prompt B"), longer)
+      assert(!Files.exists(dir.resolve("tables/e1-rung0")))
+      assertEquals(written.warnings, List("skipped 2 runs matching no experiment file in config/: " +
+        "e1fb-rung0-qwen3.5-9B (1), phase10-check-qwen3.8-27b (1)"))
+      assertEquals(Files.readString(dir.resolve("tables/arms.tex")),
+        "% Generated by `campaign report`; do not edit, regenerate instead.\n" +
+          "\\subsection{Arm \\texttt{e1fb82k-rung0}}\n\\armtables{e1fb82k-rung0}\n\n" +
+          "\\subsection{Arm \\texttt{e1fb82k-rung0-v4}}\n\\armtables{e1fb82k-rung0-v4}\n")
+    }
+
+  test("--arms: only the arms named, in their order; one with no runs is warned of; another arm stays silent"):
+    withResults(overlapping) { dir =>
+      val ins = Inspections(Map("e1fb82k-rung0-qwen3.8-27B-20261013T010115Z/attempt-009" -> Inspection()))
+      val written = writeArms(dir, Some(List("e1fb82k-rung0-v4", "e1-rung0")), ins)
+      assertEquals(written.arms, List("e1fb82k-rung0-v4"))
+      assert(!Files.exists(dir.resolve("tables/e1fb82k-rung0")), "an arm left out gets no tables")
+      assertEquals(written.warnings.drop(1), List("--arms names e1-rung0, which has no runs to read in " +
+        s"${dir.getFileName}/"), "and an inspection of an arm left out is not stray")
+      val wrote = Files.readString(dir.resolve("tables/arms.tex"))
+      assert(wrote.contains("\\armtables{e1fb82k-rung0-v4}") && !wrote.contains("\\armtables{e1fb82k-rung0}"), wrote)
+    }
+
+  test("--arms naming an arm with no experiment file is an error, naming the arms there are"):
+    withResults(overlapping) { dir =>
+      val e = Report.write(dir, arms, Some(List("e1fb82k-rung0", "e1fb-rung0")), dir.resolve("absent.json"), corpus,
+        dir.resolve("tables"))
+      assertEquals(e, Left("--arms names arms with no experiment file in config/: e1fb-rung0; " +
+        "the arms are e1-rung0, e1fb82k-rung0, e1fb82k-rung0-v4"))
+      assert(!Files.exists(dir.resolve("tables")), "nothing is written")
+    }

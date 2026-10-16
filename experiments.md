@@ -65,7 +65,7 @@ bash scripts/common.sh
    sbt "campaign/run generate --experiment config/<arm>.json --model <the provenance record>"
    ```
 
-   | arm                         | experiment file          | campaigns and report prefix |
+   | arm                         | experiment file          | campaigns' prefix           |
    |-----------------------------|--------------------------|-----------------------------|
    | rung 0, one shot            | `config/e1-rung0.json`   | `e1-rung0-`                 |
    | rung 0, build feedback      | `config/e1fb-rung0.json` | `e1fb-rung0-`               |
@@ -117,12 +117,14 @@ bash scripts/common.sh
 5. **Write it up and commit.**
 
    ```
-   sbt "campaign/run report --prefix <the arm's prefix>"
+   sbt "campaign/run report"
    (cd report && latexmk -lualatex -outdir=build report.tex)
    ```
 
-   Check its warnings: runs skipped, runs short of their samples, and
-   inspections naming no attempt it read. It replaces what is in
+   It writes a section for every arm with runs; `--arms <arm>,<arm>` names
+   the ones to write instead, by experiment file. Check its warnings: runs
+   skipped, runs short of their samples, runs matching no experiment file
+   (counted in one line), and inspections naming no attempt it read. It replaces what is in
    `report/tables/`. Then commit `results/`, `config/models/`,
    `report/inspection.json` and `report/tables/` on the server and push. Inspecting can happen anywhere
    after pulling, as long as `inspection.json` is committed back.
@@ -440,7 +442,12 @@ once the five sizes are run.
 
 `campaign report` reads the latest run of each campaign and prompt
 (*Decided — Shawn, 2026-10-12*) and names each run in the tables "<campaign>
-with prompt <letter>". The tables, the settings, the corpus and the prompts
+with prompt <letter>". The results have one section per arm, each with its
+own settings, Table 1 and Table 2 (*Decided — Shawn, 2026-10-16*): a run
+belongs to the arm whose name and a `-` begin its directory's name, the
+longest if several do, so `e1fb82k-rung0-v4-…` is not counted under
+`e1fb82k-rung0`. The corpus and the prompts are shared, so a prompt's letter
+means the same in every section. The tables, the settings, the corpus and the prompts
 are generated from the records, so the setup section cannot disagree with what
 ran; the captions, which say what each column and cell means, live in
 `report.tex`.

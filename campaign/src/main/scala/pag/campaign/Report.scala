@@ -55,16 +55,32 @@ object Report:
       Try(Instant.from(Campaign.StartFormat.parse(at))).toOption.fold(RunName(dir, None))(t => RunName(campaign, Some(t)))
     case _ => RunName(dir, None)
 
-  /** The latest run of each campaign and prompt under `results` whose campaign name starts with `prefix`,
-    * smallest model first; and warnings for the runs skipped, for a run read that holds fewer attempts than its
-    * pinned sample count, and for a run that does not say which prompt it ran. A run without a start in its
-    * name predates every run with one.
+  /** The arms (glossary, *Experiment file*): the experiment files `config/<arm>.json` by base name, sorted. */
+  def arms(config: Path): List[String] =
+    if !Files.isDirectory(config) then Nil
+    else Using.resource(Files.list(config))(_.iterator.asScala.toList)
+      .filter(f => Files.isRegularFile(f) && f.getFileName.toString.endsWith(".json"))
+      .map(_.getFileName.toString.stripSuffix(".json")).sorted
+
+  /** The arm a campaign belongs to: the longest whose name and a `-` begin the campaign's, so that
+    * `e1fb82k-rung0-v4-<model>` is not put under `e1fb82k-rung0`.
     */
-  def latestRuns(results: Path, prefix: String): (List[CampaignResults], List[String]) =
-    val dirs =
-      if !Files.isDirectory(results) then Nil
-      else Using.resource(Files.list(results))(_.iterator.asScala.toList).filter(Files.isDirectory(_)).sorted
-        .map(d => (d, runName(d.getFileName.toString))).filter(_._2.campaign.startsWith(prefix))
+  def armOf(campaign: String, arms: List[String]): Option[String] =
+    arms.filter(a => campaign.startsWith(s"$a-")).maxByOption(_.length)
+
+  private def runDirs(results: Path): List[Path] =
+    if !Files.isDirectory(results) then Nil
+    else Using.resource(Files.list(results))(_.iterator.asScala.toList).filter(Files.isDirectory(_)).sorted
+
+  /** The latest run of each campaign and prompt under `results` whose campaign name starts with `prefix` and
+    * is `within` what is wanted, smallest model first; and warnings for the runs skipped, for a run read that
+    * holds fewer attempts than its pinned sample count, and for a run that does not say which prompt it ran. A
+    * run without a start in its name predates every run with one.
+    */
+  def latestRuns(results: Path, prefix: String, within: String => Boolean = _ => true)
+      : (List[CampaignResults], List[String]) =
+    val dirs = runDirs(results).map(d => (d, runName(d.getFileName.toString)))
+      .filter((_, n) => n.campaign.startsWith(prefix) && within(n.campaign))
     val read = dirs.map((d, n) => (d, n, attemptsIn(d)))
     val keyed = read.map((d, n, as) => (d, n, as, promptOf(d, as)))
     val unknown = keyed.collect { case (d, _, _, None) =>
@@ -121,19 +137,36 @@ object Report:
   def mechanicallyAcceptable(r: AttemptRecord): Boolean =
     StatusView.outcome(r) == "evaluated" && !r.summary.unsound && r.summary.proved >= 1
 
-  /** Writes the tables and the prompt; returns warnings, e.g. inspections naming no attempt. */
-  def write(results: Path, prefix: String, inspectionFile: Path, corpus: Path, out: Path): Either[String, List[String]] =
+  /** What `write` did: the arms given a section, in order, and its warnings. */
+  final case class Written(arms: List[String], warnings: List[String])
+
+  /** Writes each arm's tables into `out/<arm>/`, `arms.tex` with a section for each, and the corpus and the
+    * prompts, shared by every arm so a prompt's letter means the same in each section. The arms are `chosen`'s,
+    * or else every one of `arms` with runs; a run matching no arm is counted in one warning. Returns warnings,
+    * e.g. inspections naming no attempt.
+    */
+  def write(results: Path, arms: List[String], chosen: Option[List[String]], inspectionFile: Path, corpus: Path,
+      out: Path): Either[String, Written] =
     for
+      _ <- chosen.toList.flatten.filterNot(arms.contains) match
+        case Nil     => Right(())
+        case unknown => Left(s"--arms names arms with no experiment file in config/: ${unknown.mkString(", ")}; " +
+          s"the arms are ${arms.mkString(", ")}")
       inspections <- readInspections(inspectionFile)
       corpusTargets <- Corpus.read(corpus)
     yield
-      val (cs, runWarnings) = latestRuns(results, prefix)
-      Files.createDirectories(out)
-      Files.writeString(out.resolve("table1.tex"), table1(cs, inspections))
-      Files.writeString(out.resolve("table2.tex"), table2(cs, inspections))
-      Files.writeString(out.resolve("settings.tex"), settings(cs))
-      Files.writeString(out.resolve("corpus.tex"), corpusTable(corpusTargets))
+      val unmatched = runDirs(results).map(d => runName(d.getFileName.toString).campaign).filter(armOf(_, arms).isEmpty)
+      val read = chosen.getOrElse(arms).distinct.map(a => (a, latestRuns(results, s"$a-", armOf(_, arms).contains(a))))
+      val (withRuns, without) = read.partition(_._2._1.nonEmpty)
+      val cs = withRuns.flatMap(_._2._1)
       val letters = promptLetters(cs)
+      for (arm, (armRuns, _)) <- withRuns do
+        val dir = Files.createDirectories(out.resolve(arm))
+        Files.writeString(dir.resolve("table1.tex"), table1(armRuns, inspections, letters))
+        Files.writeString(dir.resolve("table2.tex"), table2(armRuns, inspections, letters))
+        Files.writeString(dir.resolve("settings.tex"), settings(armRuns, letters))
+      Files.writeString(out.resolve("arms.tex"), armsTex(withRuns.map(_._1)))
+      Files.writeString(out.resolve("corpus.tex"), corpusTable(corpusTargets))
       val texts = letters.toList.sortBy((p, _) => (p.version, p.sha256)).map { (p, letter) =>
         val text = cs.filter(_.prompt == p).flatMap(_.attempts).headOption
           .map(_.prompt.messages.map(m => s"=== ${m.role} ===\n${m.content}").mkString("\n\n") + "\n")
@@ -141,9 +174,25 @@ object Report:
         (p, letter, text.isDefined)
       }
       Files.writeString(out.resolve("prompts.tex"), promptsTex(texts))
+      val unmatchedWarning = Option.when(unmatched.nonEmpty)(
+        s"skipped ${if unmatched.size == 1 then "1 run" else s"${unmatched.size} runs"} matching no experiment file " +
+          "in config/: " + unmatched.groupMapReduce(identity)(_ => 1)(_ + _).toList.sorted
+            .map((c, n) => s"$c ($n)").mkString(", "))
+      val emptyWarnings = if chosen.isEmpty then Nil
+        else without.map((a, _) => s"--arms names $a, which has no runs to read in ${results.getFileName}/")
       val known = cs.flatMap(c => c.attempts.map(a => s"${c.run}/${a.attempt}")).toSet
-      val stray = inspections.attempts.keySet.diff(known).toList.sorted
-      runWarnings ++ stray.map(k => s"inspection.json names $k, which is not among the campaigns read")
+      val reported = read.map(_._1).toSet // an inspection of an arm left out of --arms is not stray
+      val stray = inspections.attempts.keySet.diff(known)
+        .filter(k => armOf(runName(k.takeWhile(_ != '/')).campaign, arms).forall(reported)).toList.sorted
+      Written(withRuns.map(_._1), read.flatMap(_._2._2) ++ unmatchedWarning ++ emptyWarnings ++
+        stray.map(k => s"inspection.json names $k, which is not among the campaigns read"))
+
+  /** The body of the report's results: a subsection per arm, each drawing its tables with `report.tex`'s
+    * `\armtables`.
+    */
+  def armsTex(arms: List[String]): String =
+    arms.map(a => s"\\subsection{Arm \\texttt{${escape(a)}}}\n\\armtables{$a}\n")
+      .mkString("% Generated by `campaign report`; do not edit, regenerate instead.\n", "\n", "")
 
   /** The appendix: each prompt under its letter, with its version and hash, and its text exactly as sent. */
   def promptsTex(prompts: List[(PromptKey, String, Boolean)]): String =
@@ -153,11 +202,13 @@ object Report:
          else "No attempt of these runs recorded its text.\n")
     }.mkString("% Generated by `campaign report`; do not edit, regenerate instead.\n", "\n", "")
 
-  def table1(cs: List[CampaignResults], ins: Inspections): String =
+  def table1(cs: List[CampaignResults], ins: Inspections): String = table1(cs, ins, promptLetters(cs))
+
+  /** Table 1, naming prompts by `letters`, which may cover more runs than `cs`. */
+  def table1(cs: List[CampaignResults], ins: Inspections, letters: Map[PromptKey, String]): String =
     val probes = cs.flatMap(_.attempts).flatMap(_.targets.map(_.probe)).distinct
     val header = List("Sample", "Stopped at", "Files", "Built", "Tests", "Loads") ++
       probes ++ List("Proved", "Tokens", "Time", "Closest domain", "By eye", "Accept")
-    val letters = promptLetters(cs)
     val rows = cs.flatMap { c =>
       List(s"\\multicolumn{${header.size}}{l}{\\textbf{${escape(descriptor(c, letters))}}}") :: c.attempts.map { r =>
         val s = r.summary
@@ -173,10 +224,12 @@ object Report:
     }
     tabular("l" * header.size, header.map(escape), rows)
 
-  def table2(cs: List[CampaignResults], ins: Inspections): String =
+  def table2(cs: List[CampaignResults], ins: Inspections): String = table2(cs, ins, promptLetters(cs))
+
+  /** Table 2, naming prompts by `letters`, which may cover more runs than `cs`. */
+  def table2(cs: List[CampaignResults], ins: Inspections, letters: Map[PromptKey, String]): String =
     val stops = List("no reply", "timed out", "ran out of tokens", "no files in the reply", "did not compile", "did not load")
     val header = List("Run", "Attempts", "Mechanical", "Inspection", "Unsound", "Median proved") ++ stops
-    val letters = promptLetters(cs)
     val rows = cs.map { c =>
       val n = c.attempts.size
       val mech = c.attempts.filter(mechanicallyAcceptable)
@@ -193,10 +246,12 @@ object Report:
     tabular("l" + "r" * (header.size - 1), header.map(escape), rows)
 
   /** The settings each campaign actually ran with, and where its model came from, read from its records. */
-  def settings(cs: List[CampaignResults]): String =
+  def settings(cs: List[CampaignResults]): String = settings(cs, promptLetters(cs))
+
+  /** The settings table, naming prompts by `letters`, which may cover more runs than `cs`. */
+  def settings(cs: List[CampaignResults], letters: Map[PromptKey, String]): String =
     val header = List("Run", "Temp.", "top\\_p", "top\\_k", "min\\_p", "Presence", "Thinking", "Max tokens",
       "Timeout", "Revision", "SHA-256", "Run started")
-    val letters = promptLetters(cs)
     val rows = cs.flatMap(c => c.attempts.headOption.map(r => (c, r.agent))).map { (c, a) =>
       def opt[A](o: Option[A]): String = o.fold("default")(_.toString)
       List(descriptor(c, letters), a.temperature.toString, opt(a.topP), opt(a.topK), opt(a.minP), opt(a.presencePenalty),
