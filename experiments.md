@@ -458,13 +458,20 @@ One row per attempt, under its run; runs grouped, smallest model first. Its
 columns: where the attempt stopped, the files read, whether it built, its own
 tests, whether it loaded, one cell per target, the targets proved, tokens,
 time, and Shawn's inspection. Records from before 2026-10-09 show 0/0 tests,
-since whether the model's tests compiled was not yet recorded.
+since whether the model's tests compiled was not yet recorded. In an arm with
+build feedback, a Rounds column follows where it stopped. Tokens are the
+completion tokens of every round's reply added together.
 
 ### Table 2 — per run
 
 One row per run (campaign and prompt): attempts; acceptable by each bar ("2/5"
 mechanical; accepted out of those inspected); unsound attempts; the median
 *proved* among the mechanically acceptable; and how many stopped at each stage.
+In an arm with build feedback, "Built in *k*" columns count the attempts whose
+domain compiled in round *k*, up to the pinned rounds plus one; "did not
+compile" then counts those that compiled in no round. The settings table also
+gives each run's build limits, feedback, reply rules and llama.cpp build, from
+its `campaign.json`.
 
 ---
 

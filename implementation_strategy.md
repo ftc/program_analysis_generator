@@ -2608,7 +2608,9 @@ framework, library, or the OS.
        counted in a single warning, by campaign, not one line each.
        (b) Table 2 counts round by round. Split in two changes: 4b-i, the
        sections per arm (done); 4b-ii, the Rounds column, Table 2's rounds,
-       summed tokens and the settings columns.
+       summed tokens and the settings columns (done). "Never compiled" is
+       Table 2's existing "did not compile" column, not a second one: only a
+       feedback run's last round can end in a failed build.
     2. **The history setting moves to the experiment file.** The
        `--feedback-history` flag above becomes a field, `feedbackHistory`,
        since no flag overrides an experiment file. This is a docs change,

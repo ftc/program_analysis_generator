@@ -23,7 +23,9 @@
   \centering
   \caption{The settings each campaign of arm \texttt{\detokenize{#1}} ran with,
     from its records. Sampling as the Qwen3.5-27B model card recommends for
-    coding in thinking mode; ``default'' is the server's own.}
+    coding in thinking mode; ``default'' is the server's own. Build: the limit
+    on each Gradle call and the tries a compile gets. Feedback: the rounds, what
+    each sends, and the template. Blank where a run has no campaign.json.}
   \label{tab:settings-#1}
   \resizebox{\linewidth}{!}{\generated{#1/settings.tex}{\input{tables/#1/settings.tex}}}
 \end{table}
@@ -34,7 +36,9 @@
   \caption{Arm \texttt{\detokenize{#1}}: one row per attempt, under its run: the
     campaign, and the prompt (Appendix~\ref{app:prompt}). Cells: R refuted, A
     alarm, $\times$ refuted a reachable target (unsound), I did not converge, E
-    domain failure, H hung. The last three columns are Shawn's inspection.}
+    domain failure, H hung. Rounds, in an arm with build feedback: how many
+    rounds the conversation took. Tokens: the completion tokens of every
+    round's reply. The last three columns are Shawn's inspection.}
   \label{tab:attempts-#1}
   \resizebox{\linewidth}{!}{\generated{#1/table1.tex}{\input{tables/#1/table1.tex}}}
 \end{table}
@@ -45,7 +49,9 @@
   \caption{Arm \texttt{\detokenize{#1}}, per run: campaign and prompt.
     Mechanical: evaluated, not unsound, proves at least one target. Inspection:
     accepted out of those inspected. Median proved: among the mechanically
-    acceptable. The rest: where attempts stopped.}
+    acceptable. Built in $k$, in an arm with build feedback: attempts whose
+    domain compiled in round $k$; ``did not compile'' counts those whose domain
+    compiled in no round. The rest: where attempts stopped.}
   \label{tab:models-#1}
   \resizebox{\linewidth}{!}{\generated{#1/table2.tex}{\input{tables/#1/table2.tex}}}
 \end{table}}

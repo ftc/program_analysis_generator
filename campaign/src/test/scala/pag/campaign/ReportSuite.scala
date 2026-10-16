@@ -406,3 +406,82 @@ class ReportSuite extends munit.FunSuite:
         "the arms are e1-rung0, e1fb82k-rung0, e1fb82k-rung0-v4"))
       assert(!Files.exists(dir.resolve("tables")), "nothing is written")
     }
+
+  // Build feedback (implementation_strategy.md §16, item 25): rounds, summed tokens, and the pinned settings.
+
+  /** Writes a pin with build feedback of `rounds` rounds and every field recorded into a run directory. */
+  def pinFeedback(dir: Path, run: String, rounds: Int): Unit =
+    import Campaign.given
+    Files.write(dir.resolve(run).resolve("campaign.json"), Json.encode(CampaignPin(base.agent, "v", "s", "c", "p",
+      Some(4), Some(BuildPin(120, 3)), Some(FeedbackPin(rounds, FeedbackHistory.Latest, "feedback-build-v1", "h")),
+      Some("v2"), Some("b1-abc"))).toByteArray)
+
+  /** `r` with every reply reporting `n` completion tokens. */
+  def withTokens(r: AttemptRecord, n: Long): AttemptRecord =
+    RecordFixtures.withExchange(r)((reply, files, build) =>
+      Exchange.Replied(reply.copy(completionTokens = Some(n)), files, build))
+
+  /** `r` after `n` rounds whose domain failed to compile, each reply reporting 100 completion tokens. */
+  def afterFailed(r: AttemptRecord, n: Int): AttemptRecord =
+    val reply = withTokens(base, 100).reply.get
+    val round = FailedRound(Nil, reply, FilesRecord(List("a"), 0, Nil), BuildRecord.Failed(CompileTry("", false), Nil),
+      "feedback")
+    r.copy(conversation = r.conversation.copy(failed = List.fill(n)(round)))
+
+  def didNotCompile(r: AttemptRecord): AttemptRecord =
+    RecordFixtures.withExchange(r)((reply, files, _) =>
+      Exchange.Replied(reply, files.copy(written = List("a")), Some(BuildRecord.Failed(CompileTry("", false), Nil))))
+
+  val feedbackRun: String = "e1fb-rung0-m-27b-20261013T000000Z"
+
+  /** Built in round 1; built in round 3; out of rounds after 4; no files in round 2. */
+  val feedbackAttempts: List[AttemptRecord] = List(
+    withTokens(evaluated(1, List("R", "A", "R")), 100),
+    afterFailed(withTokens(evaluated(2, List("R", "A", "R")), 100), 2),
+    afterFailed(withTokens(didNotCompile(failed(3)), 100), 3),
+    afterFailed(withTokens(failed(4), 100), 1))
+
+  test("a feedback run: Table 1 shows rounds and tokens summed over every round's reply"):
+    withResults(Map(feedbackRun -> feedbackAttempts)) { dir =>
+      pinFeedback(dir, feedbackRun, 3)
+      val t = Report.table1(Report.campaigns(dir, "e1fb-rung0-"), Inspections())
+      assert(t.contains("Sample & Stopped at & Rounds & Files &"), t)
+      val rows = rowsUnder(t, "e1fb-rung0-m-27b with prompt A")
+      assertEquals(rows.map(_.split(" & ").take(3).mkString(" & ")),
+        List("1 & evaluated & 1", "2 & evaluated & 3", "3 & did not compile & 4", "4 & no files in the reply & 2"))
+      assertEquals(rows.map(_.split(" & ").dropRight(4).last), List("100", "300", "400", "200"), "Tokens, before Time")
+    }
+
+  test("a feedback run: Table 2 counts the attempts built in each round, up to the pinned rounds and one"):
+    withResults(Map(feedbackRun -> feedbackAttempts)) { dir =>
+      pinFeedback(dir, feedbackRun, 3)
+      val t = Report.table2(Report.campaigns(dir, "e1fb-rung0-"), Inspections())
+      assert(t.contains("Median proved & Built in 1 & Built in 2 & Built in 3 & Built in 4 & no reply &"), t)
+      assert(t.contains("e1fb-rung0-m-27b with prompt A & 4 & 2/4 & 0/0 & 0 & 2.0 & 1 & 0 & 1 & 0 & " +
+        "0 & 0 & 0 & 1 & 1 & 0 \\\\"), t)
+    }
+
+  test("one-shot runs, pinned or not, show no rounds: their tables are those of unpinned runs"):
+    val unpinned = withResults(campaigns)(dir => Report.campaigns(dir, "e1-rung0-")).map(_.copy(pin = None))
+    withResults(campaigns) { dir =>
+      for run <- campaigns.keys.filter(_.startsWith("e1-rung0-")) do pin(dir, run, 3)
+      val pinned = Report.campaigns(dir, "e1-rung0-")
+      assert(pinned.forall(_.pin.isDefined))
+      assertEquals(Report.table1(pinned, inspections), Report.table1(unpinned, inspections))
+      assertEquals(Report.table2(pinned, inspections), Report.table2(unpinned, inspections))
+    }
+
+  test("the settings table: build, feedback, reply rules and server build from the pin, or what an older pin meant"):
+    withResults(Map(feedbackRun -> List(failed(1)), "e1-rung0-m-4b-20261010T000000Z" -> List(failed(1)),
+        "e1-rung0-m-9b-20261010T000000Z" -> List(failed(1)))) { dir =>
+      pinFeedback(dir, feedbackRun, 3)
+      pin(dir, "e1-rung0-m-4b-20261010T000000Z", 1)
+      val fb = Report.settings(Report.campaigns(dir, "e1fb-rung0-"))
+      assert(fb.contains("Timeout & Build & Feedback & Reply rules & llama.cpp & Revision"), fb)
+      assert(fb.contains("& 1800 s & 2 min $\\times$ 3 & 3 rounds, latest, feedback-build-v1 & v2 & b1-abc &"), fb)
+      val older = Report.settings(Report.campaigns(dir, "e1-rung0-"))
+      assert(older.linesIterator.exists(l => l.startsWith("e1-rung0-m-4b with prompt") &&
+        l.contains("& 1800 s & 5 min $\\times$ 1 & none & v1 & not recorded &")), older)
+      assert(older.linesIterator.exists(l => l.startsWith("e1-rung0-m-9b with prompt") && l.contains("& 1800 s &  &  &  &  &")),
+        older)
+    }

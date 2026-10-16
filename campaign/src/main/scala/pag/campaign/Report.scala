@@ -27,10 +27,11 @@ final case class Inspections(attempts: Map[String, Inspection] = Map.empty)
 final case class PromptKey(version: String, sha256: String)
 
 /** One campaign run with one prompt, as the report reads it: the campaign's name, the run read (its directory's
-  * name), the model (the name less the prefix), the prompt, when the run started, and its attempts.
+  * name), the model (the name less the prefix), the prompt, when the run started, its attempts, and its pin, if
+  * it has a readable one.
   */
 final case class CampaignResults(name: String, run: String, model: String, prompt: PromptKey, started: Option[Instant],
-    attempts: List[AttemptRecord])
+    attempts: List[AttemptRecord], pin: Option[CampaignPin] = None)
 
 /** A run directory's name, split: the campaign it runs, and its start, which directories made before
   * 2026-10-09 do not have in their names.
@@ -90,13 +91,14 @@ object Report:
     val chosen = byRun.map { case ((campaign, prompt), runs) =>
       val ordered = runs.sortBy((d, r, _) => (r.started.isDefined, r.started.map(_.toEpochMilli).getOrElse(0L), d.toString))
       val (dir, name, attempts) = ordered.last
+      val pin = Campaign.pinned(dir)
       val skipped = ordered.init.map(_._1.getFileName.toString)
       val warnings = Option.when(skipped.nonEmpty)(
           s"$campaign: read run ${dir.getFileName}, skipped ${skipped.mkString(", ")}").toList ++
-        Campaign.pinned(dir).flatMap(_.samples).filter(_ > attempts.size).map(n =>
+        pin.flatMap(_.samples).filter(_ > attempts.size).map(n =>
           s"${dir.getFileName} holds ${attempts.size} of its $n samples: resume it before trusting its rows")
       (CampaignResults(campaign, dir.getFileName.toString, campaign.stripPrefix(prefix), prompt, name.started,
-        attempts), warnings)
+        attempts, pin), warnings)
     }
     (chosen.map(_._1).sortBy(c => (size(c.model), c.model, c.prompt.version, c.prompt.sha256)),
       unknown ++ chosen.flatMap(_._2))
@@ -132,6 +134,18 @@ object Report:
   def readInspections(file: Path): Either[String, Inspections] =
     if !Files.isRegularFile(file) then Right(Inspections())
     else Json.decode(Files.readAllBytes(file)).to[Inspections].valueEither.left.map(e => s"$file: ${e.getMessage}")
+
+  /** Whether any of these runs was pinned with build feedback: only then do the tables show rounds. */
+  def withFeedback(cs: List[CampaignResults]): Boolean = cs.exists(_.pin.exists(_.feedback.isDefined))
+
+  /** The completion tokens of every round's reply added together; blank if no reply reported them. */
+  def tokens(r: AttemptRecord): String =
+    (r.conversation.failed.map(_.reply) ++ r.reply).flatMap(_.completionTokens).reduceOption(_ + _).fold("")(_.toString)
+
+  /** The round whose domain compiled, if one did: always the last, since a domain that compiles ends the
+    * conversation.
+    */
+  def compiledIn(r: AttemptRecord): Option[Int] = r.build.collect { case _: BuildRecord.Compiled => r.rounds }
 
   /** Mechanically acceptable: evaluated, not caught unsound, and proves at least one target. */
   def mechanicallyAcceptable(r: AttemptRecord): Boolean =
@@ -207,17 +221,18 @@ object Report:
   /** Table 1, naming prompts by `letters`, which may cover more runs than `cs`. */
   def table1(cs: List[CampaignResults], ins: Inspections, letters: Map[PromptKey, String]): String =
     val probes = cs.flatMap(_.attempts).flatMap(_.targets.map(_.probe)).distinct
-    val header = List("Sample", "Stopped at", "Files", "Built", "Tests", "Loads") ++
-      probes ++ List("Proved", "Tokens", "Time", "Closest domain", "By eye", "Accept")
+    val feedback = withFeedback(cs)
+    val header = List("Sample", "Stopped at") ++ Option.when(feedback)("Rounds") ++ List("Files", "Built", "Tests",
+      "Loads") ++ probes ++ List("Proved", "Tokens", "Time", "Closest domain", "By eye", "Accept")
     val rows = cs.flatMap { c =>
       List(s"\\multicolumn{${header.size}}{l}{\\textbf{${escape(descriptor(c, letters))}}}") :: c.attempts.map { r =>
         val s = r.summary
         val i = ins.attempts.getOrElse(s"${c.run}/${r.attempt}", Inspection())
-        val before = List(r.sample.toString, StatusView.outcome(r), s.files.toString, yes(s.builds),
-          tests(s), yes(s.loads))
+        val before = List(r.sample.toString, StatusView.outcome(r)) ++ Option.when(feedback)(r.rounds.toString) ++
+          List(s.files.toString, yes(s.builds), tests(s), yes(s.loads))
         val cells = probes.map(p => r.targets.find(_.probe == p).fold("")(t => cell(t.cell)))
         val after = List(if s.loads then s.proved.toString else "",
-          r.reply.flatMap(_.completionTokens).fold("")(_.toString), minutes(r.elapsedMs),
+          tokens(r), minutes(r.elapsedMs),
           i.closestDomain.getOrElse(""), i.soundnessByEye.getOrElse(""), i.acceptable.fold("")(yes))
         before.map(escape) ++ cells ++ after.map(escape)
       }
@@ -229,7 +244,10 @@ object Report:
   /** Table 2, naming prompts by `letters`, which may cover more runs than `cs`. */
   def table2(cs: List[CampaignResults], ins: Inspections, letters: Map[PromptKey, String]): String =
     val stops = List("no reply", "timed out", "ran out of tokens", "no files in the reply", "did not compile", "did not load")
-    val header = List("Run", "Attempts", "Mechanical", "Inspection", "Unsound", "Median proved") ++ stops
+    val rounds = if !withFeedback(cs) then Nil
+      else (1 to cs.flatMap(_.pin.flatMap(_.feedback)).map(_.rounds).max + 1).toList
+    val header = List("Run", "Attempts", "Mechanical", "Inspection", "Unsound", "Median proved") ++
+      rounds.map(k => s"Built in $k") ++ stops
     val rows = cs.map { c =>
       val n = c.attempts.size
       val mech = c.attempts.filter(mechanicallyAcceptable)
@@ -241,6 +259,7 @@ object Report:
         else f"${(proved(proved.size / 2 - 1) + proved(proved.size / 2)) / 2.0}%.1f"
       (List(descriptor(c, letters), n.toString, s"${mech.size}/$n", s"${inspected.count(identity)}/${inspected.size}",
         c.attempts.count(_.summary.unsound).toString, median) ++
+        rounds.map(k => c.attempts.count(a => compiledIn(a).contains(k)).toString) ++
         stops.map(st => c.attempts.count(a => StatusView.outcome(a) == st).toString)).map(escape)
     }
     tabular("l" + "r" * (header.size - 1), header.map(escape), rows)
@@ -251,14 +270,25 @@ object Report:
   /** The settings table, naming prompts by `letters`, which may cover more runs than `cs`. */
   def settings(cs: List[CampaignResults], letters: Map[PromptKey, String]): String =
     val header = List("Run", "Temp.", "top\\_p", "top\\_k", "min\\_p", "Presence", "Thinking", "Max tokens",
-      "Timeout", "Revision", "SHA-256", "Run started")
+      "Timeout", "Build", "Feedback", "Reply rules", "llama.cpp", "Revision", "SHA-256", "Run started")
     val rows = cs.flatMap(c => c.attempts.headOption.map(r => (c, r.agent))).map { (c, a) =>
       def opt[A](o: Option[A]): String = o.fold("default")(_.toString)
       List(descriptor(c, letters), a.temperature.toString, opt(a.topP), opt(a.topK), opt(a.minP), opt(a.presencePenalty),
-        a.thinking.fold("default")(t => if t then "on" else "off"), opt(a.maxTokens), s"${a.timeoutSeconds} s",
-        a.source.revision.fold("")(_.take(12)), a.source.sha256.fold("")(_.take(12)), started(c)).map(escape)
+        a.thinking.fold("default")(t => if t then "on" else "off"), opt(a.maxTokens), s"${a.timeoutSeconds} s")
+        .map(escape) ++ c.pin.fold(List.fill(4)(""))(pinned) ++
+        List(a.source.revision.fold("")(_.take(12)), a.source.sha256.fold("")(_.take(12)), started(c)).map(escape)
     }
     tabular("l" * header.size, header.map(h => if h.contains("\\_") then h else escape(h)), rows)
+
+  /** The settings columns read from a run's pin, as LaTeX: its build limits, its feedback, its reply rules and
+    * its server's build, each with what a pin from before the field held.
+    */
+  def pinned(p: CampaignPin): List[String] =
+    def duration(s: Int): String = if s % 60 == 0 then s"${s / 60} min" else s"$s s"
+    val (seconds, tries) = p.build.fold((300, 1))(b => (b.timeoutSeconds, b.compileTries))
+    s"${escape(duration(seconds))} $$\\times$$ $tries" :: List(
+      p.feedback.fold("none")(f => s"${f.rounds} rounds, ${f.history.toString.toLowerCase}, ${f.templateVersion}"),
+      p.replyRules.getOrElse("v1"), p.serverBuild.getOrElse("not recorded")).map(escape)
 
   /** When the run began, to the minute in UTC: from its directory's name, or its earliest attempt for an older one. */
   private def started(c: CampaignResults): String =
