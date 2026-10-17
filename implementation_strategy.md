@@ -2611,13 +2611,11 @@ framework, library, or the OS.
        summed tokens and the settings columns (done). "Never compiled" is
        Table 2's existing "did not compile" column, not a second one: only a
        feedback run's last round can end in a failed build.
-    2. **The history setting moves to the experiment file.** The
-       `--feedback-history` flag above becomes a field, `feedbackHistory`,
-       since no flag overrides an experiment file. This is a docs change,
-       made before the code.
-    3. **Full-history mode,** with an over-long prompt recorded as its own
-       failure rather than sent. How llama.cpp counts and refuses an
-       over-long prompt is to be read from its source first.
+    2. ~~The history setting moves to the experiment file~~ and
+       ~~full-history mode~~ are deferred (*Shawn, 2026-10-16*): taken out
+       of the plan to get to the next feedback step sooner, and kept in
+       `misc.md` §10 to revisit. Every feedback run stays latest only, as
+       its pin already says.
 
     Also open: whether `results/phase10-check-qwen3.8-27b/campaign.json`,
     pinned in an older format, should be made readable.

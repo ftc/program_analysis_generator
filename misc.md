@@ -383,3 +383,26 @@ Smaller prompt wording, cheap to fix in the same pass:
 - One trace wondered whether `reach(id)` arrives as a `Step.Call`.
 - The contract's comments cite `implementation_strategy.md` sections and
   "lift = false", which the model cannot see.
+
+## 10. Full-history build feedback, deferred (2026-10-16)
+
+Taken out of the plan (`implementation_strategy.md` §16, item 25) by Shawn to
+get to the next feedback step sooner. What was planned, to pick up later:
+
+- **The mode.** Each feedback round would send every earlier reply, each
+  without its reasoning, and every earlier feedback message, instead of only
+  the latest reply and its errors. The model would see its whole history of
+  attempts; the prompt would grow each round.
+- **The setting.** An experiment-file field, `"feedbackHistory": "latest" |
+  "full"`, replacing the `--feedback-history` flag item 25 describes, since no
+  flag overrides an experiment file. A file without it would mean `"latest"`,
+  which every feedback run is already pinned with (`FeedbackPin.history`), so
+  existing runs would still resume. That should be a test.
+- **The guard.** A prompt too long for the server would be recorded as its own
+  failure, not sent. How llama.cpp counts and refuses an over-long prompt must
+  be read from its source first (`CLAUDE.md` rule 13).
+- **Open:** whether `feedbackHistory` in a one-shot experiment file is an error
+  or ignored; and the case for full history itself, which item 25 made from a
+  32,768-token reply limit on a 65,536 context, both since raised.
+- **Today:** `Experiment.read` rejects unknown keys, so an experiment file
+  naming `feedbackHistory` fails at start until the field is implemented.
